@@ -1,0 +1,115 @@
+/* ================= UDISE+ style global theme ================= */
+:root {
+  --gov-blue: #1b3a7a;
+  --gov-blue-dark: #142c5c;
+  --gov-blue-light: #2b56b0;
+  --gov-accent: #ff7a00;
+  --gov-saffron: #ff9933;
+  --gov-green: #138808;
+  --page-bg: #eef2f7;
+  --card-bg: #ffffff;
+  --text-dark: #1f2937;
+  --text-muted: #6b7280;
+  --border-soft: #e5e7eb;
+  --kpi-1: #2b6cb0;
+  --kpi-2: #6b46c1;
+  --kpi-3: #d69e2e;
+  --kpi-4: #2f855a;
+  --kpi-5: #c53030;
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+  overflow-x: hidden;
+  background: var(--page-bg);
+  color: var(--text-dark);
+  font-family: 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Numeric columns align nicely with Indian grouping */
+.p-datatable td.num,
+.p-datatable th.num {
+  font-variant-numeric: tabular-nums;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  font-weight: 600;
+}
+
+.card {
+  background: var(--card-bg);
+  border-radius: 10px;
+  box-shadow: var(--shadow-card);
+  border: 1px solid var(--border-soft);
+  padding: 16px;
+}
+
+.card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-dark);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.card-title i {
+  color: var(--gov-blue-light);
+}
+
+/* Utility grid helpers */
+.grid-row {
+  display: grid;
+  gap: 16px;
+}
+
+.text-muted {
+  color: var(--text-muted);
+}
+
+/* PrimeNG table tweaks to match the gov look */
+.p-datatable .p-datatable-thead > tr > th {
+  background: #f1f5fb;
+  color: var(--gov-blue-dark);
+  font-weight: 600;
+  font-size: 12.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.p-datatable .p-datatable-tbody > tr {
+  cursor: pointer;
+}
+
+.p-datatable .p-datatable-tbody > tr:hover {
+  background: #eff6ff !important;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: #c3cede;
+  border-radius: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}

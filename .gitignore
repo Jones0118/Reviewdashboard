@@ -1,0 +1,64 @@
+# See https://docs.github.com/get-started/getting-started-with-git/ignoring-files for more about ignoring files.
+
+# Compiled output
+/dist
+/tmp
+/out-tsc
+/bazel-out
+
+# Node
+/node_modules
+npm-debug.log
+yarn-error.log
+
+# IDEs and editors
+.idea/
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+
+# Visual Studio Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.history/*
+
+# Miscellaneous
+/.angular/cache
+.sass-cache/
+/connect.lock
+/coverage
+/libpeerconnection.log
+testem.log
+/typings
+__screenshots__/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Generated auth credentials — explicitly must not be committed (see file header)
+/src/app/auth.generated.ts
+
+# Local runtime logs
+serve.log
+serve.out.log
+serve.err.log
+*.log
+
+# Large uncompressed asset JSONs that exceed GitHub's file-size limits.
+# The app loads the gzipped (.json.gz) copies first and only falls back to
+# the plain .json, so the committed .gz versions are sufficient to run.
+# (The smaller real-data assets, e.g. *-real.json, have no .gz twin and ARE committed.)
+/src/assets/infra-schools.json
+/src/assets/infra-schools-udise.json
+/src/assets/academic-schools.json
+/src/assets/schools.json
+/src/assets/schools-udise.json
+/src/assets/academic.json
+/src/assets/attendance-schools.json

@@ -1,0 +1,3706 @@
+<!-- ===== Sign in ===== -->
+@if (!auth.isAuthenticated()) {
+<div class="login-page">
+  <form class="login-card" (ngSubmit)="submitLogin()">
+    <div class="login-brand">
+      <span class="login-emblem"><i class="fa-solid fa-graduation-cap"></i></span>
+      <div>
+        <div class="login-title">EMIS Dashboard</div>
+        <div class="login-sub">School Education Department<br/>Government of Tamil Nadu</div>
+      </div>
+    </div>
+
+    <label class="login-field">
+      <span>Username</span>
+      <span class="lf-input">
+        <i class="fa-solid fa-user"></i>
+        <input type="text" name="username" autocomplete="username" autocapitalize="none"
+               spellcheck="false" placeholder="Enter username"
+               [ngModel]="loginUser()" (ngModelChange)="loginUser.set($event)" />
+      </span>
+    </label>
+
+    <label class="login-field">
+      <span>Password</span>
+      <span class="lf-input">
+        <i class="fa-solid fa-lock"></i>
+        <input [type]="showPass() ? 'text' : 'password'" name="password"
+               autocomplete="current-password" placeholder="Enter password"
+               [ngModel]="loginPass()" (ngModelChange)="loginPass.set($event)" />
+        <button type="button" class="lf-eye" (click)="togglePass()"
+                [title]="showPass() ? 'Hide password' : 'Show password'">
+          <i class="fa-solid" [class.fa-eye]="!showPass()" [class.fa-eye-slash]="showPass()"></i>
+        </button>
+      </span>
+    </label>
+
+    @if (auth.error()) {
+      <div class="login-error"><i class="fa-solid fa-circle-exclamation"></i> {{ auth.error() }}</div>
+    }
+
+    <button type="submit" class="login-btn" [disabled]="auth.busy()">
+      @if (auth.busy()) {
+        <i class="fa-solid fa-spinner fa-spin"></i> Signing in
+      } @else {
+        <i class="fa-solid fa-right-to-bracket"></i> Sign In
+      }
+    </button>
+
+    <div class="login-note">
+      Demo dashboard. All figures are generated sample data, not official statistics.
+    </div>
+  </form>
+</div>
+} @else {
+
+@if (ds.loaded()) {
+<div class="app-shell">
+  <!-- ===== Utility bar ===== -->
+  <div class="util-bar">
+    <span>{{ today }}</span>
+    <span class="util-right">
+      <span class="pill-year">Year: {{ ds.data()!.currentYear }}</span>
+      <span class="util-user" title="Signed in">
+        <i class="fa-solid fa-user-shield"></i> {{ auth.user() }}
+      </span>
+      <button class="signout-btn" (click)="signOut()" title="Sign out">
+        <i class="fa-solid fa-right-from-bracket"></i> Sign Out
+      </button>
+      <span class="theme-wrap">
+        <button class="gear-btn" [class.on]="themeOpen()" (click)="toggleTheme()" title="Dashboard theme">
+          <i class="fa-solid fa-gear"></i>
+        </button>
+        @if (themeOpen()) {
+        <div class="theme-pop">
+          <div class="tp-head">
+            <i class="fa-solid fa-palette"></i> Theme Colour
+            <button class="tp-x" (click)="closeTheme()"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+          <div class="tp-list">
+            @for (t of themes; track t.id) {
+              <button class="tp-item" [class.sel]="activeTheme().id === t.id" (click)="selectTheme(t)">
+                <span class="sw" [style.background]="'linear-gradient(135deg,' + t.primary + ',' + t.dark + ')'"></span>
+                <span class="tp-label">{{ t.label }}</span>
+                @if (activeTheme().id === t.id) { <i class="fa-solid fa-check"></i> }
+              </button>
+            }
+          </div>
+        </div>
+        }
+      </span>
+    </span>
+  </div>
+
+  <!-- ===== Header + tabs ===== -->
+  <header class="moe-header">
+    <div class="moe-brand">
+      <div class="emblem">
+        <img src="tn-logo.png" alt="Government of Tamil Nadu"
+             class="tn-logo" (error)="logoOk.set(false)" [class.hide]="!logoOk()" />
+        @if (!logoOk()) { <i class="fa-solid fa-landmark-dome"></i> }
+      </div>
+      <div>
+        <div class="dept">School Education Department</div>
+        <div class="ministry">Government of Tamil Nadu</div>
+        <div class="govt">State Education Portal</div>
+      </div>
+    </div>
+    <nav class="tabs">
+      @for (t of tabs; track t.label) {
+        @if (t.url) {
+          <!-- external system: opens in a new tab -->
+          <a class="tab tab-ext" [href]="t.url" target="_blank" rel="noopener noreferrer"
+             [title]="t.label + ' opens in a new tab'">
+            {{ t.label }} <i class="fa-solid fa-arrow-up-right-from-square"></i>
+          </a>
+        } @else {
+          <button class="tab" [class.active]="activeTab() === t.label" (click)="setTab(t.label)">
+            {{ t.label }}
+          </button>
+        }
+      }
+    </nav>
+    <div class="header-actions">
+      @if (hasMap()) {
+        <button class="icon-btn" [class.on]="mapOpen()" (click)="toggleMap()"
+                [title]="mapOpen() ? 'Close Map' : 'Open Map'">
+          <i class="fa-solid" [class.fa-map-location-dot]="!mapOpen()" [class.fa-xmark]="mapOpen()"></i>
+          <span>{{ mapOpen() ? 'Close Map' : 'Open Map' }}</span>
+        </button>
+      }
+      <button class="icon-btn filter-btn" [class.on]="filterOpen() || activeFilterCount() > 0" (click)="toggleFilters()" title="Filters">
+        <i class="fa-solid fa-filter"></i>
+        <span>Filter</span>
+        @if (activeFilterCount() > 0) { <em class="badge">{{ activeFilterCount() }}</em> }
+      </button>
+      <p-button label="Export PDF" icon="fa-solid fa-file-pdf" severity="warn"
+                [loading]="exporting()" (onClick)="exportPdf()" size="small" />
+    </div>
+  </header>
+
+  <!-- ===== Breadcrumb + drill selects ===== -->
+  <div class="toolbar">
+    <nav class="breadcrumb">
+      <a (click)="ds.goToState()" [class.active]="ds.level() === 'state'"><i class="fa-solid fa-house"></i> Tamil Nadu</a>
+      @if (ds.selectedDistrict()) {
+        <i class="fa-solid fa-chevron-right sep"></i>
+        <a (click)="ds.goToDistrict()" [class.active]="ds.level() === 'district'">{{ ds.titleCase(ds.selectedDistrict()!) }}</a>
+      }
+      @if (ds.selectedBlock()) {
+        <i class="fa-solid fa-chevron-right sep"></i>
+        <a (click)="ds.goToBlock()" [class.active]="ds.level() === 'block'">{{ ds.titleCase(ds.selectedBlock()!) }}</a>
+      }
+      @if (ds.selectedSchool()) {
+        <i class="fa-solid fa-chevron-right sep"></i>
+        <a class="active school">{{ ds.selectedSchool() }}</a>
+      }
+    </nav>
+    <div class="filters">
+      <p-select [options]="districtOptions()" [ngModel]="ds.selectedDistrict()" (ngModelChange)="onDistrictChange($event)"
+                optionLabel="label" optionValue="value" placeholder="Select District" [showClear]="true"
+                [filter]="true" filterBy="label" styleClass="flt" />
+      @if (ds.selectedDistrict()) {
+        <p-select [options]="blockOptions()" [ngModel]="ds.selectedBlock()" (ngModelChange)="onBlockChange($event)"
+                  optionLabel="label" optionValue="value" placeholder="Select Block" [showClear]="true"
+                  [filter]="true" filterBy="label" styleClass="flt" />
+      }
+      @if (ds.selectedBlock()) {
+        <p-select [options]="schoolOptions()" [ngModel]="ds.selectedSchool()" (ngModelChange)="onSchoolChange($event)"
+                  optionLabel="label" optionValue="value" placeholder="Select School" [showClear]="true"
+                  [filter]="true" filterBy="label" styleClass="flt flt-wide" />
+      }
+    </div>
+  </div>
+
+  <!-- ===== Filter panel ===== -->
+  @if (filterOpen()) {
+  <div class="filter-panel">
+    <div class="fp-title"><i class="fa-solid fa-sliders"></i> Filters — apply to all charts &amp; tables</div>
+    <div class="fp-grid">
+      @if (isReview()) {
+      <div class="fp-field fp-field-wide">
+        <label>School Programme</label>
+        <div class="rf-seg">
+          @for (p of rv.programOptions(); track p.id) {
+            <button [class.on]="rv.program() === p.id" (click)="setReviewProgram($any(p.id))">{{ p.label }}</button>
+          }
+        </div>
+      </div>
+      }
+      <div class="fp-field">
+        <label>Management</label>
+        <p-multiSelect [options]="ds.mgmtOptions()" [ngModel]="ds.filters().mgmt" (ngModelChange)="setMgmt($event)"
+                       optionLabel="label" optionValue="value" placeholder="All Management"
+                       [filter]="true" display="chip" [maxSelectedLabels]="2" styleClass="ms" />
+      </div>
+      <div class="fp-field">
+        <label>Category</label>
+        <p-multiSelect [options]="ds.catOptions()" [ngModel]="ds.filters().cat" (ngModelChange)="setCat($event)"
+                       optionLabel="label" optionValue="value" placeholder="All Categories"
+                       [filter]="true" display="chip" [maxSelectedLabels]="2" styleClass="ms" />
+      </div>
+      <div class="fp-field">
+        <label>School Type</label>
+        <p-multiSelect [options]="ds.stypeOptions()" [ngModel]="ds.filters().stype" (ngModelChange)="setStype($event)"
+                       optionLabel="label" optionValue="value" placeholder="All School Types"
+                       [filter]="true" display="chip" [maxSelectedLabels]="2" styleClass="ms" />
+      </div>
+      <div class="fp-actions">
+        <button class="btn-clear" (click)="clearFilters()"><i class="fa-solid fa-rotate-left"></i> Clear All</button>
+      </div>
+    </div>
+    @if (activeFilterCount() > 0) {
+      <div class="fp-note"><i class="fa-solid fa-circle-info"></i> Filters apply to the current-year figures, charts and tables. Multi-year trend lines always show all schools.</div>
+    }
+  </div>
+  }
+
+  <!-- ===== Sub-menu ===== -->
+  @if (!isClass1()) {
+  <div class="submenu">
+    @for (s of subMenus(); track s.id) {
+      <button class="sub-item" [class.active]="activeSub() === s.id" (click)="setSub(s.id)">
+        <i [class]="s.icon"></i> {{ s.label }}
+        @if (s.id === 'alarming' && activeAlertCount() > 0) {
+          <span class="alert-count">({{ fmt(activeAlertCount()) }})</span>
+        }
+        @if (s.id === 'caution' && cautionTotal() > 0) {
+          <span class="alert-count">({{ fmt(cautionTotal()) }})</span>
+        }
+      </button>
+    }
+
+    <!-- data source: EMIS vs UDISE+ (School Dashboard only) -->
+    @if (isSchoolTab()) {
+      <div class="src-toggle" title="Switch the source system for all school figures">
+        <span class="src-lbl"><i class="fa-solid fa-database"></i> Source</span>
+        <button [class.on]="ds.source() === 'EMIS'" (click)="ds.setSource('EMIS')">EMIS</button>
+        <button [class.on]="ds.source() === 'UDISE+'" [disabled]="!ds.udiseReady()"
+                (click)="ds.setSource('UDISE+')">
+          UDISE+
+          @if (!ds.udiseReady()) { <i class="fa-solid fa-spinner fa-spin"></i> }
+        </button>
+      </div>
+    }
+  </div>
+  }
+
+  <div id="capture-area" class="content">
+
+  <!-- ================= REVIEW DASHBOARD ================= -->
+  @if (isReview()) {
+    @if (!rv.loaded()) {
+      <div class="ac-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading review dashboard…</div>
+    } @else {
+
+    <!-- ---------- REVIEW: KPI COMPONENT CARDS (landing) ---------- -->
+    @if (activeSub() === 'cards') {
+    <div class="dr-wrap">
+      <div class="dr-head">
+        <h1 class="dr-title">State Monitoring &amp; Review</h1>
+        <span class="dr-scope">{{ ds.scopeLabel() }} &middot; {{ rv.currentYear() }} &middot; {{ rv.programLabel() }}
+          &middot; State → District → Block → School · tap any KPI to drill down</span>
+      </div>
+
+      <!-- 12-module KPI tile grid (component overview) -->
+      @if (!selectedDomain()) {
+      <!-- Filter KPIs: district page only (removed from the main/state landing) -->
+      @if (ds.level() === 'district') {
+      <div class="kpi-filterbar">
+        <span class="kpi-filter-lbl"><i class="fa-solid fa-filter"></i> Filter KPIs</span>
+        <p-multiSelect [options]="kpiFilterOptions()" [ngModel]="kpiFilter()" (ngModelChange)="setKpiFilter($event)"
+                       optionLabel="label" optionValue="value" placeholder="All KPIs"
+                       [filter]="true" display="chip" [maxSelectedLabels]="3" styleClass="ms" />
+        @if (kpiFilter().length) {
+          <button class="kpi-filter-clear" (click)="setKpiFilter([])"><i class="fa-solid fa-rotate-left"></i> Clear</button>
+        }
+      </div>
+      }
+      <div class="kpi-tiles">
+        @for (mod of kpiTiles(); track mod.title) {
+          <section class="kpi-tile" [style.--kc]="mod.color">
+            <h2>{{ mod.title }}</h2>
+            @for (k of mod.kpis; track k.id) {
+              <button class="kpi-row" (click)="openKpi(k.id, k.topic)" [title]="k.hasData ? 'Drill down ' + k.label : k.label + ' — no data source yet'">
+                <span class="kpi-dot"
+                      [class.g]="k.band === 'good'" [class.a]="k.band === 'warn'"
+                      [class.r]="k.band === 'bad'" [class.n]="k.band === 'none'"></span>
+                <span class="kpi-lb">{{ k.label }}</span>
+                <b [class.muted]="!k.hasData">{{ k.value }}</b>
+                <i class="fa-solid fa-chevron-right"></i>
+              </button>
+            }
+            <button class="kpi-view" (click)="openModule(mod.topic)">View details <i class="fa-solid fa-arrow-right"></i></button>
+          </section>
+        }
+      </div>
+      }
+
+      <!-- inline drill-down (District -> Block -> School) for the selected component -->
+      @if (selectedDomain()) {
+      <div class="dr-drill" id="rv-drilldown">
+        <div class="dr-drill-bar">
+          <button class="dr-back" (click)="closeDomain()"><i class="fa-solid fa-arrow-left"></i> All components</button>
+          <div class="dr-drill-title">
+            <i class="fa-solid fa-layer-group"></i> {{ selectedDomainName() }} — {{ rv.drillUnitLabel() }}s in {{ ds.scopeLabel() }}
+          </div>
+          @if (ds.canGoBack()) {
+            <button class="dr-back ghost" (click)="ds.goUp()"><i class="fa-solid fa-turn-up"></i> {{ ds.backLabel() }}</button>
+            <button class="dr-back ghost" (click)="ds.goToState()"><i class="fa-solid fa-house"></i> Tamil Nadu</button>
+          }
+        </div>
+
+        <!-- KPI topic switcher -->
+        <div class="rv-topics">
+          @for (t of rv.topics; track t.id) {
+            <button [class.on]="rv.activeTopic() === t.id" (click)="rv.setTopic(t.id)">
+              <i [class]="t.icon"></i> {{ t.label }}
+            </button>
+          }
+        </div>
+
+        <div class="card table-card">
+          <div class="card-title">
+            <i class="fa-solid fa-table-list"></i> {{ rv.drillUnitLabel() }}s — {{ ds.scopeLabel() }}
+            <span class="hint">click a row to
+              {{ ds.level() === 'state' ? 'open that district' : ds.selectedBlock() ? 'open the school profile' : 'open that block' }}</span>
+            <!-- KPI filter: lists ONLY the active component's KPIs; controls which columns show -->
+            <span class="dr-kpi-filter">
+              <i class="fa-solid fa-filter"></i>
+              <p-multiSelect [options]="rv.topicColumnOptions()" [ngModel]="rv.colFilterKeys()"
+                             (ngModelChange)="rv.setColFilter($event)"
+                             optionLabel="label" optionValue="value" placeholder="All KPIs"
+                             [filter]="false" display="chip" [maxSelectedLabels]="3" styleClass="ms" />
+              @if (rv.colFilterKeys().length) {
+                <button class="kpi-filter-clear" (click)="rv.clearColFilter()"><i class="fa-solid fa-rotate-left"></i> Clear</button>
+              }
+            </span>
+          </div>
+          <p-table [value]="rv.sortedDrillRows()" styleClass="p-datatable-sm" [scrollable]="true"
+                   [rows]="15" [paginator]="rv.sortedDrillRows().length > 15" [rowHover]="true">
+            <ng-template pTemplate="header">
+              <tr>
+                <th>{{ rv.drillUnitLabel() }}</th>
+                @for (c of rv.topicColumns(); track c.key) {
+                  <th class="num">
+                    <button class="th-sort" (click)="rv.setSort(c.key)">
+                      {{ c.label }}
+                      <i class="fa-solid" [class.fa-sort]="rv.sortCol() !== c.key"
+                         [class.fa-sort-up]="rv.sortCol() === c.key && rv.sortDir() === 1"
+                         [class.fa-sort-down]="rv.sortCol() === c.key && rv.sortDir() === -1"></i>
+                    </button>
+                  </th>
+                }
+              </tr>
+            </ng-template>
+            <ng-template pTemplate="body" let-r>
+              <tr class="rv-row" (click)="rv.drillRow(r)">
+                <td class="strong">
+                  {{ r.name }}
+                  @if (r.ns > 1 && ds.level() !== 'state') { <span class="text-muted">({{ fmt(r.ns) }} schools)</span> }
+                </td>
+                @for (c of rv.topicColumns(); track c.key) {
+                  <td [class.num]="c.fmt !== 'text'">
+                    @if (c.fmt === 'text') {
+                      {{ ddVal(r, c) }}
+                    } @else if (c.tone && ddHasData(r, c) && c.tone(ddNum(r, c), r)) {
+                      <p-tag [value]="ddVal(r, c)"
+                             [severity]="c.tone!(ddNum(r,c),r) === 'bad' ? 'danger' : c.tone!(ddNum(r,c),r) === 'warn' ? 'warn' : 'success'" />
+                    } @else {
+                      {{ ddVal(r, c) }}
+                    }
+                  </td>
+                }
+              </tr>
+            </ng-template>
+          </p-table>
+        </div>
+      </div>
+      }
+    </div>
+    }
+
+    <!-- ---------- REVIEW: NUMBERS ---------- -->
+    @if (activeSub() === 'numbers') {
+    <div class="view-title">
+      <i class="fa-solid fa-gauge-high"></i> Overall State Review — {{ ds.scopeLabel() }}
+      <span class="yr">{{ rv.currentYear() }} &middot; {{ rv.programLabel() }}</span>
+    </div>
+
+    @if (ds.canGoBack()) {
+    <div class="back-bar">
+      <button class="back-btn" (click)="ds.goUp()"><i class="fa-solid fa-arrow-left"></i> {{ ds.backLabel() }}</button>
+      <span class="back-scope">Currently viewing: <b>{{ ds.scopeLabel() }}</b></span>
+      <button class="home-btn" (click)="ds.goToState()"><i class="fa-solid fa-house"></i> Tamil Nadu</button>
+    </div>
+    }
+
+    <!-- ===== Needs attention ===== -->
+    @if (rv.insights().length) {
+    <div class="card rv-insight-card">
+      <div class="card-title"><i class="fa-solid fa-bell"></i> Needs Attention</div>
+      <div class="rv-insights">
+        @for (ins of rv.insights(); track ins.id) {
+          <button class="rv-ins" [class.bad]="ins.severity === 'bad'" [class.warn]="ins.severity === 'warn'"
+                  (click)="rv.applyInsight(ins)">
+            <i [class]="ins.icon"></i>
+            <span><b>{{ ins.text }}</b><small>{{ ins.action }} <i class="fa-solid fa-arrow-right"></i></small></span>
+          </button>
+        }
+      </div>
+    </div>
+    }
+
+    <!-- ===== KPI cards, one line per domain (click to switch drill topic) ===== -->
+    @for (sec of rv.kpiSections(); track sec.id) {
+      <div class="rv-sec">
+        <div class="rv-sec-title"><i [class]="sec.icon"></i> {{ sec.label }}</div>
+        <div class="rv-line" [style.--rv-n]="sec.cards.length">
+          @for (k of sec.cards; track k.label) {
+            <button class="ac-box rv-box" [class.on]="rv.activeTopic() === k.topic"
+                    [class.bad]="k.card === 'r'" [class.warn]="k.card === 'a'"
+                    (click)="rv.setTopic(k.topic)" [title]="'Show ' + k.label + ' in the drill-down table'">
+              <div class="ac-ico"><i [class]="k.icon"></i></div>
+              <div class="rv-box-text">
+                <div class="ac-val">{{ k.value }}</div>
+                <div class="ac-lbl">{{ k.label }}</div>
+                @if (k.sub) { <div class="rv-sub" [class.up]="k.subClass === 'up'" [class.down]="k.subClass === 'down'">{{ k.sub }}</div> }
+              </div>
+            </button>
+          }
+        </div>
+      </div>
+    }
+
+    <!-- ===== Enrolment ===== -->
+    <div class="card">
+      <div class="card-title">
+        <i class="fa-solid fa-chart-line"></i> Enrolment Trend — last 5 years
+        <span class="hint">change {{ rv.enrolmentChangePct() > 0 ? '+' : '' }}{{ rv.enrolmentChangePct() }}% &middot;
+          potential dropouts {{ fmt(rv.protoDropTotal()) }}</span>
+      </div>
+      <div echarts [options]="reviewTrendOpt()" (chartInit)="registerChart('reviewTrend', $event)"
+           class="chart tall-chart"></div>
+    </div>
+
+    <div class="grid-row row-two">
+      <div class="card">
+        <div class="card-title"><i class="fa-solid fa-venus-mars"></i> Gender Split</div>
+        <div echarts [options]="reviewGenderOpt()" (chartInit)="registerChart('reviewGender', $event)"
+             class="chart donut-chart"></div>
+      </div>
+      <div class="card">
+        <div class="card-title"><i class="fa-solid fa-building-user"></i> Management-Wise Enrolment</div>
+        <div echarts [options]="reviewMgmtOpt()" (chartInit)="registerChart('reviewMgmt', $event)"
+             class="chart donut-chart"></div>
+      </div>
+    </div>
+
+    <!-- ===== Attendance ===== -->
+    <div class="card">
+      <div class="card-title">
+        <i class="fa-solid fa-calendar-check"></i>
+        Low Performing {{ rv.drillUnitLabel() }}s by Attendance
+        <span class="hint">lowest {{ rv.attendanceByUnit().length }} of {{ rv.attendanceUnitTotal() }} &middot;
+          average {{ rv.attendanceScopeAvg() }}% &middot; red below 88%, amber below 91%</span>
+      </div>
+      @if (rv.attendanceByUnit().length) {
+        <div echarts [options]="reviewAttUnitOpt()" (chartInit)="registerChart('reviewAttUnit', $event)"
+             class="chart tall-chart"></div>
+      } @else {
+        <div class="no-data"><i class="fa-solid fa-circle-exclamation"></i> No attendance data for this scope.</div>
+      }
+    </div>
+
+    <div class="grid-row row-two">
+      <div class="card">
+        <div class="card-title">
+          <i class="fa-solid fa-calendar-check"></i> Attendance by School Type
+          <span class="hint">categories attendance is collected for</span>
+        </div>
+        @if (rv.attendanceBySchoolType().length) {
+          <div echarts [options]="reviewAttTypeOpt()" (chartInit)="registerChart('reviewAttType', $event)"
+               class="chart tall-chart"></div>
+        } @else {
+          <div class="no-data"><i class="fa-solid fa-circle-exclamation"></i> No attendance data for this scope.</div>
+        }
+      </div>
+      <div class="card">
+        <div class="card-title">
+          <i class="fa-solid fa-building-columns"></i> Critical Infrastructure Gaps
+          <span class="hint">schools failing each facility check</span>
+        </div>
+        @if (rv.infraGapRows().length) {
+          <div echarts [options]="reviewInfraOpt()" (chartInit)="registerChart('reviewInfra', $event)"
+               class="chart tall-chart"></div>
+        } @else {
+          <div class="no-data"><i class="fa-solid fa-circle-exclamation"></i> No infrastructure gaps reported.</div>
+        }
+      </div>
+    </div>
+
+    <!-- ===== Academic ===== -->
+    <div class="card">
+      <div class="card-title">
+        <i class="fa-solid fa-graduation-cap"></i> Academic Score by Class
+        <span class="seg-inline">
+          @for (p of rv.examPeriodOptions(); track p) {
+            <button [class.on]="rv.examPeriod() === p" (click)="rv.setExamPeriod(p)">{{ p }}</button>
+          }
+        </span>
+        <span class="hint">
+          state average {{ rv.academicStateAvg() }}% &middot;
+          {{ classesBelowState() }} of {{ rv.academicByClass().length }} classes below it
+          @if (boardClassCount() > 0) { &middot; classes 10 &amp; 12 are board exams (Annual only) }
+        </span>
+      </div>
+      @if (rv.academicByClass().length) {
+        <div echarts [options]="reviewClassOpt()" (chartInit)="registerChart('reviewClass', $event)"
+             class="chart tall-chart"></div>
+      } @else {
+        <div class="no-data"><i class="fa-solid fa-circle-exclamation"></i> No academic data for this scope.</div>
+      }
+    </div>
+
+    <!-- ===== Schemes & grievances ===== -->
+    <div class="grid-row row-two">
+      <div class="card">
+        <div class="card-title">
+          <i class="fa-solid fa-hand-holding-heart"></i> Scheme Coverage &amp; Resolution
+        </div>
+        <div echarts [options]="reviewSchemeOpt()" (chartInit)="registerChart('reviewScheme', $event)"
+             class="chart tall-chart"></div>
+      </div>
+      <div class="card">
+        <div class="card-title"><i class="fa-solid fa-comment-dots"></i> Grievances: CM Cell &amp; 14417</div>
+        <div echarts [options]="reviewGrievOpt()" (chartInit)="registerChart('reviewGriev', $event)"
+             class="chart donut-chart"></div>
+      </div>
+    </div>
+
+    <!-- ================= ADDITIONAL KPI MODULES (KPI.md) ================= -->
+    @if (rv.modulesReady()) {
+
+    <!-- ===== 1. THIRAN+ ===== -->
+    <div class="rv-sec" id="rv-thiran">
+      <div class="rv-sec-title"><i class="fa-solid fa-graduation-cap"></i> THIRAN+</div>
+      <div class="rv-line" [style.--rv-n]="rv.thiranKpis().length">
+        @for (k of rv.thiranKpis(); track k.label) {
+          <div class="ac-box rv-box">
+            <div class="ac-ico"><i [class]="k.icon"></i></div>
+            <div class="rv-box-text">
+              <div class="ac-val">{{ k.value }}</div>
+              <div class="ac-lbl">{{ k.label }}</div>
+            </div>
+          </div>
+        }
+      </div>
+    </div>
+    <div class="grid-row row-two">
+      <div class="card">
+        <div class="card-title">
+          <i class="fa-solid fa-chart-column"></i> THIRAN+ Students by Class
+          <span class="hint">classes 2 to 9</span>
+        </div>
+        <div echarts [options]="thiranClassOpt()" (chartInit)="registerChart('thiranClass', $event)"
+             class="chart tall-chart"></div>
+      </div>
+      <div class="card">
+        <div class="card-title"><i class="fa-solid fa-layer-group"></i> THIRAN+ by School Category</div>
+        <div echarts [options]="thiranCategoryOpt()" (chartInit)="registerChart('thiranCategory', $event)"
+             class="chart donut-chart"></div>
+      </div>
+    </div>
+
+    <!-- ===== 2. SCHOLARSHIP ===== -->
+    <div class="rv-sec" id="rv-scholarship">
+      <div class="rv-sec-title">
+        <i class="fa-solid fa-award"></i> Scholarship
+        <span class="rv-sec-filter">
+          <label>Scheme</label>
+          <select [ngModel]="rv.scholarshipScheme()" (ngModelChange)="rv.setScholarshipScheme($event)">
+            <option value="">All schemes</option>
+            @for (s of rv.scholarshipSchemeOptions(); track s) { <option [value]="s">{{ s }}</option> }
+          </select>
+        </span>
+      </div>
+
+      <div class="rv-sub-head">Eligibility</div>
+      <div class="rv-line" [style.--rv-n]="rv.scholarshipEligibilityKpis().length">
+        @for (k of rv.scholarshipEligibilityKpis(); track k.label) {
+          <div class="ac-box rv-box">
+            <div class="ac-ico"><i [class]="k.icon"></i></div>
+            <div class="rv-box-text">
+              <div class="ac-val">{{ k.value }}</div>
+              <div class="ac-lbl">{{ k.label }}</div>
+            </div>
+          </div>
+        }
+      </div>
+
+      <div class="rv-sub-head">Payment</div>
+      <div class="rv-line" [style.--rv-n]="rv.scholarshipPaymentKpis().length">
+        @for (k of rv.scholarshipPaymentKpis(); track k.label) {
+          <div class="ac-box rv-box" [class.bad]="k.tone === 'bad'" [class.warn]="k.tone === 'warn'">
+            <div class="ac-ico"><i [class]="k.icon"></i></div>
+            <div class="rv-box-text">
+              <div class="ac-val">{{ k.value }}</div>
+              <div class="ac-lbl">{{ k.label }}</div>
+            </div>
+          </div>
+        }
+      </div>
+
+      <div class="rv-sub-head">Verification</div>
+      <div class="rv-line" [style.--rv-n]="rv.scholarshipVerificationKpis().length">
+        @for (k of rv.scholarshipVerificationKpis(); track k.label) {
+          <div class="ac-box rv-box" [class.bad]="k.tone === 'bad'" [class.warn]="k.tone === 'warn'">
+            <div class="ac-ico"><i [class]="k.icon"></i></div>
+            <div class="rv-box-text">
+              <div class="ac-val">{{ k.value }}</div>
+              <div class="ac-lbl">{{ k.label }}</div>
+            </div>
+          </div>
+        }
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">
+        <i class="fa-solid fa-users-line"></i> Scholarship by Social Category
+        <span class="hint">{{ rv.scholarshipActive()?.name }}</span>
+      </div>
+      <div echarts [options]="scholarshipCatOpt()" (chartInit)="registerChart('scholarshipCat', $event)"
+           class="chart donut-chart"></div>
+    </div>
+
+    <!-- ===== 3. DIGITAL INFRASTRUCTURE ===== -->
+    <div class="rv-sec">
+      <div class="rv-sec-title"><i class="fa-solid fa-desktop"></i> Digital Infrastructure</div>
+      <div class="rv-line" [style.--rv-n]="rv.digitalKpis().length">
+        @for (k of rv.digitalKpis(); track k.label) {
+          <div class="ac-box rv-box" [class.bad]="k.tone === 'bad'">
+            <div class="ac-ico"><i [class]="k.icon"></i></div>
+            <div class="rv-box-text">
+              <div class="ac-val">{{ k.value }}</div>
+              <div class="ac-lbl">{{ k.label }}</div>
+            </div>
+          </div>
+        }
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">
+        <i class="fa-solid fa-wifi"></i> ICT Coverage
+        <span class="hint">internet and ICT-teacher availability across ICT schools</span>
+      </div>
+      <div echarts [options]="digitalOpt()" (chartInit)="registerChart('digital', $event)"
+           class="chart tall-chart"></div>
+    </div>
+
+    <!-- ===== 4. SMC ===== -->
+    <div class="rv-sec" id="rv-smc">
+      <div class="rv-sec-title"><i class="fa-solid fa-people-group"></i> SMC — School Management Committee</div>
+      <div class="rv-line" [style.--rv-n]="rv.smcKpis().length">
+        @for (k of rv.smcKpis(); track k.label) {
+          <div class="ac-box rv-box" [class.bad]="k.tone === 'bad'" [class.warn]="k.tone === 'warn'">
+            <div class="ac-ico"><i [class]="k.icon"></i></div>
+            <div class="rv-box-text">
+              <div class="ac-val">{{ k.value }}</div>
+              <div class="ac-lbl">{{ k.label }}</div>
+            </div>
+          </div>
+        }
+      </div>
+    </div>
+    <div class="grid-row row-two">
+      <div class="card">
+        <div class="card-title">
+          <i class="fa-solid fa-hourglass-half"></i> Resolution Ageing
+          <span class="hint">pending resolutions by age</span>
+        </div>
+        <div echarts [options]="smcAgeingOpt()" (chartInit)="registerChart('smcAgeing', $event)"
+             class="chart tall-chart"></div>
+      </div>
+      <div class="card">
+        <div class="card-title"><i class="fa-solid fa-triangle-exclamation"></i> Emergency vs Non-Emergency</div>
+        <div echarts [options]="smcTypeOpt()" (chartInit)="registerChart('smcType', $event)"
+             class="chart donut-chart"></div>
+      </div>
+    </div>
+    <div class="card table-card">
+      <div class="card-title">
+        <i class="fa-solid fa-sitemap"></i> SMC Resolutions by Level
+        <span class="rv-sec-filter">
+          <label>Level</label>
+          <select [ngModel]="rv.smcLevel()" (ngModelChange)="rv.setSmcLevel($event)">
+            <option value="">All levels</option>
+            @for (l of rv.smcLevelOptions(); track l) { <option [value]="l">{{ l }}</option> }
+          </select>
+        </span>
+      </div>
+      <p-table [value]="rv.smcByLevel()" styleClass="p-datatable-sm" [rowHover]="true">
+        <ng-template pTemplate="header">
+          <tr><th>Level</th><th class="num">Raised</th><th class="num">Closed</th><th class="num">Pending</th><th class="num">Closure Rate</th></tr>
+        </ng-template>
+        <ng-template pTemplate="body" let-r>
+          <tr>
+            <td class="strong">{{ r.name }}</td>
+            <td class="num">{{ fmt(r.raised) }}</td>
+            <td class="num">{{ fmt(r.closed) }}</td>
+            <td class="num">{{ fmt(r.pending) }}</td>
+            <td class="num">
+              <p-tag [value]="r.closureRate + '%'"
+                     [severity]="r.closureRate < 60 ? 'danger' : r.closureRate < 75 ? 'warn' : 'success'" />
+            </td>
+          </tr>
+        </ng-template>
+      </p-table>
+    </div>
+    <div class="card table-card">
+      <div class="card-title">
+        <i class="fa-solid fa-building-columns"></i>
+        {{ rv.smcAllDepartments() ? 'All Departments' : 'Top 5 Departments by Pending Count' }}
+        <button class="rv-link-btn" (click)="rv.toggleSmcDepartments()">
+          {{ rv.smcAllDepartments() ? 'Show top 5' : 'View all ' + rv.smcDepartmentTotal() + ' departments' }}
+          <i class="fa-solid fa-arrow-right"></i>
+        </button>
+      </div>
+      <p-table [value]="rv.smcDepartments()" styleClass="p-datatable-sm" [rowHover]="true">
+        <ng-template pTemplate="header">
+          <tr>
+            <th>Department</th><th class="num">Mapped</th><th class="num">Resolved</th>
+            <th class="num">Pending</th><th class="num">Schools</th><th class="num">Students</th><th class="num">Rate</th>
+          </tr>
+        </ng-template>
+        <ng-template pTemplate="body" let-r>
+          <tr>
+            <td class="strong">{{ r.name }}</td>
+            <td class="num">{{ fmt(r.mapped) }}</td>
+            <td class="num">{{ fmt(r.resolved) }}</td>
+            <td class="num"><b>{{ fmt(r.pending) }}</b></td>
+            <td class="num">{{ fmt(r.schools) }}</td>
+            <td class="num">{{ fmt(r.students) }}</td>
+            <td class="num">
+              <p-tag [value]="r.rate + '%'"
+                     [severity]="r.rate < 60 ? 'danger' : r.rate < 75 ? 'warn' : 'success'" />
+            </td>
+          </tr>
+        </ng-template>
+      </p-table>
+    </div>
+
+    <!-- ===== 5. PALLI PARVAI ===== -->
+    <div class="rv-sec" id="rv-palli">
+      <div class="rv-sec-title"><i class="fa-solid fa-clipboard-check"></i> Palli Parvai — Monitoring</div>
+      <div class="rv-line" [style.--rv-n]="rv.palliKpis().length">
+        @for (k of rv.palliKpis(); track k.label) {
+          <div class="ac-box rv-box" [class.bad]="k.tone === 'bad'" [class.warn]="k.tone === 'warn'">
+            <div class="ac-ico"><i [class]="k.icon"></i></div>
+            <div class="rv-box-text">
+              <div class="ac-val">{{ k.value }}</div>
+              <div class="ac-lbl">{{ k.label }}</div>
+            </div>
+          </div>
+        }
+      </div>
+    </div>
+    <div class="grid-row row-two">
+      <div class="card">
+        <div class="card-title">
+          <i class="fa-solid fa-user-tie"></i> Monitoring by Designation
+          <span class="hint">target vs observed</span>
+        </div>
+        <div echarts [options]="palliDesignationOpt()" (chartInit)="registerChart('palliDesignation', $event)"
+             class="chart tall-chart"></div>
+      </div>
+      <div class="card table-card">
+        <div class="card-title"><i class="fa-solid fa-table-list"></i> Designation-wise Monitoring</div>
+        <p-table [value]="rv.palliByDesignation()" styleClass="p-datatable-sm" [rowHover]="true">
+          <ng-template pTemplate="header">
+            <tr><th>Designation</th><th class="num">Target</th><th class="num">Observed</th><th class="num">Pending</th><th class="num">Completion</th></tr>
+          </ng-template>
+          <ng-template pTemplate="body" let-r>
+            <tr [class.rv-total-row]="r.name === 'Total'">
+              <td class="strong">{{ r.name }}</td>
+              <td class="num">{{ fmt(r.target) }}</td>
+              <td class="num">{{ fmt(r.observed) }}</td>
+              <td class="num">{{ fmt(r.pending) }}</td>
+              <td class="num">
+                <p-tag [value]="r.completionPct + '%'"
+                       [severity]="r.completionPct < 60 ? 'danger' : r.completionPct < 80 ? 'warn' : 'success'" />
+              </td>
+            </tr>
+          </ng-template>
+        </p-table>
+      </div>
+    </div>
+    <div class="card table-card">
+      <div class="card-title">
+        <i class="fa-solid fa-user-slash"></i> Officials with 0 School Visits
+        <span class="hint">target &gt; 0 and visited = 0 &middot; {{ fmt(rv.palliZeroVisitCount()) }} officials</span>
+        <button class="rv-link-btn" (click)="rv.togglePalliOfficials()">
+          {{ rv.palliOfficialsOpen() ? 'Hide details' : 'Show official-wise details' }}
+          <i class="fa-solid" [class.fa-chevron-down]="!rv.palliOfficialsOpen()" [class.fa-chevron-up]="rv.palliOfficialsOpen()"></i>
+        </button>
+      </div>
+      @if (rv.palliOfficialsOpen()) {
+        <p-table [value]="rv.palliZeroVisitOfficials()" styleClass="p-datatable-sm" [scrollable]="true"
+                 [rows]="15" [paginator]="rv.palliZeroVisitCount() > 15" [rowHover]="true">
+          <ng-template pTemplate="header">
+            <tr><th>Official</th><th>Designation</th><th>District</th><th class="num">Target</th><th class="num">Visited</th><th class="num">Pending</th></tr>
+          </ng-template>
+          <ng-template pTemplate="body" let-o>
+            <tr>
+              <td class="strong">{{ o.name }}</td>
+              <td>{{ o.designation }}</td>
+              <td>{{ ds.titleCase(o.district) }}</td>
+              <td class="num">{{ o.target }}</td>
+              <td class="num">{{ o.visited }}</td>
+              <td class="num"><b>{{ o.pending }}</b></td>
+            </tr>
+          </ng-template>
+        </p-table>
+      }
+    </div>
+
+    <p class="caution-note"><i class="fa-solid fa-circle-info"></i> {{ rv.moduleNote() }}</p>
+    }
+    <!-- ===== Drill down ===== -->
+    <div class="card table-card">
+      <div class="card-title">
+        <i class="fa-solid fa-layer-group"></i> Drill Down — {{ rv.drillUnitLabel() }}s
+        <span class="hint">
+          worst first &middot; click a row to
+          {{ ds.level() === 'state' ? 'open that district' : ds.selectedBlock() ? 'open the school profile' : 'open that block' }}
+        </span>
+      </div>
+
+      <div class="rv-topics">
+        @for (t of rv.topics; track t.id) {
+          <button [class.on]="rv.activeTopic() === t.id" (click)="rv.setTopic(t.id)">
+            <i [class]="t.icon"></i> {{ t.label }}
+          </button>
+        }
+      </div>
+
+      <p-table [value]="rv.sortedDrillRows()" styleClass="p-datatable-sm" [scrollable]="true"
+               [rows]="15" [paginator]="rv.sortedDrillRows().length > 15" [rowHover]="true">
+        <ng-template pTemplate="header">
+          <tr>
+            <th>{{ rv.drillUnitLabel() }}</th>
+            @for (c of rv.topicColumns(); track c.key) {
+              <th class="num">
+                <button class="th-sort" (click)="rv.setSort(c.key)">
+                  {{ c.label }}
+                  <i class="fa-solid" [class.fa-sort]="rv.sortCol() !== c.key"
+                     [class.fa-sort-up]="rv.sortCol() === c.key && rv.sortDir() === 1"
+                     [class.fa-sort-down]="rv.sortCol() === c.key && rv.sortDir() === -1"></i>
+                </button>
+              </th>
+            }
+          </tr>
+        </ng-template>
+        <ng-template pTemplate="body" let-r>
+          <tr class="rv-row" (click)="rv.drillRow(r)">
+            <td class="strong">
+              {{ r.name }}
+              @if (r.ns > 1 && ds.level() !== 'state') { <span class="text-muted">({{ fmt(r.ns) }} schools)</span> }
+            </td>
+            @for (c of rv.topicColumns(); track c.key) {
+              <td [class.num]="c.fmt !== 'text'">
+                @if (c.fmt === 'text') {
+                  {{ ddVal(r, c) }}
+                } @else if (c.tone && ddHasData(r, c) && c.tone(ddNum(r, c), r)) {
+                  <p-tag [value]="ddVal(r, c)"
+                         [severity]="c.tone!(ddNum(r,c),r) === 'bad' ? 'danger' : c.tone!(ddNum(r,c),r) === 'warn' ? 'warn' : 'success'" />
+                } @else {
+                  {{ ddVal(r, c) }}
+                }
+              </td>
+            }
+          </tr>
+        </ng-template>
+      </p-table>
+    </div>
+
+    <p class="caution-note"><i class="fa-solid fa-circle-info"></i> {{ rv.note() }}</p>
+
+    <!-- ===== School profile (app modal overlay) ===== -->
+    @if (rv.drawerOpen()) {
+    <div class="dl-backdrop" (click)="rv.closeDrawer()">
+      <div class="dl-modal rv-modal" (click)="$event.stopPropagation()">
+        <div class="dl-head">
+          <i class="fa-solid fa-school"></i> {{ rv.drawerRow()?.name }}
+          <button class="dl-x" (click)="rv.closeDrawer()"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="rv-modal-body">
+          <p class="rv-modal-sub">
+            {{ ds.titleCase(ds.selectedBlock() || '') }} block &middot; {{ fmt(rv.drawerRow()?.n || 0) }} students
+          </p>
+
+          <div class="rv-metrics">
+            @for (m of rv.drawerMetrics(); track m.label) {
+              <div class="rv-metric">
+                <span><i [class]="m.icon"></i> {{ m.label }}</span>
+                <b>{{ m.value }}</b>
+              </div>
+            }
+          </div>
+
+          <div class="rv-sec-head">Infrastructure gaps</div>
+          <div class="rv-chips">
+            @if (rv.drawerRow()?.gapList?.length) {
+              @for (g of rv.drawerRow()!.gapList!; track g) { <p-tag [value]="g" severity="danger" /> }
+            } @else {
+              <p-tag value="None reported" severity="success" />
+            }
+          </div>
+
+          <div class="rv-sec-head">Suggested actions</div>
+          @if (rv.drawerActions().length) {
+            @for (a of rv.drawerActions(); track a.text) {
+              <div class="rv-act">
+                <span>{{ a.text }}</span>
+                <p-button [label]="'Assign to ' + a.assignee" size="small" severity="secondary"
+                          (onClick)="rv.assignAction(a.assignee)" />
+              </div>
+            }
+          } @else {
+            <p class="rv-modal-sub">No action needed.</p>
+          }
+        </div>
+      </div>
+    </div>
+    }
+    @if (rv.assignToast()) {
+      <div class="rv-toast"><i class="fa-solid fa-circle-check"></i> {{ rv.assignToast() }}</div>
+    }
+    }
+
+
+    <!-- ---------- REVIEW: CAUTION (ALARMING KPIs ONLY) ---------- -->
+    @if (activeSub() === 'caution') {
+    <div class="view-title">
+      <i class="fa-solid fa-triangle-exclamation"></i> Critical Watchlist — {{ ds.scopeLabel() }}
+      <span class="yr">{{ rv.currentYear() }} &middot; {{ rv.programLabel() }}</span>
+    </div>
+
+    @if (ds.canGoBack()) {
+    <div class="back-bar">
+      <button class="back-btn" (click)="ds.goUp()"><i class="fa-solid fa-arrow-left"></i> {{ ds.backLabel() }}</button>
+      <span class="back-scope">Currently viewing: <b>{{ ds.scopeLabel() }}</b></span>
+      <button class="home-btn" (click)="ds.goToState()"><i class="fa-solid fa-house"></i> Tamil Nadu</button>
+    </div>
+    }
+
+    @if (!rv.cautionItems().length) {
+      <div class="no-data"><i class="fa-solid fa-circle-check"></i> No critical items flagged for this scope.</div>
+    } @else {
+      <div class="ac-kpi rv-kpi">
+        @for (c of rv.cautionItems(); track c.id) {
+          <div class="ac-box rv-box bad">
+            <div class="ac-ico"><i [class]="c.icon"></i></div>
+            <div>
+              <div class="ac-val">{{ fmt(c.count) }}</div>
+              <div class="ac-lbl">{{ c.label }}</div>
+            </div>
+          </div>
+        }
+      </div>
+
+      <div class="card">
+        <div class="card-title">
+          <i class="fa-solid fa-triangle-exclamation"></i> Critical / Alarming Indicators
+          <span class="hint">schools &amp; cases needing immediate intervention</span>
+        </div>
+        <div echarts [options]="reviewCautionOpt()" (chartInit)="registerChart('reviewCaution', $event)"
+             class="chart tall-chart"></div>
+      </div>
+
+      <div class="card table-card">
+        <div class="card-title"><i class="fa-solid fa-list-check"></i> Alarming KPIs</div>
+        <p-table [value]="rv.cautionItems()" styleClass="p-datatable-sm" [scrollable]="true" [rowHover]="true">
+          <ng-template pTemplate="header">
+            <tr><th>Indicator</th><th class="num">Count</th><th>Why it matters</th></tr>
+          </ng-template>
+          <ng-template pTemplate="body" let-c>
+            <tr>
+              <td class="strong"><i [class]="c.icon" class="rv-tbl-ico"></i> {{ c.label }}</td>
+              <td class="num"><b>{{ fmt(c.count) }}</b></td>
+              <td class="text-muted">{{ c.hint }}</td>
+            </tr>
+          </ng-template>
+        </p-table>
+      </div>
+    }
+    }
+
+    }
+  }
+
+  <!-- ================= NUMBERS ================= -->
+  @if (isSchoolTab() && activeSub() === 'numbers') {
+    <!-- ===== KPI strip (full-width rectangles) ===== -->
+    <div class="kpi-strip" [class.compact]="mapOpen()">
+      @for (s of stats(); track s.label) {
+        <div class="kpi-box">
+          <div class="kpi-ico"><i [class]="s.icon"></i></div>
+          <div class="kpi-text">
+            <div class="kpi-num">{{ short(s.value) }}</div>
+            <div class="kpi-full">{{ fmt(s.value) }}</div>
+            <div class="kpi-cap">{{ s.label }}</div>
+          </div>
+        </div>
+      }
+      <div class="kpi-box scope-box">
+        <div class="kpi-text">
+          <div class="kpi-scope">{{ ds.titleCase(ds.scopeLabel()) }}</div>
+          <div class="kpi-cap">{{ ds.data()!.currentYear }} &middot; {{ tableTitle() }} level</div>
+          <div class="kpi-src"><i class="fa-solid fa-database"></i> Source: {{ ds.source() }}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== Ratio cards ===== -->
+    <div class="ratio-row">
+      @for (r of ratios(); track r.label) {
+        <div class="ratio-card"><div class="ratio-val">{{ r.value }}</div><div class="ratio-lbl">{{ r.label }}</div></div>
+      }
+    </div>
+
+    <!-- ===== Map + charts (map collapsible) ===== -->
+    @if (mapOpen()) {
+    <div class="hero-row">
+      <div class="card map-card">
+        <div class="map-head">
+          <span class="map-title"><i class="fa-solid fa-map-location-dot"></i> {{ ds.metricLabel() }}</span>
+          <button class="close-map" (click)="toggleMap()" title="Close Map"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <select class="metric-select full" [ngModel]="ds.metric()" (ngModelChange)="setMetric($event)">
+          @for (m of metricOptions; track m.value) { <option [value]="m.value">{{ m.label }}</option> }
+        </select>
+        <div class="map-wrap">
+          <div echarts [options]="mapOpt()" (chartInit)="onMapInit($event); registerChart('map', $event)"
+               (chartClick)="onMapClick($event)" class="chart map-chart"></div>
+          <div class="map-zoom">
+            <button (click)="zoomIn()" title="Zoom in"><i class="fa-solid fa-magnifying-glass-plus"></i></button>
+            <button (click)="zoomOut()" title="Zoom out"><i class="fa-solid fa-magnifying-glass-minus"></i></button>
+            <button (click)="zoomReset()" title="Reset"><i class="fa-solid fa-rotate-right"></i></button>
+          </div>
+        </div>
+        <div class="map-hint">
+          <i class="fa-solid fa-hand-pointer"></i> Click a district to drill down &middot; drag to pan &middot; scroll to zoom
+        </div>
+      </div>
+
+      <!-- 2x2 chart grid beside the map -->
+      <div class="hero-charts">
+        <div class="card">
+          <div class="card-title">
+            <i class="fa-solid fa-chart-pie"></i> {{ primaryDonutTitle() }}
+            <select class="donut-select" [ngModel]="ds.donutDimension()" (ngModelChange)="setDonutDim($event)">
+              @for (d of donutOptions; track d.value) { <option [value]="d.value">{{ d.label }}</option> }
+            </select>
+          </div>
+          <div echarts [options]="primaryDonutOpt()" (chartInit)="registerChart('primaryDonut', $event)" class="chart quad-chart"></div>
+        </div>
+        <div class="card">
+          <div class="card-title"><i class="fa-solid fa-venus-mars"></i> Gender Split</div>
+          <div echarts [options]="genderOpt()" (chartInit)="registerChart('gender', $event)" class="chart quad-chart"></div>
+        </div>
+        <div class="card">
+          <div class="card-title"><i class="fa-solid fa-users-line"></i> Social Category</div>
+          <div echarts [options]="casteOpt()" (chartInit)="registerChart('caste', $event)" class="chart quad-chart"></div>
+        </div>
+        <div class="card">
+          <div class="card-title"><i class="fa-solid fa-chart-column"></i> Enrolment by Grade</div>
+          <div echarts [options]="gradeOpt()" (chartInit)="registerChart('grade', $event)" class="chart quad-chart"></div>
+        </div>
+      </div>
+    </div>
+    }
+
+    <!-- ===== Charts full width when map is closed ===== -->
+    @if (!mapOpen()) {
+    <div class="grid-row donut-row-4">
+      <div class="card">
+        <div class="card-title">
+          <i class="fa-solid fa-chart-pie"></i> {{ primaryDonutTitle() }}
+          <select class="donut-select" [ngModel]="ds.donutDimension()" (ngModelChange)="setDonutDim($event)">
+            @for (d of donutOptions; track d.value) { <option [value]="d.value">{{ d.label }}</option> }
+          </select>
+        </div>
+        <div echarts [options]="primaryDonutOpt()" (chartInit)="registerChart('primaryDonut', $event)" class="chart donut-chart"></div>
+      </div>
+      <div class="card">
+        <div class="card-title"><i class="fa-solid fa-venus-mars"></i> Gender Split</div>
+        <div echarts [options]="genderOpt()" (chartInit)="registerChart('gender', $event)" class="chart donut-chart"></div>
+      </div>
+      <div class="card">
+        <div class="card-title"><i class="fa-solid fa-users-line"></i> Social Category</div>
+        <div echarts [options]="casteOpt()" (chartInit)="registerChart('caste', $event)" class="chart donut-chart"></div>
+      </div>
+      <div class="card">
+        <div class="card-title"><i class="fa-solid fa-chart-column"></i> Enrolment by Grade</div>
+        <div echarts [options]="gradeOpt()" (chartInit)="registerChart('grade', $event)" class="chart donut-chart"></div>
+      </div>
+    </div>
+    }
+
+    <!-- ===== District combo (state level) ===== -->
+    @if (ds.level() === 'state') {
+    <div class="grid-row">
+      <div class="card">
+        <div class="card-title">
+          <i class="fa-solid fa-chart-simple"></i> District-wise {{ comboMetric() === 'students' ? 'Students' : 'Schools' }} — click a bar to drill down
+          <span class="toolbar-btns">
+            <button [class.on]="comboMetric()==='students'" (click)="comboMetric.set('students')"><i class="fa-solid fa-user-graduate"></i> Students</button>
+            <button [class.on]="comboMetric()==='schools'" (click)="comboMetric.set('schools')"><i class="fa-solid fa-school"></i> Schools</button>
+          </span>
+        </div>
+        <div echarts [options]="comboOpt()" (chartInit)="registerChart('combo', $event)" (chartClick)="onComboClick($event)" class="chart combo-chart"></div>
+      </div>
+    </div>
+    }
+
+    <!-- ===== Back navigation (one level up) ===== -->
+    @if (ds.canGoBack()) {
+    <div class="back-bar">
+      <button class="back-btn" (click)="ds.goUp()">
+        <i class="fa-solid fa-arrow-left"></i> {{ ds.backLabel() }}
+      </button>
+      <span class="back-scope">
+        Currently viewing: <b>{{ ds.titleCase(ds.scopeLabel()) }}</b>
+      </span>
+      <button class="home-btn" (click)="ds.goToState()" title="Back to state level">
+        <i class="fa-solid fa-house"></i> Tamil Nadu
+      </button>
+    </div>
+    }
+
+    <!-- ===== Table ===== -->
+    @if (ds.level() !== 'school') {
+    <div class="card table-card">
+      <div class="card-title">
+        <i class="fa-solid fa-table-list"></i> {{ tableTitle() }} — {{ ds.titleCase(ds.scopeLabel()) }}
+        @if (canDrillRows()) { <span class="hint">(click a row to drill down)</span> }
+        <span class="tbl-export">
+          <button class="exp-btn xls" (click)="exportTable('drill','excel')" title="Download all rows as Excel"><i class="fa-solid fa-file-excel"></i> Excel</button>
+          <button class="exp-btn csv" (click)="exportTable('drill','csv')" title="Download all rows as CSV"><i class="fa-solid fa-file-csv"></i> CSV</button>
+          <button class="exp-btn pdf" (click)="exportTable('drill','pdf')" title="Download all rows as PDF"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+        </span>
+      </div>
+      <p-table [value]="tableRows()" [paginator]="true" [rows]="12" [rowsPerPageOptions]="[12,25,50,100]"
+               [globalFilterFields]="['name']" styleClass="p-datatable-sm p-datatable-striped" #dt>
+        <ng-template pTemplate="caption">
+          <div class="tbl-caption">
+            <input type="text" class="tbl-search" placeholder="Search {{ tableTitle() }}..."
+                   (input)="dt.filterGlobal($any($event.target).value, 'contains')" />
+          </div>
+        </ng-template>
+        <ng-template pTemplate="header">
+          <tr>
+            <th pSortableColumn="name">Name <p-sortIcon field="name" /></th>
+            @if (ds.level() !== 'block') {
+              <th pSortableColumn="schools" class="num">Schools <p-sortIcon field="schools" /></th>
+            } @else {
+              <th>Type</th>
+            }
+            <th pSortableColumn="boys" class="num">Boys <p-sortIcon field="boys" /></th>
+            <th pSortableColumn="girls" class="num">Girls <p-sortIcon field="girls" /></th>
+            <th pSortableColumn="students" class="num">Students <p-sortIcon field="students" /></th>
+            <th pSortableColumn="teaching" class="num">Teachers <p-sortIcon field="teaching" /></th>
+          </tr>
+        </ng-template>
+        <ng-template pTemplate="body" let-row>
+          <tr (click)="onRowClick(row)" [class.clickable]="canDrillRows()">
+            <td>
+              <span class="row-name">{{ ds.level() === 'block' ? row.name : ds.titleCase(row.name) }}</span>
+              @if (canDrillRows()) { <i class="fa-solid fa-chevron-right drill-ic"></i> }
+            </td>
+            @if (ds.level() !== 'block') {
+              <td class="num">{{ fmt(row.schools) }}</td>
+            } @else {
+              <td class="type-cell">{{ row.extra }}</td>
+            }
+            <td class="num">{{ fmt(row.boys) }}</td>
+            <td class="num">{{ fmt(row.girls) }}</td>
+            <td class="num strong">{{ fmt(row.students) }}</td>
+            <td class="num">{{ fmt(row.teaching) }}</td>
+          </tr>
+        </ng-template>
+        <ng-template pTemplate="emptymessage">
+          <tr><td colspan="6" class="empty">No data for the current filters.</td></tr>
+        </ng-template>
+      </p-table>
+    </div>
+    } @else if (ds.currentSchool()) {
+      <div class="card">
+        <div class="card-title"><i class="fa-solid fa-circle-info"></i> School Details</div>
+        <div class="school-detail">
+          <div><span>Name</span><b>{{ ds.currentSchool()!.name }}</b></div>
+          <div><span>UDISE Code</span><b>{{ ds.currentSchool()!.udise }}</b></div>
+          <div><span>Management</span><b>{{ ds.currentSchool()!.mgmt }}</b></div>
+          <div><span>Category</span><b>{{ ds.currentSchool()!.cat }}</b></div>
+          <div><span>School Type</span><b>{{ ds.currentSchool()!.stype }}</b></div>
+          <div><span>Level</span><b>{{ ds.currentSchool()!.ctype }}</b></div>
+          <div><span>Total Staff</span><b>{{ fmt(ds.currentSchool()!.staff) }}</b></div>
+          <div><span>Non-Teaching</span><b>{{ fmt(ds.currentSchool()!.nonTeaching) }}</b></div>
+        </div>
+      </div>
+    }
+  }
+
+  <!-- ================= TREND ANALYSIS ================= -->
+  @if (isSchoolTab() && activeSub() === 'trend') {
+    <div class="view-title">
+      <i class="fa-solid fa-chart-line"></i> Trend Analysis — {{ ds.titleCase(ds.scopeLabel()) }}
+      <span class="yr">{{ ds.data()!.years[0] }} to {{ ds.data()!.currentYear }}</span>
+    </div>
+
+    @if (ds.canGoBack()) {
+    <div class="back-bar">
+      <button class="back-btn" (click)="ds.goUp()"><i class="fa-solid fa-arrow-left"></i> {{ ds.backLabel() }}</button>
+      <span class="back-scope">Currently viewing: <b>{{ ds.titleCase(ds.scopeLabel()) }}</b></span>
+      <button class="home-btn" (click)="ds.goToState()"><i class="fa-solid fa-house"></i> Tamil Nadu</button>
+    </div>
+    }
+
+    <!-- Trend controls: baseline year, top/bottom, how many -->
+    <div class="trend-controls">
+      <label class="tc-field">
+        <span>Compare from</span>
+        <select class="metric-select" [ngModel]="ds.fromYearInfo().year" (ngModelChange)="setFromYear($event)">
+          @for (y of ds.fromYearOptions(); track y.value) { <option [value]="y.value">{{ y.label }}</option> }
+        </select>
+      </label>
+      <span class="tc-to">to <b>{{ ds.data()!.currentYear }}</b></span>
+      <div class="tc-rank">
+        <button [class.on]="ds.trendRank()==='top'" (click)="setTrendRank('top')">
+          <i class="fa-solid fa-arrow-trend-up"></i> Top performers
+        </button>
+        <button [class.on]="ds.trendRank()==='bottom'" (click)="setTrendRank('bottom')">
+          <i class="fa-solid fa-arrow-trend-down"></i> Bottom performers
+        </button>
+      </div>
+      <label class="tc-field">
+        <span>Show</span>
+        <select class="metric-select" [ngModel]="ds.trendCount()" (ngModelChange)="setTrendCount($event)">
+          @for (n of trendCountOptions; track n) { <option [value]="n">{{ n }}</option> }
+        </select>
+      </label>
+    </div>
+
+    <!-- ===== GER + Transition Rate (state-level cohort measures) ===== -->
+    @if (showTransition()) {
+    <div class="grid-row row-two">
+      <!-- Gross Enrolment Ratio -->
+      <div class="card">
+        <div class="card-title">
+          <i class="fa-solid fa-percent"></i> Gross Enrolment Ratio — {{ ds.source() }}
+          @if (gerNeedsApi()) {
+            <button class="ger-star" (click)="openGerApiPopup()"
+                    title="Age-wise population pending — click for details">
+              <i class="fa-solid fa-star"></i>
+            </button>
+          }
+        </div>
+        @if (gerReady()) {
+          <div echarts [options]="gerOpt()" (chartInit)="registerChart('ger', $event)" class="chart tall-chart"></div>
+        } @else {
+          <div class="ger-pending" (click)="openGerApiPopup()">
+            <i class="fa-solid fa-satellite-dish"></i>
+            <p><b>GER unavailable for {{ ds.source() }}</b></p>
+            <p class="ger-sub">Age-wise population is not held in EMIS. It must be pulled
+               from the respective departments' API before GER (2018 → today) can be shown.</p>
+            <span class="ger-cta"><i class="fa-solid fa-star"></i> Click for details</span>
+          </div>
+        }
+      </div>
+
+      <!-- Transition Rate -->
+      <div class="card">
+        <div class="card-title">
+          <i class="fa-solid fa-arrow-right-arrow-left"></i> Transition Rate — {{ ds.titleCase(ds.scopeLabel()) }}
+          <span class="hint">cohort progression to the next stage · 2021 → {{ ds.data()!.currentYear }}</span>
+        </div>
+        <div echarts [options]="transitionOpt()" (chartInit)="registerChart('transition', $event)" class="chart tall-chart"></div>
+      </div>
+    </div>
+    }
+
+    <div class="grid-row row-two">
+      <div class="card">
+        <div class="card-title"><i class="fa-solid fa-arrow-trend-down"></i> Enrolment Trend — {{ ds.titleCase(ds.scopeLabel()) }}</div>
+        <div echarts [options]="trendOpt()" (chartInit)="registerChart('trend', $event)" class="chart tall-chart"></div>
+      </div>
+      <div class="card">
+        <div class="card-title"><i class="fa-solid fa-venus-mars"></i> Boys vs Girls Trend — {{ ds.titleCase(ds.scopeLabel()) }}</div>
+        <div echarts [options]="genderTrendOpt()" (chartInit)="registerChart('genderTrend', $event)" class="chart tall-chart"></div>
+      </div>
+    </div>
+
+    <div class="grid-row">
+      <div class="card">
+        <div class="card-title">
+          <i class="fa-solid fa-ranking-star"></i>
+          {{ ds.trendRank()==='top' ? 'Top' : 'Bottom' }} {{ ds.childTrendPlot().shown }} {{ ds.childTrends().childLabel }} by Change
+          @if (ds.canDrillTrend()) {
+            <span class="hint">click a line or legend entry to drill down</span>
+          }
+          <span class="count-chip">{{ fmt(ds.childTrendPlot().total) }} total &middot; {{ ds.childTrendPlot().shown }} shown</span>
+        </div>
+        <div echarts [options]="childTrendOpt()" (chartInit)="registerChart('childTrend', $event)"
+             (chartClick)="onChildTrendClick($event)" (chartLegendSelectChanged)="onChildTrendClick($event)"
+             class="chart tall-chart"></div>
+      </div>
+    </div>
+
+    <!-- Drillable trend table: districts -> blocks -> schools -->
+    @if (ds.canDrillTrend()) {
+    <div class="card table-card">
+      <div class="card-title">
+        <i class="fa-solid fa-table-list"></i>
+        {{ ds.childTrends().childLabel }} — Change from {{ ds.fromYearInfo().year }} to {{ ds.data()!.currentYear }}
+        <span class="hint">(click a row to drill down)</span>
+        <span class="count-chip">{{ fmt(ds.childTrendRows().length) }} total</span>
+        <span class="tbl-export">
+          <button class="exp-btn xls" (click)="exportTable('childTrend','excel')" title="Download all rows as Excel"><i class="fa-solid fa-file-excel"></i> Excel</button>
+          <button class="exp-btn csv" (click)="exportTable('childTrend','csv')" title="Download all rows as CSV"><i class="fa-solid fa-file-csv"></i> CSV</button>
+          <button class="exp-btn pdf" (click)="exportTable('childTrend','pdf')" title="Download all rows as PDF"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+        </span>
+      </div>
+      <p-table [value]="ds.childTrendRows()" [paginator]="true" [rows]="12" [rowsPerPageOptions]="[12,25,50]"
+               [globalFilterFields]="['name']" styleClass="p-datatable-sm p-datatable-striped" #tt>
+        <ng-template pTemplate="caption">
+          <div class="tbl-caption">
+            <input type="text" class="tbl-search" placeholder="Search {{ ds.childTrends().childLabel }}..."
+                   (input)="tt.filterGlobal($any($event.target).value, 'contains')" />
+          </div>
+        </ng-template>
+        <ng-template pTemplate="header">
+          <tr>
+            <th pSortableColumn="name">Name <p-sortIcon field="name" /></th>
+            <th pSortableColumn="first" class="num">{{ ds.fromYearInfo().year }} <p-sortIcon field="first" /></th>
+            <th pSortableColumn="last" class="num">{{ ds.data()!.currentYear }} <p-sortIcon field="last" /></th>
+            <th pSortableColumn="diff" class="num">Difference <p-sortIcon field="diff" /></th>
+            <th pSortableColumn="change" class="num">Change % <p-sortIcon field="change" /></th>
+          </tr>
+        </ng-template>
+        <ng-template pTemplate="body" let-r>
+          <tr class="clickable" (click)="drillChild(r.key)">
+            <td>
+              <span class="row-name">{{ r.name }}</span>
+              <i class="fa-solid fa-chevron-right drill-ic"></i>
+            </td>
+            <td class="num">{{ fmt(r.first) }}</td>
+            <td class="num strong">{{ fmt(r.last) }}</td>
+            <td class="num" [class.bad]="r.diff < 0" [class.good]="r.diff > 0">
+              {{ r.diff > 0 ? '+' : '' }}{{ fmt(r.diff) }}
+            </td>
+            <td class="num" [class.bad]="r.change < 0" [class.good]="r.change > 0">
+              <i class="fa-solid" [class.fa-arrow-down]="r.change < 0" [class.fa-arrow-up]="r.change > 0"></i>
+              {{ r.change > 0 ? '+' : '' }}{{ r.change }}%
+            </td>
+          </tr>
+        </ng-template>
+        <ng-template pTemplate="emptymessage">
+          <tr><td colspan="5" class="empty">No trend data available at this level.</td></tr>
+        </ng-template>
+      </p-table>
+    </div>
+    }
+
+    <div class="card table-card">
+      <div class="card-title"><i class="fa-solid fa-table-list"></i> Year-wise State Enrolment</div>
+      <p-table [value]="ds.stateTrend()" styleClass="p-datatable-sm p-datatable-striped">
+        <ng-template pTemplate="header">
+          <tr>
+            <th>Year</th><th class="num">Schools</th><th class="num">Boys</th>
+            <th class="num">Girls</th><th class="num">Students</th><th class="num">Teachers</th>
+          </tr>
+        </ng-template>
+        <ng-template pTemplate="body" let-r>
+          <tr>
+            <td class="strong">{{ r.year }}</td>
+            <td class="num">{{ fmt(r.schools) }}</td>
+            <td class="num">{{ fmt(r.boys) }}</td>
+            <td class="num">{{ fmt(r.girls) }}</td>
+            <td class="num strong">{{ fmt(r.students) }}</td>
+            <td class="num">{{ fmt(r.teaching) }}</td>
+          </tr>
+        </ng-template>
+      </p-table>
+        <span class="tbl-export">
+          <button class="exp-btn xls" (click)="exportTable('stateTrend','excel')" title="Download all rows as Excel"><i class="fa-solid fa-file-excel"></i> Excel</button>
+          <button class="exp-btn csv" (click)="exportTable('stateTrend','csv')" title="Download all rows as CSV"><i class="fa-solid fa-file-csv"></i> CSV</button>
+          <button class="exp-btn pdf" (click)="exportTable('stateTrend','pdf')" title="Download all rows as PDF"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+        </span>
+    </div>
+  }
+
+  <!-- ================= COMPARISON ================= -->
+  @if (isSchoolTab() && activeSub() === 'comparison') {
+    <div class="view-title">
+      <i class="fa-solid fa-code-compare"></i>
+      {{ ds.level() === 'state' ? 'District Comparison' : 'Block Comparison' }} — {{ ds.titleCase(ds.scopeLabel()) }}
+      <span class="yr">{{ ds.data()!.currentYear }}</span>
+    </div>
+
+    @if (ds.canGoBack()) {
+    <div class="back-bar">
+      <button class="back-btn" (click)="ds.goUp()"><i class="fa-solid fa-arrow-left"></i> {{ ds.backLabel() }}</button>
+      <span class="back-scope">Currently viewing: <b>{{ ds.titleCase(ds.scopeLabel()) }}</b></span>
+      <button class="home-btn" (click)="ds.goToState()"><i class="fa-solid fa-house"></i> Tamil Nadu</button>
+    </div>
+    }
+
+    <div class="grid-row">
+      <div class="card">
+        <div class="card-title">
+          <i class="fa-solid fa-chart-simple"></i> Ranked by {{ compareMetricLabel() }} — click a bar to drill down
+          <select class="donut-select" [ngModel]="compareMetric()" (ngModelChange)="setCompareMetric($event)">
+            @for (m of compareMetrics; track m.value) { <option [value]="m.value">{{ m.label }}</option> }
+          </select>
+        </div>
+        <div echarts [options]="compareOpt()" (chartInit)="registerChart('compare', $event)"
+             (chartClick)="onCompareClick($event)" class="chart rank-chart"></div>
+      </div>
+    </div>
+
+    <div class="card table-card">
+      <div class="card-title">
+        <i class="fa-solid fa-table-list"></i> Indicator Comparison
+        <span class="hint">state averages — GPI {{ ds.baseline().gpi }}, PTR {{ ds.baseline().ptr }}:1, {{ fmt(ds.baseline().avgPerSchool) }} students/school</span>
+        <span class="tbl-export">
+          <button class="exp-btn xls" (click)="exportTable('comparison','excel')" title="Download all rows as Excel"><i class="fa-solid fa-file-excel"></i> Excel</button>
+          <button class="exp-btn csv" (click)="exportTable('comparison','csv')" title="Download all rows as CSV"><i class="fa-solid fa-file-csv"></i> CSV</button>
+          <button class="exp-btn pdf" (click)="exportTable('comparison','pdf')" title="Download all rows as PDF"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+        </span>
+      </div>
+      <p-table [value]="ds.comparisonRows()" [paginator]="true" [rows]="12" [rowsPerPageOptions]="[12,25,50]"
+               [globalFilterFields]="['name']" styleClass="p-datatable-sm p-datatable-striped" #ct>
+        <ng-template pTemplate="caption">
+          <div class="tbl-caption">
+            <input type="text" class="tbl-search" placeholder="Search..."
+                   (input)="ct.filterGlobal($any($event.target).value, 'contains')" />
+          </div>
+        </ng-template>
+        <ng-template pTemplate="header">
+          <tr>
+            <th pSortableColumn="name">Name <p-sortIcon field="name" /></th>
+            <th pSortableColumn="schools" class="num">Schools <p-sortIcon field="schools" /></th>
+            <th pSortableColumn="students" class="num">Students <p-sortIcon field="students" /></th>
+            <th pSortableColumn="gpi" class="num">GPI <p-sortIcon field="gpi" /></th>
+            <th pSortableColumn="ptr" class="num">PTR <p-sortIcon field="ptr" /></th>
+            <th pSortableColumn="avgPerSchool" class="num">Avg/School <p-sortIcon field="avgPerSchool" /></th>
+            <th pSortableColumn="girlsPct" class="num">Girls % <p-sortIcon field="girlsPct" /></th>
+          </tr>
+        </ng-template>
+        <ng-template pTemplate="body" let-r>
+          <tr class="clickable" (click)="onRowClick(r)">
+            <td><span class="row-name">{{ ds.titleCase(r.name) }}</span><i class="fa-solid fa-chevron-right drill-ic"></i></td>
+            <td class="num">{{ fmt(r.schools) }}</td>
+            <td class="num strong">{{ fmt(r.students) }}</td>
+            <td class="num" [class.bad]="r.gpi < 0.95" [class.good]="r.gpi >= 1">{{ r.gpi }}</td>
+            <td class="num" [class.bad]="r.ptr > 30">{{ r.ptr }}:1</td>
+            <td class="num" [class.bad]="r.avgPerSchool < 100">{{ fmt(r.avgPerSchool) }}</td>
+            <td class="num">{{ r.girlsPct }}%</td>
+          </tr>
+        </ng-template>
+        <ng-template pTemplate="emptymessage">
+          <tr><td colspan="7" class="empty">No data for the current filters.</td></tr>
+        </ng-template>
+      </p-table>
+    </div>
+  }
+
+  <!-- ================= ALARMING ================= -->
+  @if (isSchoolTab() && activeSub() === 'alarming') {
+    <div class="view-title">
+      <i class="fa-solid fa-triangle-exclamation"></i> Alarming Indicators ({{ fmt(ds.alertSummary().total) }}) — Tamil Nadu
+      <span class="yr">{{ ds.data()!.currentYear }}</span>
+    </div>
+
+    <div class="alert-summary">
+      <div class="as-box high">
+        <div class="as-num">{{ fmt(ds.alertSummary().high) }}</div>
+        <div class="as-lbl">High Severity</div>
+      </div>
+      <div class="as-box med">
+        <div class="as-num">{{ fmt(ds.alertSummary().medium) }}</div>
+        <div class="as-lbl">Medium Severity</div>
+      </div>
+      <div class="as-box tot">
+        <div class="as-num">{{ fmt(ds.alertSummary().total) }}</div>
+        <div class="as-lbl">Total Alerts</div>
+      </div>
+      <div class="as-box dist">
+        <div class="as-num">{{ fmt(ds.alertSummary().districts) }}</div>
+        <div class="as-lbl">Districts Flagged</div>
+      </div>
+    </div>
+
+    <div class="grid-row">
+      <div class="card">
+        <div class="card-title"><i class="fa-solid fa-chart-column"></i> Alerts by Category</div>
+        <div echarts [options]="alertOpt()" (chartInit)="registerChart('alerts', $event)" class="chart wide-chart"></div>
+      </div>
+    </div>
+
+      <div class="alert-kind-tabs">
+        <button [class.on]="alertKind() === ''" (click)="setAlertKind('')">
+          All <em>({{ fmt(alertKinds().length ? activeAlertCount() : 0) }})</em>
+        </button>
+        @for (k of alertKinds(); track k.kind) {
+          <button [class.on]="alertKind() === k.kind" (click)="setAlertKind(k.kind)">
+            {{ k.kind }} <em>({{ fmt(k.count) }})</em>
+          </button>
+        }
+      </div>
+
+    <div class="card table-card">
+      <div class="card-title">
+        <i class="fa-solid fa-list-check"></i> Alert Details
+        <span class="hint">thresholds: decline &le; -15% &middot; GPI &lt; 0.95 &middot; PTR &gt; 30:1 &middot; avg size &lt; 100</span>
+        <span class="tbl-export">
+          <button class="exp-btn xls" (click)="exportTable('alerts','excel')" title="Download all rows as Excel"><i class="fa-solid fa-file-excel"></i> Excel</button>
+          <button class="exp-btn csv" (click)="exportTable('alerts','csv')" title="Download all rows as CSV"><i class="fa-solid fa-file-csv"></i> CSV</button>
+          <button class="exp-btn pdf" (click)="exportTable('alerts','pdf')" title="Download all rows as PDF"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+        </span>
+      </div>
+      <p-table [value]="filteredAlerts()" [paginator]="true" [rows]="15" [rowsPerPageOptions]="[15,30,60]"
+               [globalFilterFields]="['district','kind']" styleClass="p-datatable-sm p-datatable-striped" #at>
+        <ng-template pTemplate="caption">
+          <div class="tbl-caption">
+            <input type="text" class="tbl-search" placeholder="Search district or alert type..."
+                   (input)="at.filterGlobal($any($event.target).value, 'contains')" />
+          </div>
+        </ng-template>
+        <ng-template pTemplate="header">
+          <tr>
+            <th pSortableColumn="severity">Severity <p-sortIcon field="severity" /></th>
+            <th pSortableColumn="district">District <p-sortIcon field="district" /></th>
+            <th pSortableColumn="kind">Alert <p-sortIcon field="kind" /></th>
+            <th>Measured</th>
+          </tr>
+        </ng-template>
+        <ng-template pTemplate="body" let-a>
+          <tr class="clickable" (click)="openAlert(a.district)">
+            <td><span class="sev" [class.sev-high]="a.severity==='high'" [class.sev-med]="a.severity==='medium'">{{ a.severity | titlecase }}</span></td>
+            <td><span class="row-name">{{ ds.titleCase(a.district) }}</span><i class="fa-solid fa-chevron-right drill-ic"></i></td>
+            <td>{{ a.kind }}</td>
+            <td class="detail-cell">{{ a.detail }}</td>
+          </tr>
+        </ng-template>
+        <ng-template pTemplate="emptymessage">
+          <tr><td colspan="4" class="empty">No districts breach the alert thresholds.</td></tr>
+        </ng-template>
+      </p-table>
+    </div>
+  }
+
+  <!-- ============================================================= -->
+  <!-- ==================  ACADEMIC SCORES  ======================== -->
+  <!-- ============================================================= -->
+  @if (isAcademic()) {
+    @if (!ac.loaded()) {
+      <div class="ac-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading academic scores…</div>
+    } @else {
+
+    <!-- shared academic control bar -->
+    <div class="trend-controls">
+      @if (activeSub() !== 'trend') {
+        <label class="tc-field">
+          <span>Academic Year</span>
+          <select class="metric-select" [ngModel]="ac.activeYear()" (ngModelChange)="setAcYear($event)">
+            @for (y of ac.years(); track y) { <option [value]="y">{{ y }}</option> }
+          </select>
+        </label>
+      }
+      @if (activeSub() === 'trend') {
+        <label class="tc-field">
+          <span>From</span>
+          <select class="metric-select" [ngModel]="ac.fromYearInfo().year" (ngModelChange)="setAcFromYear($event)">
+            @for (y of ac.fromYearOptions(); track y) { <option [value]="y">{{ y }}</option> }
+          </select>
+        </label>
+        <label class="tc-field">
+          <span>To</span>
+          <select class="metric-select" [ngModel]="ac.toYearInfo().year" (ngModelChange)="setAcToYear($event)">
+            @for (y of ac.toYearOptions(); track y) { <option [value]="y">{{ y }}</option> }
+          </select>
+        </label>
+      }
+      @if (activeSub() === 'trend' || activeSub() === 'comparison') {
+        <label class="tc-field">
+          <span>Metric</span>
+          <select class="metric-select" [ngModel]="ac.metric()" (ngModelChange)="setAcMetric($event)">
+            @for (m of academicMetrics; track m.value) { <option [value]="m.value">{{ m.label }}</option> }
+          </select>
+        </label>
+      }
+      @if (activeSub() === 'trend') {
+        <label class="tc-field">
+          <span>Exam Type</span>
+          <p-multiSelect [options]="ac.trendExamOptions()" [ngModel]="ac.trendExams()" (ngModelChange)="setAcTrendExams($event)"
+                         optionLabel="label" optionValue="value" placeholder="All Exam Types"
+                         display="chip" [maxSelectedLabels]="2" selectedItemsLabel="{0} exams" styleClass="ms" />
+        </label>
+        <label class="tc-field">
+          <span>Class</span>
+          <p-multiSelect [options]="ac.trendClassOptions()" [ngModel]="ac.trendClasses()" (ngModelChange)="setAcTrendClasses($event)"
+                         optionLabel="label" optionValue="value" placeholder="All Classes"
+                         display="chip" [maxSelectedLabels]="3" selectedItemsLabel="{0} classes" styleClass="ms" />
+        </label>
+        <div class="tc-rank">
+          <button [class.on]="ac.rank()==='top'" (click)="setAcRank('top')"><i class="fa-solid fa-arrow-trend-up"></i> Most improved</button>
+          <button [class.on]="ac.rank()==='bottom'" (click)="setAcRank('bottom')"><i class="fa-solid fa-arrow-trend-down"></i> Steepest decline</button>
+        </div>
+        <label class="tc-field">
+          <span>Show</span>
+          <select class="metric-select" [ngModel]="ac.count()" (ngModelChange)="setAcCount($event)">
+            @for (n of trendCountOptions; track n) { <option [value]="n">{{ n }}</option> }
+          </select>
+        </label>
+      }
+      @if (activeSub() === 'numbers') {
+        <div class="tc-rank">
+          <button [class.on]="ac.subjectSet()==='core'" (click)="setAcSubjectSet('core')">
+            <i class="fa-solid fa-book"></i> Class 6-10 (5 subjects)
+          </button>
+          <button [class.on]="ac.subjectSet()==='hs'" (click)="setAcSubjectSet('hs')">
+            <i class="fa-solid fa-flask"></i> Class 11-12 (streams)
+          </button>
+        </div>
+      }
+      <span class="ac-note"><i class="fa-solid fa-circle-info"></i>
+        <b>Scope:</b> Government, Partially Aided &amp; Fully Aided schools only.
+        Class 10 &amp; 12 = board exam (Annual only); classes 6-10 sit 5 core subjects, 11-12 are stream based.
+      </span>
+    </div>
+
+    @if (ds.canGoBack()) {
+    <div class="back-bar">
+      <button class="back-btn" (click)="ds.goUp()"><i class="fa-solid fa-arrow-left"></i> {{ ds.backLabel() }}</button>
+      <span class="back-scope">Currently viewing: <b>{{ acScopeLabel() }}</b></span>
+      <button class="home-btn" (click)="ds.goToState()"><i class="fa-solid fa-house"></i> Tamil Nadu</button>
+    </div>
+    }
+
+    <!-- ---------- ACADEMIC: NUMBERS ---------- -->
+    @if (activeSub() === 'numbers') {
+      <div class="view-title">
+        <i class="fa-solid fa-graduation-cap"></i> Academic Scores — {{ acScopeLabel() }}
+        <span class="yr">{{ ac.activeYear() }}</span>
+      </div>
+
+      @if (!ac.schoolHasData()) {
+        <div class="no-data"><i class="fa-solid fa-circle-exclamation"></i>
+          This school has no graded exam records (primary schools are excluded from academic scoring).
+        </div>
+      } @else {
+      <div class="ac-kpi">
+        @for (s of acStats(); track s.label) {
+          <div class="ac-box">
+            <div class="ac-ico"><i [class]="s.icon"></i></div>
+            <div>
+              <div class="ac-val">{{ s.value }}{{ s.suffix }}</div>
+              <div class="ac-lbl">{{ s.label }}</div>
+            </div>
+          </div>
+        }
+      </div>
+
+      <div class="ratio-row ac-counts">
+        @for (c of acCounts(); track c.label) {
+          <div class="ratio-card"><div class="ratio-val">{{ c.value }}</div><div class="ratio-lbl">{{ c.label }}</div></div>
+        }
+      </div>
+
+      <div class="grid-row row-two">
+        <div class="card">
+          <div class="card-title">
+            <i class="fa-solid fa-chart-pie"></i> Subject Profile vs State
+            <span class="count-chip">{{ ac.subjectSetLabel() }} &middot; {{ ac.activeSubjects().length }} subjects</span>
+          </div>
+          <div echarts [options]="acRadarOpt()" (chartInit)="registerChart('acRadar', $event)" class="chart tall-chart"></div>
+        </div>
+        <div class="card">
+          <div class="card-title"><i class="fa-solid fa-layer-group"></i> Mark Band Distribution — {{ ac.subjectSetLabel() }}</div>
+          <div echarts [options]="acBandOpt()" (chartInit)="registerChart('acBand', $event)" class="chart tall-chart"></div>
+        </div>
+      </div>
+
+      @if (ac.subjectSet() === 'hs' && ac.current()!.byStream.length) {
+      <div class="grid-row">
+        <div class="card">
+          <div class="card-title">
+            <i class="fa-solid fa-diagram-successor"></i> Higher Secondary Stream Comparison
+            <span class="hint">Class 11 &amp; 12 subject groups</span>
+          </div>
+          <div echarts [options]="acStreamOpt()" (chartInit)="registerChart('acStream', $event)" class="chart tall-chart"></div>
+        </div>
+      </div>
+      }
+
+      <div class="grid-row row-two">
+        <div class="card">
+          <div class="card-title"><i class="fa-solid fa-diagram-project"></i> Exam Progression (Quarterly &rarr; Annual)</div>
+          <div echarts [options]="acExamOpt()" (chartInit)="registerChart('acExam', $event)" class="chart tall-chart"></div>
+        </div>
+        <div class="card">
+          <div class="card-title">
+            <i class="fa-solid fa-chart-column"></i> Class-wise Performance
+            <span class="hint">maroon = board exam classes</span>
+          </div>
+          <div echarts [options]="acClassOpt()" (chartInit)="registerChart('acClass', $event)" class="chart tall-chart"></div>
+        </div>
+      </div>
+
+      <div class="card table-card">
+        <div class="card-title">
+          <i class="fa-solid fa-table-list"></i> Subject Detail — {{ ac.subjectSetLabel() }}
+          <span class="count-chip">{{ ac.activeSubjects().length }} subjects</span>
+        <span class="tbl-export">
+          <button class="exp-btn xls" (click)="exportTable('acSubjects','excel')" title="Download all rows as Excel"><i class="fa-solid fa-file-excel"></i> Excel</button>
+          <button class="exp-btn csv" (click)="exportTable('acSubjects','csv')" title="Download all rows as CSV"><i class="fa-solid fa-file-csv"></i> CSV</button>
+          <button class="exp-btn pdf" (click)="exportTable('acSubjects','pdf')" title="Download all rows as PDF"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+        </span>
+        </div>
+        <p-table [value]="ac.activeSubjects()" styleClass="p-datatable-sm p-datatable-striped">
+          <ng-template pTemplate="header">
+            <tr>
+              <th>Subject</th><th class="num">Average Mark</th><th class="num">Pass %</th>
+              <th class="num">Below 35</th><th class="num">35-60</th>
+              <th class="num">61-80</th><th class="num">Above 80</th><th class="num">Absentees</th>
+            </tr>
+          </ng-template>
+          <ng-template pTemplate="body" let-s>
+            <tr>
+              <td class="strong">{{ s.name }}</td>
+              <td class="num" [class.bad]="s.avg < 50" [class.good]="s.avg >= 60">{{ s.avg }}</td>
+              <td class="num" [class.bad]="s.pass < 70">{{ s.pass }}%</td>
+              <td class="num bad">{{ fmt(s.below35) }}</td>
+              <td class="num">{{ fmt(s.b35_60) }}</td>
+              <td class="num">{{ fmt(s.b61_80) }}</td>
+              <td class="num good">{{ fmt(s.above80) }}</td>
+              <td class="num">{{ fmt(s.absent) }}</td>
+            </tr>
+          </ng-template>
+        </p-table>
+      </div>
+
+      @if (ds.level() !== 'school') {
+      <div class="card table-card">
+        <div class="card-title">
+          <i class="fa-solid fa-table-list"></i> {{ ac.childLabel() }} — Academic Summary
+          <span class="hint">(click a row to drill down)</span>
+          <span class="count-chip">{{ fmt(ac.comparisonRows().length) }} total</span>
+        <span class="tbl-export">
+          <button class="exp-btn xls" (click)="exportTable('acChildren','excel')" title="Download all rows as Excel"><i class="fa-solid fa-file-excel"></i> Excel</button>
+          <button class="exp-btn csv" (click)="exportTable('acChildren','csv')" title="Download all rows as CSV"><i class="fa-solid fa-file-csv"></i> CSV</button>
+          <button class="exp-btn pdf" (click)="exportTable('acChildren','pdf')" title="Download all rows as PDF"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+        </span>
+        </div>
+        <p-table [value]="ac.comparisonRows()" [paginator]="true" [rows]="12" [rowsPerPageOptions]="[12,25,50]"
+                 [globalFilterFields]="['name']" styleClass="p-datatable-sm p-datatable-striped" #acn>
+          <ng-template pTemplate="caption">
+            <div class="tbl-caption">
+              <input type="text" class="tbl-search" placeholder="Search {{ ac.childLabel() }}..."
+                     (input)="acn.filterGlobal($any($event.target).value, 'contains')" />
+            </div>
+          </ng-template>
+          <ng-template pTemplate="header">
+            <tr>
+              <th pSortableColumn="name">Name <p-sortIcon field="name" /></th>
+              <th pSortableColumn="avgMark" class="num">Avg Mark <p-sortIcon field="avgMark" /></th>
+              <th pSortableColumn="passPct" class="num">Pass % <p-sortIcon field="passPct" /></th>
+              <th pSortableColumn="compliance" class="num">Compliance <p-sortIcon field="compliance" /></th>
+              <th pSortableColumn="weakestAvg">Weakest Subject <p-sortIcon field="weakestAvg" /></th>
+            </tr>
+          </ng-template>
+          <ng-template pTemplate="body" let-r>
+            <tr class="clickable" (click)="drillChild(r.key)">
+              <td><span class="row-name">{{ r.name }}</span><i class="fa-solid fa-chevron-right drill-ic"></i></td>
+              <td class="num" [class.bad]="r.avgMark < 50" [class.good]="r.avgMark >= 60">{{ r.avgMark }}</td>
+              <td class="num" [class.bad]="r.passPct < 70">{{ r.passPct }}%</td>
+              <td class="num" [class.bad]="r.compliance < 85">{{ r.compliance }}%</td>
+              <td>{{ r.weakest }} <span class="text-muted">({{ r.weakestAvg }})</span></td>
+            </tr>
+          </ng-template>
+          <ng-template pTemplate="emptymessage">
+            <tr><td colspan="5" class="empty">No academic records at this level.</td></tr>
+          </ng-template>
+        </p-table>
+      </div>
+      }
+      }
+    }
+
+    <!-- ---------- ACADEMIC: TREND ---------- -->
+    @if (activeSub() === 'trend') {
+      <div class="view-title">
+        <i class="fa-solid fa-chart-line"></i> Academic Trend — {{ acScopeLabel() }}
+        <span class="yr">{{ ac.rangeLabel() }}</span>
+      </div>
+
+      <div class="grid-row">
+        <div class="card">
+          <div class="card-title"><i class="fa-solid fa-arrow-trend-up"></i> Average Mark, Pass % and Compliance</div>
+          <div echarts [options]="acTrendOpt()" (chartInit)="registerChart('acTrend', $event)" class="chart tall-chart"></div>
+        </div>
+      </div>
+
+      @if (ac.childTrends().items.length) {
+      <div class="grid-row">
+        <div class="card">
+          <div class="card-title">
+            <i class="fa-solid fa-ranking-star"></i>
+            {{ ac.rank()==='top' ? 'Most Improved' : 'Steepest Decline' }} — {{ ac.metricLabel() }} by {{ ac.childLabel() }}
+            <span class="hint">click a line to drill down</span>
+            <span class="count-chip">{{ fmt(ac.childTrends().total) }} total &middot; {{ ac.childTrends().shown }} shown</span>
+          </div>
+          <div echarts [options]="acChildTrendOpt()" (chartInit)="registerChart('acChildTrend', $event)"
+               (chartClick)="onAcChildTrendClick($event)" class="chart tall-chart"></div>
+        </div>
+      </div>
+      }
+
+      @if (ac.childTrendRows().length) {
+      <div class="card table-card">
+        <div class="card-title">
+          <i class="fa-solid fa-table-list"></i>
+          {{ ac.childLabel() }} — {{ ac.metricLabel() }} change, {{ ac.rangeLabel() }}
+          <span class="hint">(click a row to drill down)</span>
+        <span class="tbl-export">
+          <button class="exp-btn xls" (click)="exportTable('acChildTrend','excel')" title="Download all rows as Excel"><i class="fa-solid fa-file-excel"></i> Excel</button>
+          <button class="exp-btn csv" (click)="exportTable('acChildTrend','csv')" title="Download all rows as CSV"><i class="fa-solid fa-file-csv"></i> CSV</button>
+          <button class="exp-btn pdf" (click)="exportTable('acChildTrend','pdf')" title="Download all rows as PDF"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+        </span>
+        </div>
+        <p-table [value]="ac.childTrendRows()" [paginator]="true" [rows]="12" [rowsPerPageOptions]="[12,25,50]"
+                 [globalFilterFields]="['name']" styleClass="p-datatable-sm p-datatable-striped" #act>
+          <ng-template pTemplate="caption">
+            <div class="tbl-caption">
+              <input type="text" class="tbl-search" placeholder="Search..."
+                     (input)="act.filterGlobal($any($event.target).value, 'contains')" />
+            </div>
+          </ng-template>
+          <ng-template pTemplate="header">
+            <tr>
+              <th pSortableColumn="name">Name <p-sortIcon field="name" /></th>
+              <th pSortableColumn="first" class="num">{{ ac.fromYearInfo().year }} <p-sortIcon field="first" /></th>
+              <th pSortableColumn="last" class="num">{{ ac.toYearInfo().year }} <p-sortIcon field="last" /></th>
+              <th pSortableColumn="diff" class="num">Change <p-sortIcon field="diff" /></th>
+            </tr>
+          </ng-template>
+          <ng-template pTemplate="body" let-r>
+            <tr class="clickable" (click)="drillChild(r.key)">
+              <td><span class="row-name">{{ r.name }}</span><i class="fa-solid fa-chevron-right drill-ic"></i></td>
+              <td class="num">{{ r.first }}{{ ac.metricSuffix() }}</td>
+              <td class="num strong">{{ r.last }}{{ ac.metricSuffix() }}</td>
+              <td class="num" [class.bad]="r.diff < 0" [class.good]="r.diff > 0">
+                <i class="fa-solid" [class.fa-arrow-down]="r.diff < 0" [class.fa-arrow-up]="r.diff > 0"></i>
+                {{ r.diff > 0 ? '+' : '' }}{{ r.diff }}{{ ac.metricSuffix() }}
+              </td>
+            </tr>
+          </ng-template>
+        </p-table>
+      </div>
+      }
+    }
+
+    <!-- ---------- ACADEMIC: COMPARISON ---------- -->
+    @if (activeSub() === 'comparison') {
+      <div class="view-title">
+        <i class="fa-solid fa-code-compare"></i> Academic Comparison
+        <span class="yr">{{ ac.activeYear() }}</span>
+      </div>
+
+      <!-- comparison sub-tabs -->
+      <div class="cmp-tabs">
+        <button [class.on]="ac.compareMode()==='districts'" (click)="setAcCompareMode('districts')">
+          <i class="fa-solid fa-map-location-dot"></i> Between {{ ac.childLabel() }}
+        </button>
+        <button [class.on]="ac.compareMode()==='exams'" (click)="setAcCompareMode('exams')">
+          <i class="fa-solid fa-clipboard-list"></i> Between Exams
+        </button>
+      </div>
+
+      <!-- ===== Between districts / blocks / schools ===== -->
+      @if (ac.compareMode() === 'districts') {
+        @if (ds.level() === 'state') {
+        <div class="grid-row">
+          <div class="card">
+            <div class="card-title">
+              <i class="fa-solid fa-table-cells"></i> Subject vs District Heatmap
+              <span class="hint">spot which subject is weak, and where</span>
+            </div>
+            <div echarts [options]="acHeatOpt()" (chartInit)="registerChart('acHeat', $event)" class="chart heat-chart"></div>
+          </div>
+        </div>
+        }
+
+        <div class="grid-row">
+          <div class="card">
+            <div class="card-title">
+              <i class="fa-solid fa-chart-simple"></i> {{ ac.metricLabel() }} ranked — click a bar to drill down
+              <span class="count-chip">{{ fmt(ac.comparisonRows().length) }} {{ ac.childLabel() }}</span>
+            </div>
+            <div echarts [options]="acCompareOpt()" (chartInit)="registerChart('acCompare', $event)"
+                 (chartClick)="onAcCompareClick($event)" class="chart rank-chart"></div>
+          </div>
+        </div>
+      }
+
+      <!-- ===== Between exams ===== -->
+      @if (ac.compareMode() === 'exams') {
+
+        <!-- Pick two sittings: class + exam each, with optional subject focus -->
+        @if (ac.examHeadToHead(); as h) {
+        <div class="h2h-picker">
+          <div class="h2h-side">
+            <div class="h2h-side-tag a">Exam A</div>
+            <label class="tc-field">
+              <span>Class</span>
+              <select class="metric-select" [ngModel]="h.a.cls" (ngModelChange)="setAcAClass($event)">
+                @for (c of ac.sittingClasses(); track c) { <option [value]="c">Class {{ c }}</option> }
+              </select>
+            </label>
+            <label class="tc-field">
+              <span>Exam</span>
+              <select class="metric-select" [ngModel]="h.a.exam" (ngModelChange)="setAcAExam($event)">
+                @for (e of ac.aExamOptions(); track e) { <option [value]="e">{{ e }}</option> }
+              </select>
+            </label>
+            @if (h.a.board) { <span class="board-tag">Board</span> }
+          </div>
+
+          <span class="h2h-vs">vs</span>
+
+          <div class="h2h-side">
+            <div class="h2h-side-tag b">Exam B</div>
+            <label class="tc-field">
+              <span>Class</span>
+              <select class="metric-select" [ngModel]="h.b.cls" (ngModelChange)="setAcBClass($event)">
+                @for (c of ac.sittingClasses(); track c) { <option [value]="c">Class {{ c }}</option> }
+              </select>
+            </label>
+            <label class="tc-field">
+              <span>Exam</span>
+              <select class="metric-select" [ngModel]="h.b.exam" (ngModelChange)="setAcBExam($event)">
+                @for (e of ac.bExamOptions(); track e) { <option [value]="e">{{ e }}</option> }
+              </select>
+            </label>
+            @if (h.b.board) { <span class="board-tag">Board</span> }
+          </div>
+
+          <label class="tc-field h2h-subj">
+            <span>Subject (optional)</span>
+            <select class="metric-select" [ngModel]="ac.subjectFilter()" (ngModelChange)="setAcSubjectFilter($event)">
+              <option value="">All subjects</option>
+              @for (s of ac.sharedSubjects(); track s) { <option [value]="s">{{ s }}</option> }
+            </select>
+          </label>
+        </div>
+
+        @if (h.mixedKind) {
+          <div class="no-data"><i class="fa-solid fa-triangle-exclamation"></i>
+            You are comparing a board exam (class {{ h.a.board ? h.a.cls : h.b.cls }}) with an internal EMIS exam — these are not like-for-like assessments.
+          </div>
+        }
+
+        <!-- head-to-head summary -->
+        <div class="h2h-cards">
+          <div class="h2h-card a">
+            <div class="h2h-lbl">{{ h.a.label }}</div>
+            <div class="h2h-row"><span>Avg Mark{{ h.focus ? ' (' + h.focus + ')' : '' }}</span><b>{{ h.headline.aAvg }}</b></div>
+            <div class="h2h-row"><span>Pass %</span><b>{{ h.headline.aPass }}%</b></div>
+            <div class="h2h-row"><span>Compliance</span><b>{{ h.a.compliance }}%</b></div>
+            <div class="h2h-row"><span>Entered</span><b>{{ fmt(h.a.updated) }}</b></div>
+          </div>
+          <div class="h2h-delta">
+            <div class="h2h-dl">Difference (B − A)</div>
+            <div class="h2h-dv" [class.good]="h.avgDiff > 0" [class.bad]="h.avgDiff < 0">
+              <i class="fa-solid" [class.fa-arrow-up]="h.avgDiff > 0" [class.fa-arrow-down]="h.avgDiff < 0"></i>
+              {{ h.avgDiff > 0 ? '+' : '' }}{{ h.avgDiff }}
+            </div>
+            <div class="h2h-dsub">avg mark{{ h.focus ? ' · ' + h.focus : '' }}</div>
+            <div class="h2h-dsub2" [class.good]="h.passDiff > 0" [class.bad]="h.passDiff < 0">
+              {{ h.passDiff > 0 ? '+' : '' }}{{ h.passDiff }}% pass
+            </div>
+          </div>
+          <div class="h2h-card b">
+            <div class="h2h-lbl">{{ h.b.label }}</div>
+            <div class="h2h-row"><span>Avg Mark{{ h.focus ? ' (' + h.focus + ')' : '' }}</span><b>{{ h.headline.bAvg }}</b></div>
+            <div class="h2h-row"><span>Pass %</span><b>{{ h.headline.bPass }}%</b></div>
+            <div class="h2h-row"><span>Compliance</span><b>{{ h.b.compliance }}%</b></div>
+            <div class="h2h-row"><span>Entered</span><b>{{ fmt(h.b.updated) }}</b></div>
+          </div>
+        </div>
+
+        <div class="grid-row">
+          <div class="card">
+            <div class="card-title">
+              <i class="fa-solid fa-code-compare"></i> {{ h.a.label }} vs {{ h.b.label }}
+              <span class="hint">{{ h.focus ? h.focus + ' only' : 'all shared subjects' }} · dashed line = difference (B − A)</span>
+            </div>
+            <div echarts [options]="acH2hOpt()" (chartInit)="registerChart('acH2h', $event)" class="chart tall-chart"></div>
+          </div>
+        </div>
+
+        <div class="card table-card">
+          <div class="card-title">
+            <i class="fa-solid fa-table-list"></i> Subject Comparison
+            <span class="count-chip">{{ fmt(h.subjects.length) }} subjects</span>
+        <span class="tbl-export">
+          <button class="exp-btn xls" (click)="exportTable('acH2hSubjects','excel')" title="Download all rows as Excel"><i class="fa-solid fa-file-excel"></i> Excel</button>
+          <button class="exp-btn csv" (click)="exportTable('acH2hSubjects','csv')" title="Download all rows as CSV"><i class="fa-solid fa-file-csv"></i> CSV</button>
+          <button class="exp-btn pdf" (click)="exportTable('acH2hSubjects','pdf')" title="Download all rows as PDF"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+        </span>
+          </div>
+          <p-table [value]="h.subjects" styleClass="p-datatable-sm p-datatable-striped">
+            <ng-template pTemplate="header">
+              <tr>
+                <th>Subject</th>
+                <th class="num">{{ h.a.label }}</th>
+                <th class="num">{{ h.b.label }}</th>
+                <th class="num">Avg Diff</th>
+                <th class="num">Pass Diff</th>
+              </tr>
+            </ng-template>
+            <ng-template pTemplate="body" let-s>
+              <tr>
+                <td class="strong">{{ s.name }}</td>
+                <td class="num">{{ s.aAvg }}</td>
+                <td class="num">{{ s.bAvg }}</td>
+                <td class="num" [class.good]="s.avgDiff > 0" [class.bad]="s.avgDiff < 0">
+                  {{ s.avgDiff > 0 ? '+' : '' }}{{ s.avgDiff }}
+                </td>
+                <td class="num" [class.good]="s.passDiff > 0" [class.bad]="s.passDiff < 0">
+                  {{ s.passDiff > 0 ? '+' : '' }}{{ s.passDiff }}%
+                </td>
+              </tr>
+            </ng-template>
+            <ng-template pTemplate="emptymessage">
+              <tr><td colspan="5" class="empty">These two exams share no common subjects.</td></tr>
+            </ng-template>
+          </p-table>
+        </div>
+        }
+        <div class="ac-kpi cmp-exam-kpi">
+          @for (e of ac.examRows(); track e.name) {
+            <div class="ac-box" [class.base-exam]="e.isBase">
+              <div>
+                <div class="ac-val">{{ e.avg }}</div>
+                <div class="ac-lbl">{{ e.name }} &middot; avg mark</div>
+                <div class="cmp-sub">
+                  Pass {{ e.pass }}%
+                  @if (!e.isBase) {
+                    <span [class.good]="e.avgDelta > 0" [class.bad]="e.avgDelta < 0">
+                      ({{ e.avgDelta > 0 ? '+' : '' }}{{ e.avgDelta }} vs {{ ac.examTypes()[0] }})
+                    </span>
+                  } @else {
+                    <span class="text-muted">(baseline)</span>
+                  }
+                </div>
+              </div>
+            </div>
+          }
+        </div>
+
+        <div class="grid-row row-two">
+          <div class="card">
+            <div class="card-title">
+              <i class="fa-solid fa-chart-column"></i> Exam vs Subject — {{ acScopeLabel() }}
+              <span class="hint">core subjects, classes 6-10</span>
+            </div>
+            <div echarts [options]="acExamSubjOpt()" (chartInit)="registerChart('acExamSubj', $event)" class="chart tall-chart"></div>
+          </div>
+          <div class="card">
+            <div class="card-title"><i class="fa-solid fa-diagram-project"></i> Exam Progression — {{ acScopeLabel() }}</div>
+            <div echarts [options]="acExamOpt()" (chartInit)="registerChart('acExam', $event)" class="chart tall-chart"></div>
+          </div>
+        </div>
+
+        <!-- Exam sittings: exam name + class -->
+        <div class="grid-row">
+          <div class="card">
+            <div class="card-title">
+              <i class="fa-solid fa-clipboard-check"></i> Exam Sittings — name &amp; class
+              <span class="hint">maroon = board exam (class 10 &amp; 12, Annual only)</span>
+              <select class="donut-select" [ngModel]="ac.examClassFilter()" (ngModelChange)="setAcExamClass($event)">
+                <option [value]="0">All classes</option>
+                @for (c of ac.examClassOptions(); track c) { <option [value]="c">Class {{ c }}</option> }
+              </select>
+            </div>
+            <div echarts [options]="acSittingOpt()" (chartInit)="registerChart('acSitting', $event)" class="chart sitting-chart"></div>
+          </div>
+        </div>
+
+        <div class="card table-card">
+          <div class="card-title">
+            <i class="fa-solid fa-table-list"></i> Exam Sitting Detail
+            <span class="count-chip">{{ fmt(ac.examSittings().length) }} sittings &middot; {{ fmt(ac.boardSittings().length) }} board</span>
+        <span class="tbl-export">
+          <button class="exp-btn xls" (click)="exportTable('acSittings','excel')" title="Download all rows as Excel"><i class="fa-solid fa-file-excel"></i> Excel</button>
+          <button class="exp-btn csv" (click)="exportTable('acSittings','csv')" title="Download all rows as CSV"><i class="fa-solid fa-file-csv"></i> CSV</button>
+          <button class="exp-btn pdf" (click)="exportTable('acSittings','pdf')" title="Download all rows as PDF"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+        </span>
+          </div>
+          <p-table [value]="ac.examSittings()" [paginator]="true" [rows]="12" [rowsPerPageOptions]="[12,20,30]"
+                   [globalFilterFields]="['label']" styleClass="p-datatable-sm p-datatable-striped" #aes>
+            <ng-template pTemplate="caption">
+              <div class="tbl-caption">
+                <input type="text" class="tbl-search" placeholder="Search exam or class..."
+                       (input)="aes.filterGlobal($any($event.target).value, 'contains')" />
+              </div>
+            </ng-template>
+            <ng-template pTemplate="header">
+              <tr>
+                <th pSortableColumn="exam">Exam Name <p-sortIcon field="exam" /></th>
+                <th pSortableColumn="cls" class="num">Class <p-sortIcon field="cls" /></th>
+                <th>Type</th>
+                <th pSortableColumn="avg" class="num">Avg Mark <p-sortIcon field="avg" /></th>
+                <th pSortableColumn="pass" class="num">Pass % <p-sortIcon field="pass" /></th>
+                <th pSortableColumn="compliance" class="num">Compliance <p-sortIcon field="compliance" /></th>
+                <th pSortableColumn="updated" class="num">Entered <p-sortIcon field="updated" /></th>
+              </tr>
+            </ng-template>
+            <ng-template pTemplate="body" let-e>
+              <tr>
+                <td class="strong">{{ e.exam }}</td>
+                <td class="num">{{ e.cls }}</td>
+                <td>
+                  <span class="sev" [class.sev-board]="e.board" [class.sev-emis]="!e.board">
+                    {{ e.board ? 'Board Exam' : 'EMIS Entry' }}
+                  </span>
+                </td>
+                <td class="num strong" [class.bad]="e.avg < 50" [class.good]="e.avg >= 60">{{ e.avg }}</td>
+                <td class="num" [class.bad]="e.pass < 70">{{ e.pass }}%</td>
+                <td class="num" [class.bad]="e.compliance < 85">{{ e.compliance }}%</td>
+                <td class="num">{{ fmt(e.updated) }}</td>
+              </tr>
+            </ng-template>
+            <ng-template pTemplate="emptymessage">
+              <tr><td colspan="7" class="empty">No exam sittings for this selection.</td></tr>
+            </ng-template>
+          </p-table>
+        </div>
+
+        <div class="card table-card">
+          <div class="card-title">
+            <i class="fa-solid fa-table-list"></i> Exam Comparison — {{ acScopeLabel() }}
+            <span class="hint">deltas measured against {{ ac.examTypes()[0] }}</span>
+        <span class="tbl-export">
+          <button class="exp-btn xls" (click)="exportTable('acExamRows','excel')" title="Download all rows as Excel"><i class="fa-solid fa-file-excel"></i> Excel</button>
+          <button class="exp-btn csv" (click)="exportTable('acExamRows','csv')" title="Download all rows as CSV"><i class="fa-solid fa-file-csv"></i> CSV</button>
+          <button class="exp-btn pdf" (click)="exportTable('acExamRows','pdf')" title="Download all rows as PDF"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+        </span>
+          </div>
+          <p-table [value]="ac.examRows()" styleClass="p-datatable-sm p-datatable-striped">
+            <ng-template pTemplate="header">
+              <tr>
+                <th>Exam Type</th><th class="num">Avg Mark</th><th class="num">vs Baseline</th>
+                <th class="num">Pass %</th><th class="num">Pass Δ</th>
+                <th class="num">Compliance</th><th class="num">Students Entered</th>
+              </tr>
+            </ng-template>
+            <ng-template pTemplate="body" let-e>
+              <tr>
+                <td class="strong">{{ e.name }} @if (e.isBase) { <span class="text-muted">(baseline)</span> }</td>
+                <td class="num strong">{{ e.avg }}</td>
+                <td class="num" [class.good]="e.avgDelta > 0" [class.bad]="e.avgDelta < 0">
+                  {{ e.isBase ? '—' : (e.avgDelta > 0 ? '+' : '') + e.avgDelta }}
+                </td>
+                <td class="num">{{ e.pass }}%</td>
+                <td class="num" [class.good]="e.passDelta > 0" [class.bad]="e.passDelta < 0">
+                  {{ e.isBase ? '—' : (e.passDelta > 0 ? '+' : '') + e.passDelta + '%' }}
+                </td>
+                <td class="num" [class.bad]="e.compliance < 85">{{ e.compliance }}%</td>
+                <td class="num">{{ fmt(e.updated) }}</td>
+              </tr>
+            </ng-template>
+          </p-table>
+        </div>
+
+        @if (ds.level() === 'state') {
+        <div class="grid-row">
+          <div class="card">
+            <div class="card-title">
+              <i class="fa-solid fa-ranking-star"></i> Which districts improve most from {{ ac.examTypes()[0] }} to {{ ac.examTypes()[ac.examTypes().length - 1] }}?
+              <span class="hint">click a bar to drill into the district</span>
+            </div>
+            <div echarts [options]="acExamGainOpt()" (chartInit)="registerChart('acExamGain', $event)"
+                 (chartClick)="onAcGainClick($event)" class="chart rank-chart"></div>
+          </div>
+        </div>
+
+        <div class="card table-card">
+          <div class="card-title">
+            <i class="fa-solid fa-table-list"></i> District Exam Improvement
+            <span class="hint">(click a row to drill down)</span>
+        <span class="tbl-export">
+          <button class="exp-btn xls" (click)="exportTable('acExamGain','excel')" title="Download all rows as Excel"><i class="fa-solid fa-file-excel"></i> Excel</button>
+          <button class="exp-btn csv" (click)="exportTable('acExamGain','csv')" title="Download all rows as CSV"><i class="fa-solid fa-file-csv"></i> CSV</button>
+          <button class="exp-btn pdf" (click)="exportTable('acExamGain','pdf')" title="Download all rows as PDF"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+        </span>
+          </div>
+          <p-table [value]="ac.examSpreadByDistrict()" [paginator]="true" [rows]="12" [rowsPerPageOptions]="[12,25,50]"
+                   [globalFilterFields]="['name']" styleClass="p-datatable-sm p-datatable-striped" #aeg>
+            <ng-template pTemplate="caption">
+              <div class="tbl-caption">
+                <input type="text" class="tbl-search" placeholder="Search district..."
+                       (input)="aeg.filterGlobal($any($event.target).value, 'contains')" />
+              </div>
+            </ng-template>
+            <ng-template pTemplate="header">
+              <tr>
+                <th pSortableColumn="name">District <p-sortIcon field="name" /></th>
+                <th pSortableColumn="quarterly" class="num">{{ ac.examTypes()[0] }} <p-sortIcon field="quarterly" /></th>
+                <th pSortableColumn="annual" class="num">{{ ac.examTypes()[ac.examTypes().length - 1] }} <p-sortIcon field="annual" /></th>
+                <th pSortableColumn="gain" class="num">Gain <p-sortIcon field="gain" /></th>
+              </tr>
+            </ng-template>
+            <ng-template pTemplate="body" let-r>
+              <tr class="clickable" (click)="openAcAlert(r.key)">
+                <td><span class="row-name">{{ r.name }}</span><i class="fa-solid fa-chevron-right drill-ic"></i></td>
+                <td class="num">{{ r.quarterly }}</td>
+                <td class="num strong">{{ r.annual }}</td>
+                <td class="num" [class.good]="r.gain > 0" [class.bad]="r.gain < 0">
+                  <i class="fa-solid" [class.fa-arrow-up]="r.gain > 0" [class.fa-arrow-down]="r.gain < 0"></i>
+                  {{ r.gain > 0 ? '+' : '' }}{{ r.gain }}
+                </td>
+              </tr>
+            </ng-template>
+          </p-table>
+        </div>
+        }
+      }
+    }
+
+    <!-- ---------- ACADEMIC: ALARMING ---------- -->
+    @if (activeSub() === 'alarming') {
+      <div class="view-title">
+        <i class="fa-solid fa-triangle-exclamation"></i> Academic Alarming Indicators ({{ fmt(ac.alertSummary().total) }})
+        <span class="yr">{{ ac.activeYear() }}</span>
+      </div>
+
+      <div class="alert-summary">
+        <div class="as-box high"><div class="as-num">{{ fmt(ac.alertSummary().high) }}</div><div class="as-lbl">High Severity</div></div>
+        <div class="as-box med"><div class="as-num">{{ fmt(ac.alertSummary().medium) }}</div><div class="as-lbl">Medium Severity</div></div>
+        <div class="as-box tot"><div class="as-num">{{ fmt(ac.alertSummary().total) }}</div><div class="as-lbl">Total Alerts</div></div>
+        <div class="as-box dist"><div class="as-num">{{ fmt(ac.alertSummary().districts) }}</div><div class="as-lbl">Districts Flagged</div></div>
+      </div>
+
+      <div class="grid-row row-two">
+        <div class="card">
+          <div class="card-title"><i class="fa-solid fa-chart-column"></i> Alerts by Category</div>
+          <div echarts [options]="acAlertOpt()" (chartInit)="registerChart('acAlerts', $event)" class="chart tall-chart"></div>
+        </div>
+        <div class="card">
+          <div class="card-title">
+            <i class="fa-solid fa-crosshairs"></i> Risk Quadrant — Compliance vs Pass %
+            <span class="hint">bottom-left = under-reporting AND under-performing</span>
+          </div>
+          <div echarts [options]="acRiskOpt()" (chartInit)="registerChart('acRisk', $event)"
+               (chartClick)="onAcRiskClick($event)" class="chart tall-chart"></div>
+        </div>
+      </div>
+
+      <div class="alert-kind-tabs">
+        <button [class.on]="alertKind() === ''" (click)="setAlertKind('')">
+          All <em>({{ fmt(alertKinds().length ? activeAlertCount() : 0) }})</em>
+        </button>
+        @for (k of alertKinds(); track k.kind) {
+          <button [class.on]="alertKind() === k.kind" (click)="setAlertKind(k.kind)">
+            {{ k.kind }} <em>({{ fmt(k.count) }})</em>
+          </button>
+        }
+      </div>
+
+      <div class="card table-card">
+        <div class="card-title">
+          <i class="fa-solid fa-list-check"></i> Academic Alert Details
+          <span class="hint">thresholds: pass &lt; 70% &middot; avg mark &lt; 50 &middot; compliance &lt; 85% &middot; any subject &lt; 40</span>
+        <span class="tbl-export">
+          <button class="exp-btn xls" (click)="exportTable('acAlerts','excel')" title="Download all rows as Excel"><i class="fa-solid fa-file-excel"></i> Excel</button>
+          <button class="exp-btn csv" (click)="exportTable('acAlerts','csv')" title="Download all rows as CSV"><i class="fa-solid fa-file-csv"></i> CSV</button>
+          <button class="exp-btn pdf" (click)="exportTable('acAlerts','pdf')" title="Download all rows as PDF"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+        </span>
+        </div>
+        <p-table [value]="filteredAlerts()" [paginator]="true" [rows]="15" [rowsPerPageOptions]="[15,30,60]"
+                 [globalFilterFields]="['district','kind']" styleClass="p-datatable-sm p-datatable-striped" #aca>
+          <ng-template pTemplate="caption">
+            <div class="tbl-caption">
+              <input type="text" class="tbl-search" placeholder="Search district or alert type..."
+                     (input)="aca.filterGlobal($any($event.target).value, 'contains')" />
+            </div>
+          </ng-template>
+          <ng-template pTemplate="header">
+            <tr>
+              <th pSortableColumn="severity">Severity <p-sortIcon field="severity" /></th>
+              <th pSortableColumn="district">District <p-sortIcon field="district" /></th>
+              <th pSortableColumn="kind">Alert <p-sortIcon field="kind" /></th>
+              <th>Measured</th>
+            </tr>
+          </ng-template>
+          <ng-template pTemplate="body" let-a>
+            <tr class="clickable" (click)="openAcAlert(a.district)">
+              <td><span class="sev" [class.sev-high]="a.severity==='high'" [class.sev-med]="a.severity==='medium'">{{ a.severity | titlecase }}</span></td>
+              <td><span class="row-name">{{ ds.titleCase(a.district) }}</span><i class="fa-solid fa-chevron-right drill-ic"></i></td>
+              <td>{{ a.kind }}</td>
+              <td class="detail-cell">{{ a.detail }}</td>
+            </tr>
+          </ng-template>
+          <ng-template pTemplate="emptymessage">
+            <tr><td colspan="4" class="empty">No districts breach the academic thresholds.</td></tr>
+          </ng-template>
+        </p-table>
+      </div>
+    }
+    }
+  }
+
+  <!-- ============================================================= -->
+  <!-- =====================  ATTENDANCE  ========================== -->
+  <!-- ============================================================= -->
+  @if (isAttendance()) {
+    @if (!at.loaded()) {
+      <div class="ac-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading attendance…</div>
+    } @else {
+
+    <!-- shared attendance control bar -->
+    <div class="trend-controls">
+      @if (activeSub() === 'numbers' || activeSub() === 'comparison') {
+        <div class="tc-rank mode-toggle">
+          <button [class.on]="!at.isDayMode()" (click)="setAtMode('period')">
+            <i class="fa-solid fa-calendar-week"></i> Period
+          </button>
+          <button [class.on]="at.isDayMode()" (click)="setAtMode('day')">
+            <i class="fa-solid fa-calendar-day"></i> Single day
+          </button>
+        </div>
+      }
+      @if (at.isDayMode() && (activeSub() === 'numbers' || activeSub() === 'comparison')) {
+        <label class="tc-field">
+          <span>Date</span>
+          <select class="metric-select" [ngModel]="at.activeDay()" (ngModelChange)="setAtDay($event)">
+            @for (d of at.dayOptions(); track d) { <option [value]="d">{{ d }}</option> }
+          </select>
+        </label>
+      } @else {
+        <label class="tc-field">
+          <span>Period</span>
+          <select class="metric-select" [ngModel]="at.window()" (ngModelChange)="setAtWindow($event)">
+            @for (w of at.windowOptions(); track w) { <option [value]="w">Last {{ w }} days</option> }
+          </select>
+        </label>
+      }
+      @if (activeSub() === 'comparison' || activeSub() === 'trend') {
+        <label class="tc-field">
+          <span>Metric</span>
+          <select class="metric-select" [ngModel]="at.metric()" (ngModelChange)="setAtMetric($event)">
+            @for (m of attendanceMetrics; track m.value) { <option [value]="m.value">{{ m.label }}</option> }
+          </select>
+        </label>
+      }
+      @if (activeSub() === 'trend') {
+        <div class="tc-rank">
+          <button [class.on]="at.rank()==='bottom'" (click)="setAtRank('bottom')"><i class="fa-solid fa-arrow-trend-down"></i> Lowest</button>
+          <button [class.on]="at.rank()==='top'" (click)="setAtRank('top')"><i class="fa-solid fa-arrow-trend-up"></i> Highest</button>
+        </div>
+        <label class="tc-field">
+          <span>Show</span>
+          <select class="metric-select" [ngModel]="at.count()" (ngModelChange)="setAtCount($event)">
+            @for (n of trendCountOptions; track n) { <option [value]="n">{{ n }}</option> }
+          </select>
+        </label>
+      }
+      <span class="ac-note"><i class="fa-solid fa-circle-info"></i>
+        <b>Scope:</b> Government, Partially Aided &amp; Fully Aided schools only. As of {{ at.asOf() }}.
+        Compliance = marked / expected school-days. Potential dropout = absent {{ at.dropoutThreshold() }}+ days in the month.
+      </span>
+    </div>
+
+    @if (ds.canGoBack()) {
+    <div class="back-bar">
+      <button class="back-btn" (click)="ds.goUp()"><i class="fa-solid fa-arrow-left"></i> {{ ds.backLabel() }}</button>
+      <span class="back-scope">Currently viewing: <b>{{ atScopeLabel() }}</b></span>
+      <button class="home-btn" (click)="ds.goToState()"><i class="fa-solid fa-house"></i> Tamil Nadu</button>
+    </div>
+    }
+
+    <!-- ---------- ATTENDANCE: NUMBERS ---------- -->
+    @if (activeSub() === 'numbers') {
+      <div class="view-title">
+        <i class="fa-solid fa-user-check"></i> Attendance — {{ atScopeLabel() }}
+        <span class="yr">{{ atWindowLabel() }}</span>
+      </div>
+
+      @if (!at.schoolHasData()) {
+        <div class="no-data"><i class="fa-solid fa-circle-exclamation"></i> No attendance records for this school.</div>
+      } @else {
+      <div class="ac-kpi at-kpi">
+        @for (s of atStats(); track s.label) {
+          <div class="ac-box">
+            <div class="ac-ico"><i [class]="s.icon"></i></div>
+            <div>
+              <div class="ac-val">{{ s.value }}{{ s.suffix }}</div>
+              <div class="ac-lbl">{{ s.label }}</div>
+            </div>
+          </div>
+        }
+      </div>
+
+      <div class="ratio-row ac-counts">
+        @for (c of atCounts(); track c.label) {
+          <div class="ratio-card"><div class="ratio-val">{{ c.value }}</div><div class="ratio-lbl">{{ c.label }}</div></div>
+        }
+      </div>
+
+      @if (ds.level() !== 'school') {
+      <div class="grid-row row-two">
+        <div class="card">
+          <div class="card-title">
+            <i class="fa-solid fa-chart-simple"></i> School Attendance Distribution
+            <span class="hint">{{ fmt(at.belowMark().schools) }} schools below 85% ({{ at.belowMark().pct }}%)</span>
+          </div>
+          <div echarts [options]="atBandOpt()" (chartInit)="registerChart('atBand', $event)" class="chart donut-chart"></div>
+        </div>
+        <div class="card">
+          <div class="card-title">
+            <i class="fa-solid fa-building-columns"></i> Attendance by School Type
+            <span class="hint">only types in scope</span>
+          </div>
+          <div echarts [options]="atMgmtOpt()" (chartInit)="registerChart('atMgmt', $event)" class="chart donut-chart"></div>
+        </div>
+      </div>
+
+      <div class="card table-card">
+        <div class="card-title">
+          <i class="fa-solid fa-table-list"></i> Attendance Distribution — {{ atScopeLabel() }}
+          <span class="hint">how many schools sit in each band</span>
+          <span class="tbl-export">
+            <button class="exp-btn xls" (click)="exportTable('atBands','excel')"><i class="fa-solid fa-file-excel"></i> Excel</button>
+            <button class="exp-btn csv" (click)="exportTable('atBands','csv')"><i class="fa-solid fa-file-csv"></i> CSV</button>
+            <button class="exp-btn pdf" (click)="exportTable('atBands','pdf')"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+          </span>
+        </div>
+        <p-table [value]="at.attendanceBands()" styleClass="p-datatable-sm p-datatable-striped">
+          <ng-template pTemplate="header">
+            <tr>
+              <th>Attendance Band</th><th class="num">Schools</th><th class="num">Share of Schools</th>
+              <th class="num">Students</th><th class="num">Share of Students</th>
+            </tr>
+          </ng-template>
+          <ng-template pTemplate="body" let-b>
+            <tr>
+              <td><span class="band-dot" [style.background]="b.color"></span>{{ b.label }}</td>
+              <td class="num">{{ fmt(b.schools) }}</td>
+              <td class="num">{{ b.pct }}%</td>
+              <td class="num">{{ fmt(b.students) }}</td>
+              <td class="num">{{ b.studentPct }}%</td>
+            </tr>
+          </ng-template>
+        </p-table>
+      </div>
+
+      <div class="card table-card">
+        <div class="card-title">
+          <i class="fa-solid fa-table-list"></i> Attendance by School Type — {{ atScopeLabel() }}
+          <span class="tbl-export">
+            <button class="exp-btn xls" (click)="exportTable('atMgmt','excel')"><i class="fa-solid fa-file-excel"></i> Excel</button>
+            <button class="exp-btn csv" (click)="exportTable('atMgmt','csv')"><i class="fa-solid fa-file-csv"></i> CSV</button>
+            <button class="exp-btn pdf" (click)="exportTable('atMgmt','pdf')"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+          </span>
+        </div>
+        <p-table [value]="at.byManagement()" styleClass="p-datatable-sm p-datatable-striped">
+          <ng-template pTemplate="header">
+            <tr>
+              <th>School Type</th><th class="num">Schools</th><th class="num">Students</th>
+              <th class="num">Attendance</th><th class="num">Compliance</th>
+              <th class="num">Teacher</th><th class="num">Dropout Risk</th>
+            </tr>
+          </ng-template>
+          <ng-template pTemplate="body" let-m>
+            <tr>
+              <td class="strong">{{ m.name }}</td>
+              <td class="num">{{ fmt(m.schools) }}</td>
+              <td class="num">{{ fmt(m.enrolled) }}</td>
+              <td class="num" [class.bad]="m.attendance < 85" [class.good]="m.attendance >= 90">{{ m.attendance }}%</td>
+              <td class="num" [class.bad]="m.compliance < 80">{{ m.compliance }}%</td>
+              <td class="num" [class.bad]="m.teacherAttendance < 90">{{ m.teacherAttendance }}%</td>
+              <td class="num" [class.bad]="m.dropoutRate > 5">{{ m.dropoutRate }}%</td>
+            </tr>
+          </ng-template>
+        </p-table>
+      </div>
+      }
+
+      <div class="grid-row donut-row-3">
+        <div class="card">
+          <div class="card-title">
+            <i class="fa-solid fa-clipboard-check"></i>
+            {{ at.isDayMode() ? 'Schools Marked vs Not Marked' : 'Marked vs Unmarked School-Days' }}
+          </div>
+          <div echarts [options]="atComplianceOpt()" (chartInit)="registerChart('atCompliance', $event)" class="chart donut-chart"></div>
+        </div>
+        <div class="card">
+          <div class="card-title"><i class="fa-solid fa-users"></i> Students Present vs Absent</div>
+          <div echarts [options]="atPresenceOpt()" (chartInit)="registerChart('atPresence', $event)" class="chart donut-chart"></div>
+        </div>
+        <div class="card">
+          <div class="card-title"><i class="fa-solid fa-calendar-week"></i> Attendance Across Periods</div>
+          <div echarts [options]="atWindowOpt()" (chartInit)="registerChart('atWindow', $event)" class="chart donut-chart"></div>
+        </div>
+      </div>
+
+      @if (!at.isDayMode()) {
+      <div class="card table-card">
+        <div class="card-title"><i class="fa-solid fa-table-list"></i> Period Breakdown — {{ atScopeLabel() }}</div>
+        <p-table [value]="at.current()!.windows" styleClass="p-datatable-sm p-datatable-striped">
+          <ng-template pTemplate="header">
+            <tr>
+              <th>Period</th><th class="num">Attendance</th><th class="num">Absentee-days</th>
+              <th class="num">Compliance</th><th class="num">Unmarked Days</th>
+            </tr>
+          </ng-template>
+          <ng-template pTemplate="body" let-w>
+            <tr [class.row-active]="w.days === at.window()">
+              <td class="strong">Last {{ w.days }} working days</td>
+              <td class="num" [class.bad]="w.attendance < 85" [class.good]="w.attendance >= 90">{{ w.attendance }}%</td>
+              <td class="num">{{ fmt(w.absentees) }}</td>
+              <td class="num" [class.bad]="w.compliance < 80">{{ w.compliance }}%</td>
+              <td class="num">{{ fmt(w.unmarked) }}</td>
+            </tr>
+          </ng-template>
+        </p-table>
+        <span class="tbl-export">
+          <button class="exp-btn xls" (click)="exportTable('atWindows','excel')" title="Download all rows as Excel"><i class="fa-solid fa-file-excel"></i> Excel</button>
+          <button class="exp-btn csv" (click)="exportTable('atWindows','csv')" title="Download all rows as CSV"><i class="fa-solid fa-file-csv"></i> CSV</button>
+          <button class="exp-btn pdf" (click)="exportTable('atWindows','pdf')" title="Download all rows as PDF"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+        </span>
+      </div>
+      } @else {
+      <div class="card table-card">
+        <div class="card-title">
+          <i class="fa-solid fa-calendar-day"></i> Day Detail — {{ at.activeDay() }}
+          <span class="hint">exact counts for the selected working day</span>
+        <span class="tbl-export">
+          <button class="exp-btn xls" (click)="exportTable('atDay','excel')" title="Download all rows as Excel"><i class="fa-solid fa-file-excel"></i> Excel</button>
+          <button class="exp-btn csv" (click)="exportTable('atDay','csv')" title="Download all rows as CSV"><i class="fa-solid fa-file-csv"></i> CSV</button>
+          <button class="exp-btn pdf" (click)="exportTable('atDay','pdf')" title="Download all rows as PDF"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+        </span>
+        </div>
+        @if (at.activeDayRecord(); as dd) {
+        <p-table [value]="[dd]" styleClass="p-datatable-sm p-datatable-striped">
+          <ng-template pTemplate="header">
+            <tr>
+              <th>Date</th><th class="num">Schools</th><th class="num">Marked</th><th class="num">Not Marked</th>
+              <th class="num">Compliance</th><th class="num">Present</th><th class="num">Absent</th>
+              <th class="num">Attendance</th><th class="num">Teacher</th>
+            </tr>
+          </ng-template>
+          <ng-template pTemplate="body" let-d>
+            <tr>
+              <td class="strong">{{ d.date }}</td>
+              <td class="num">{{ fmt(d.schools) }}</td>
+              <td class="num good">{{ fmt(d.marked) }}</td>
+              <td class="num bad">{{ fmt(d.unmarked) }}</td>
+              <td class="num" [class.bad]="d.compliance < 80">{{ d.compliance }}%</td>
+              <td class="num">{{ fmt(d.present) }}</td>
+              <td class="num">{{ fmt(d.absentees) }}</td>
+              <td class="num" [class.bad]="d.attendance < 85" [class.good]="d.attendance >= 90">{{ d.attendance }}%</td>
+              <td class="num" [class.bad]="d.teacher < 90">{{ d.teacher }}%</td>
+            </tr>
+          </ng-template>
+        </p-table>
+        } @else {
+          <div class="no-data"><i class="fa-solid fa-circle-exclamation"></i> No record for {{ at.activeDay() }} at this level.</div>
+        }
+      </div>
+      }
+
+      @if (ds.level() !== 'school') {
+      <div class="card table-card">
+        <div class="card-title">
+          <i class="fa-solid fa-table-list"></i> {{ at.childLabel() }} — Attendance Summary
+          <span class="hint">(click a row to drill down)</span>
+          <span class="count-chip">{{ fmt(at.comparisonRows().length) }} total</span>
+        <span class="tbl-export">
+          <button class="exp-btn xls" (click)="exportTable('atChildren','excel')" title="Download all rows as Excel"><i class="fa-solid fa-file-excel"></i> Excel</button>
+          <button class="exp-btn csv" (click)="exportTable('atChildren','csv')" title="Download all rows as CSV"><i class="fa-solid fa-file-csv"></i> CSV</button>
+          <button class="exp-btn pdf" (click)="exportTable('atChildren','pdf')" title="Download all rows as PDF"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+        </span>
+        </div>
+        <p-table [value]="at.comparisonRows()" [paginator]="true" [rows]="12" [rowsPerPageOptions]="[12,25,50]"
+                 [globalFilterFields]="['name']" styleClass="p-datatable-sm p-datatable-striped" #atn>
+          <ng-template pTemplate="caption">
+            <div class="tbl-caption">
+              <input type="text" class="tbl-search" placeholder="Search {{ at.childLabel() }}..."
+                     (input)="atn.filterGlobal($any($event.target).value, 'contains')" />
+            </div>
+          </ng-template>
+          <ng-template pTemplate="header">
+            <tr>
+              <th pSortableColumn="name">Name <p-sortIcon field="name" /></th>
+              <th pSortableColumn="attendance" class="num">Attendance <p-sortIcon field="attendance" /></th>
+              <th pSortableColumn="compliance" class="num">Compliance <p-sortIcon field="compliance" /></th>
+              <th pSortableColumn="teacherAttendance" class="num">Teacher <p-sortIcon field="teacherAttendance" /></th>
+              <th pSortableColumn="absentees" class="num">Absentee-days <p-sortIcon field="absentees" /></th>
+              <th pSortableColumn="dropoutRate" class="num">Dropout Risk <p-sortIcon field="dropoutRate" /></th>
+              <th pSortableColumn="dropoutRisk" class="num">Potential Dropout Students <p-sortIcon field="dropoutRisk" /></th>
+            </tr>
+          </ng-template>
+          <ng-template pTemplate="body" let-r>
+            <tr class="clickable" (click)="drillChild(r.key)">
+              <td><span class="row-name">{{ r.name }}</span><i class="fa-solid fa-chevron-right drill-ic"></i></td>
+              <td class="num" [class.bad]="r.attendance < 85" [class.good]="r.attendance >= 90">{{ r.attendance }}%</td>
+              <td class="num" [class.bad]="r.compliance < 80">{{ r.compliance }}%</td>
+              <td class="num" [class.bad]="r.teacherAttendance < 90">{{ r.teacherAttendance }}%</td>
+              <td class="num">{{ fmt(r.absentees) }}</td>
+              <td class="num" [class.bad]="r.dropoutRate > 5">{{ r.dropoutRate }}%</td>
+              <td class="num" [class.bad]="r.dropoutRate > 5">{{ fmt(r.dropoutRisk) }}</td>
+            </tr>
+          </ng-template>
+          <ng-template pTemplate="emptymessage">
+            <tr><td colspan="7" class="empty">No attendance records at this level.</td></tr>
+          </ng-template>
+        </p-table>
+      </div>
+      }
+      }
+    }
+
+    <!-- ---------- ATTENDANCE: TREND ---------- -->
+    @if (activeSub() === 'trend') {
+      <div class="view-title">
+        <i class="fa-solid fa-chart-line"></i> Attendance Trend — {{ atScopeLabel() }}
+        <span class="yr">{{ atWindowLabel() }}</span>
+      </div>
+
+      <div class="grid-row">
+        <div class="card">
+          <div class="card-title"><i class="fa-solid fa-chart-area"></i> Daily Attendance, Compliance &amp; Teacher Attendance</div>
+          <div echarts [options]="atDailyOpt()" (chartInit)="registerChart('atDaily', $event)" class="chart tall-chart"></div>
+        </div>
+      </div>
+
+      @if (at.childTrends().items.length) {
+      <div class="grid-row">
+        <div class="card">
+          <div class="card-title">
+            <i class="fa-solid fa-ranking-star"></i>
+            {{ at.rank()==='bottom' ? 'Lowest' : 'Highest' }} {{ at.childTrends().shown }} {{ at.childLabel() }} — {{ at.metricLabel() }}
+            <span class="hint">click a line to drill down</span>
+            <span class="count-chip">{{ fmt(at.childTrends().total) }} total</span>
+          </div>
+          <div echarts [options]="atTrendOpt()" (chartInit)="registerChart('atTrend', $event)"
+               (chartClick)="onAtTrendClick($event)" class="chart tall-chart"></div>
+        </div>
+      </div>
+      }
+
+      <div class="grid-row">
+        <div class="card">
+          <div class="card-title"><i class="fa-solid fa-calendar-week"></i> Attendance Across Periods (3 / 5 / 7 / 15 / 30 days)</div>
+          <div echarts [options]="atWindowOpt()" (chartInit)="registerChart('atWindow', $event)" class="chart tall-chart"></div>
+        </div>
+      </div>
+    }
+
+    <!-- ---------- ATTENDANCE: COMPARISON ---------- -->
+    @if (activeSub() === 'comparison') {
+      <div class="view-title">
+        <i class="fa-solid fa-code-compare"></i> Attendance Comparison
+        <span class="yr">{{ atWindowLabel() }}</span>
+      </div>
+
+      <div class="cmp-tabs">
+        <button [class.on]="at.compareMode()==='districts'" (click)="setAtCompareMode('districts')">
+          <i class="fa-solid fa-map-location-dot"></i> Between {{ at.childLabel() }}
+        </button>
+        <button [class.on]="at.compareMode()==='days'" (click)="setAtCompareMode('days')">
+          <i class="fa-solid fa-calendar-days"></i> Between Days
+        </button>
+      </div>
+
+      @if (at.compareMode() === 'districts') {
+      <div class="grid-row">
+        <div class="card">
+          <div class="card-title">
+            <i class="fa-solid fa-chart-simple"></i> {{ at.metricLabel() }} ranked — click a bar to drill down
+            <span class="legend-chip">
+              @if (at.metric() === 'dropoutRate') {
+                <em class="sw-bad"></em> high = worse
+                <em class="sw-good"></em> low = better
+              } @else {
+                <em class="sw-bad"></em> below state
+                <em class="sw-good"></em> at or above state
+              }
+            </span>
+            <span class="count-chip">{{ fmt(at.comparisonRows().length) }} {{ at.childLabel() }}</span>
+          </div>
+          <div echarts [options]="atCompareOpt()" (chartInit)="registerChart('atCompare', $event)"
+               (chartClick)="onAtCompareClick($event)" class="chart rank-chart"></div>
+        </div>
+      </div>
+      }
+
+      @if (at.compareMode() === 'days') {
+        @if (at.dayHeadToHead(); as h) {
+        <div class="h2h-picker">
+          <div class="h2h-side">
+            <div class="h2h-side-tag a">Day A</div>
+            <label class="tc-field">
+              <span>Date</span>
+              <select class="metric-select" [ngModel]="h.aDate" (ngModelChange)="setAtDayA($event)">
+                @for (d of at.dayOptions(); track d) { <option [value]="d">{{ d }}</option> }
+              </select>
+            </label>
+          </div>
+          <span class="h2h-vs">vs</span>
+          <div class="h2h-side">
+            <div class="h2h-side-tag b">Day B</div>
+            <label class="tc-field">
+              <span>Date</span>
+              <select class="metric-select" [ngModel]="h.bDate" (ngModelChange)="setAtDayB($event)">
+                @for (d of at.dayOptions(); track d) { <option [value]="d">{{ d }}</option> }
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <div class="h2h-cards">
+          <div class="h2h-card a">
+            <div class="h2h-lbl">{{ h.aDate }}</div>
+            <div class="h2h-row"><span>Attendance</span><b>{{ h.a.attendance }}%</b></div>
+            <div class="h2h-row"><span>Compliance</span><b>{{ h.a.compliance }}%</b></div>
+            <div class="h2h-row"><span>Teacher</span><b>{{ h.a.teacher }}%</b></div>
+            <div class="h2h-row"><span>Schools Marked</span><b>{{ fmt(h.a.marked) }}</b></div>
+            <div class="h2h-row"><span>Students Absent</span><b>{{ fmt(h.a.absentees) }}</b></div>
+          </div>
+          <div class="h2h-delta">
+            <div class="h2h-dl">Difference (B − A)</div>
+            <div class="h2h-dv" [class.good]="h.attDiff > 0" [class.bad]="h.attDiff < 0">
+              <i class="fa-solid" [class.fa-arrow-up]="h.attDiff > 0" [class.fa-arrow-down]="h.attDiff < 0"></i>
+              {{ h.attDiff > 0 ? '+' : '' }}{{ h.attDiff }}%
+            </div>
+            <div class="h2h-dsub">attendance</div>
+            <div class="h2h-dsub2" [class.good]="h.compDiff > 0" [class.bad]="h.compDiff < 0">
+              {{ h.compDiff > 0 ? '+' : '' }}{{ h.compDiff }}% compliance
+            </div>
+          </div>
+          <div class="h2h-card b">
+            <div class="h2h-lbl">{{ h.bDate }}</div>
+            <div class="h2h-row"><span>Attendance</span><b>{{ h.b.attendance }}%</b></div>
+            <div class="h2h-row"><span>Compliance</span><b>{{ h.b.compliance }}%</b></div>
+            <div class="h2h-row"><span>Teacher</span><b>{{ h.b.teacher }}%</b></div>
+            <div class="h2h-row"><span>Schools Marked</span><b>{{ fmt(h.b.marked) }}</b></div>
+            <div class="h2h-row"><span>Students Absent</span><b>{{ fmt(h.b.absentees) }}</b></div>
+          </div>
+        </div>
+
+        @if (h.children.length) {
+        <div class="grid-row">
+          <div class="card">
+            <div class="card-title">
+              <i class="fa-solid fa-code-compare"></i> {{ at.childLabel() }} attendance: {{ h.aDate }} vs {{ h.bDate }}
+              <span class="hint">dashed line = change (B − A)</span>
+            </div>
+            <div echarts [options]="atDayCmpOpt()" (chartInit)="registerChart('atDayCmp', $event)" class="chart rank-chart"></div>
+          </div>
+        </div>
+
+        <div class="card table-card">
+          <div class="card-title">
+            <i class="fa-solid fa-table-list"></i> Day-over-Day Movement by {{ at.childLabel() }}
+            <span class="hint">(click a row to drill down)</span>
+            <span class="tbl-export">
+              <button class="exp-btn xls" (click)="exportTable('atDayCmp','excel')" title="Download all rows as Excel"><i class="fa-solid fa-file-excel"></i> Excel</button>
+              <button class="exp-btn csv" (click)="exportTable('atDayCmp','csv')" title="Download all rows as CSV"><i class="fa-solid fa-file-csv"></i> CSV</button>
+              <button class="exp-btn pdf" (click)="exportTable('atDayCmp','pdf')" title="Download all rows as PDF"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+            </span>
+          </div>
+          <p-table [value]="h.children" [paginator]="true" [rows]="15" [rowsPerPageOptions]="[15,30,50]"
+                   [globalFilterFields]="['name']" styleClass="p-datatable-sm p-datatable-striped" #adc>
+            <ng-template pTemplate="caption">
+              <div class="tbl-caption">
+                <input type="text" class="tbl-search" placeholder="Search..."
+                       (input)="adc.filterGlobal($any($event.target).value, 'contains')" />
+              </div>
+            </ng-template>
+            <ng-template pTemplate="header">
+              <tr>
+                <th pSortableColumn="name">Name <p-sortIcon field="name" /></th>
+                <th pSortableColumn="aAtt" class="num">{{ h.aDate }} <p-sortIcon field="aAtt" /></th>
+                <th pSortableColumn="bAtt" class="num">{{ h.bDate }} <p-sortIcon field="bAtt" /></th>
+                <th pSortableColumn="attDiff" class="num">Attendance Change <p-sortIcon field="attDiff" /></th>
+                <th pSortableColumn="compDiff" class="num">Compliance Change <p-sortIcon field="compDiff" /></th>
+              </tr>
+            </ng-template>
+            <ng-template pTemplate="body" let-r>
+              <tr class="clickable" (click)="drillChild(r.key)">
+                <td><span class="row-name">{{ r.name }}</span><i class="fa-solid fa-chevron-right drill-ic"></i></td>
+                <td class="num">{{ r.aAtt }}%</td>
+                <td class="num">{{ r.bAtt }}%</td>
+                <td class="num" [class.good]="r.attDiff > 0" [class.bad]="r.attDiff < 0">
+                  <i class="fa-solid" [class.fa-arrow-up]="r.attDiff > 0" [class.fa-arrow-down]="r.attDiff < 0"></i>
+                  {{ r.attDiff > 0 ? '+' : '' }}{{ r.attDiff }}%
+                </td>
+                <td class="num" [class.good]="r.compDiff > 0" [class.bad]="r.compDiff < 0">
+                  {{ r.compDiff > 0 ? '+' : '' }}{{ r.compDiff }}%
+                </td>
+              </tr>
+            </ng-template>
+          </p-table>
+        </div>
+        }
+        }
+      }
+
+      @if (at.compareMode() === 'districts') {
+      <div class="card table-card">
+        <div class="card-title">
+          <i class="fa-solid fa-table-list"></i> Full Comparison — {{ atWindowLabel() }}
+          <span class="hint">(click a row to drill down)</span>
+        <span class="tbl-export">
+          <button class="exp-btn xls" (click)="exportTable('atChildren','excel')" title="Download all rows as Excel"><i class="fa-solid fa-file-excel"></i> Excel</button>
+          <button class="exp-btn csv" (click)="exportTable('atChildren','csv')" title="Download all rows as CSV"><i class="fa-solid fa-file-csv"></i> CSV</button>
+          <button class="exp-btn pdf" (click)="exportTable('atChildren','pdf')" title="Download all rows as PDF"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+        </span>
+        </div>
+        <p-table [value]="at.comparisonRows()" [paginator]="true" [rows]="15" [rowsPerPageOptions]="[15,30,50]"
+                 [globalFilterFields]="['name']" styleClass="p-datatable-sm p-datatable-striped" #atc>
+          <ng-template pTemplate="caption">
+            <div class="tbl-caption">
+              <input type="text" class="tbl-search" placeholder="Search..."
+                     (input)="atc.filterGlobal($any($event.target).value, 'contains')" />
+            </div>
+          </ng-template>
+          <ng-template pTemplate="header">
+            <tr>
+              <th pSortableColumn="name">Name <p-sortIcon field="name" /></th>
+              <th pSortableColumn="enrolled" class="num">Enrolled <p-sortIcon field="enrolled" /></th>
+              <th pSortableColumn="attendance" class="num">Attendance <p-sortIcon field="attendance" /></th>
+              <th pSortableColumn="compliance" class="num">Compliance <p-sortIcon field="compliance" /></th>
+              <th pSortableColumn="unmarked" class="num">Unmarked <p-sortIcon field="unmarked" /></th>
+              <th pSortableColumn="teacherAttendance" class="num">Teacher <p-sortIcon field="teacherAttendance" /></th>
+              <th pSortableColumn="dropoutRisk" class="num">At Risk <p-sortIcon field="dropoutRisk" /></th>
+            </tr>
+          </ng-template>
+          <ng-template pTemplate="body" let-r>
+            <tr class="clickable" (click)="drillChild(r.key)">
+              <td><span class="row-name">{{ r.name }}</span><i class="fa-solid fa-chevron-right drill-ic"></i></td>
+              <td class="num">{{ fmt(r.enrolled) }}</td>
+              <td class="num" [class.bad]="r.attendance < 85" [class.good]="r.attendance >= 90">{{ r.attendance }}%</td>
+              <td class="num" [class.bad]="r.compliance < 80">{{ r.compliance }}%</td>
+              <td class="num">{{ fmt(r.unmarked) }}</td>
+              <td class="num" [class.bad]="r.teacherAttendance < 90">{{ r.teacherAttendance }}%</td>
+              <td class="num" [class.bad]="r.dropoutRate > 5">{{ fmt(r.dropoutRisk) }} <span class="text-muted">({{ r.dropoutRate }}%)</span></td>
+            </tr>
+          </ng-template>
+        </p-table>
+      </div>
+      }
+    }
+
+    <!-- ---------- ATTENDANCE: ALARMING ---------- -->
+    @if (activeSub() === 'alarming') {
+      <div class="view-title">
+        <i class="fa-solid fa-triangle-exclamation"></i> Attendance Alarming Indicators ({{ fmt(at.alertSummary().total) }})
+        <span class="yr">{{ atWindowLabel() }}</span>
+      </div>
+
+      <div class="alert-summary">
+        <div class="as-box high"><div class="as-num">{{ fmt(at.alertSummary().high) }}</div><div class="as-lbl">High Severity</div></div>
+        <div class="as-box med"><div class="as-num">{{ fmt(at.alertSummary().medium) }}</div><div class="as-lbl">Medium Severity</div></div>
+        <div class="as-box tot"><div class="as-num">{{ fmt(at.alertSummary().total) }}</div><div class="as-lbl">Total Alerts</div></div>
+        <div class="as-box dist"><div class="as-num">{{ fmt(at.alertSummary().districts) }}</div><div class="as-lbl">Districts Flagged</div></div>
+      </div>
+
+      <div class="grid-row row-two">
+        <div class="card">
+          <div class="card-title"><i class="fa-solid fa-chart-column"></i> Alerts by Category</div>
+          <div echarts [options]="atAlertOpt()" (chartInit)="registerChart('atAlerts', $event)" class="chart tall-chart"></div>
+        </div>
+        <div class="card">
+          <div class="card-title">
+            <i class="fa-solid fa-crosshairs"></i> Compliance vs Attendance
+            <span class="hint">bottom-left = not marking AND low attendance</span>
+          </div>
+          <div echarts [options]="atRiskOpt()" (chartInit)="registerChart('atRisk', $event)"
+               (chartClick)="onAtRiskClick($event)" class="chart tall-chart"></div>
+        </div>
+      </div>
+
+      <div class="grid-row">
+        <div class="card">
+          <div class="card-title">
+            <i class="fa-solid fa-user-xmark"></i> Potential Dropouts — absent {{ at.dropoutThreshold() }}+ days in the month
+            <span class="hint">click a bar to drill into the district</span>
+          </div>
+          <div echarts [options]="atDropoutOpt()" (chartInit)="registerChart('atDropout', $event)"
+               (chartClick)="onAtDropoutClick($event)" class="chart rank-chart"></div>
+        </div>
+      </div>
+
+      <div class="alert-kind-tabs">
+        <button [class.on]="alertKind() === ''" (click)="setAlertKind('')">
+          All <em>({{ fmt(alertKinds().length ? activeAlertCount() : 0) }})</em>
+        </button>
+        @for (k of alertKinds(); track k.kind) {
+          <button [class.on]="alertKind() === k.kind" (click)="setAlertKind(k.kind)">
+            {{ k.kind }} <em>({{ fmt(k.count) }})</em>
+          </button>
+        }
+      </div>
+
+      <div class="card table-card">
+        <div class="card-title">
+          <i class="fa-solid fa-list-check"></i> Attendance Alert Details
+          <span class="hint">thresholds: compliance &lt; 80% &middot; attendance &lt; 85% &middot; teacher &lt; 90% &middot; dropout risk &gt; 5%</span>
+        <span class="tbl-export">
+          <button class="exp-btn xls" (click)="exportTable('atAlerts','excel')" title="Download all rows as Excel"><i class="fa-solid fa-file-excel"></i> Excel</button>
+          <button class="exp-btn csv" (click)="exportTable('atAlerts','csv')" title="Download all rows as CSV"><i class="fa-solid fa-file-csv"></i> CSV</button>
+          <button class="exp-btn pdf" (click)="exportTable('atAlerts','pdf')" title="Download all rows as PDF"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+        </span>
+        </div>
+        <p-table [value]="filteredAlerts()" [paginator]="true" [rows]="15" [rowsPerPageOptions]="[15,30,60]"
+                 [globalFilterFields]="['district','kind']" styleClass="p-datatable-sm p-datatable-striped" #ata>
+          <ng-template pTemplate="caption">
+            <div class="tbl-caption">
+              <input type="text" class="tbl-search" placeholder="Search district or alert type..."
+                     (input)="ata.filterGlobal($any($event.target).value, 'contains')" />
+            </div>
+          </ng-template>
+          <ng-template pTemplate="header">
+            <tr>
+              <th pSortableColumn="severity">Severity <p-sortIcon field="severity" /></th>
+              <th pSortableColumn="district">District <p-sortIcon field="district" /></th>
+              <th pSortableColumn="kind">Alert <p-sortIcon field="kind" /></th>
+              <th>Measured</th>
+            </tr>
+          </ng-template>
+          <ng-template pTemplate="body" let-a>
+            <tr class="clickable" (click)="openAtAlert(a.district)">
+              <td><span class="sev" [class.sev-high]="a.severity==='high'" [class.sev-med]="a.severity==='medium'">{{ a.severity | titlecase }}</span></td>
+              <td><span class="row-name">{{ ds.titleCase(a.district) }}</span><i class="fa-solid fa-chevron-right drill-ic"></i></td>
+              <td>{{ a.kind }}</td>
+              <td class="detail-cell">{{ a.detail }}</td>
+            </tr>
+          </ng-template>
+          <ng-template pTemplate="emptymessage">
+            <tr><td colspan="4" class="empty">No districts breach the attendance thresholds.</td></tr>
+          </ng-template>
+        </p-table>
+      </div>
+    }
+    }
+  }
+
+  <!-- ============================================================= -->
+  <!-- ==================  INFRASTRUCTURE  ========================= -->
+  <!-- ============================================================= -->
+  @if (isInfra()) {
+    @if (!inf.loaded()) {
+      <div class="ac-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading infrastructure…</div>
+    } @else {
+    <div class="infra-layout" [class.no-side]="activeSub() === 'caution'">
+      <!--
+        Caution checks span every infrastructure type at once, so the type
+        picker doesn't apply. With only a period and a source left, a full-height
+        sidebar card wastes the space — those two drop into a flat inline bar
+        above the content instead.
+      -->
+      @if (activeSub() !== 'caution') {
+      <aside class="infra-side">
+        <div class="side-head"><i class="fa-solid fa-layer-group"></i> Infrastructure Type</div>
+        @for (t of inf.types(); track t.id) {
+          <button class="side-item" [class.on]="inf.type() === t.id" (click)="setInfType(t.id)">
+            <i [class]="t.icon"></i>
+            <span>{{ t.label }}</span>
+            <i class="fa-solid fa-circle-info norms-i"
+               title="How norms are calculated for this item"
+               (click)="$event.stopPropagation(); openNormsInfo(t.id)"></i>
+          </button>
+        }
+        <div class="side-head side-head-2">
+          <i class="fa-solid fa-calendar-days"></i> {{ inf.periodLabel() }}
+        </div>
+        <select class="metric-select side-month" [ngModel]="inf.activePeriod()" (ngModelChange)="setInfPeriod($event)">
+          @for (m of inf.periods(); track m) { <option [value]="m">{{ m }}</option> }
+        </select>
+        <div class="side-head side-head-2"><i class="fa-solid fa-database"></i> Source</div>
+        <div class="side-src">
+          <button [class.on]="inf.source() === 'EMIS'" (click)="inf.setSource('EMIS')">EMIS</button>
+          <button [class.on]="inf.source() === 'UDISE+'" [disabled]="!inf.udiseReady()"
+                  (click)="inf.setSource('UDISE+')">UDISE+</button>
+        </div>
+        <div class="side-note">
+          {{ inf.activePeriod() }}<br/>
+          Norms: 1 classroom / 35 students, 1 toilet / 40, 1 urinal / 60
+        </div>
+      </aside>
+      }
+
+      <div class="infra-main">
+        @if (activeSub() === 'caution') {
+        <div class="flat-bar">
+          <span class="fb-group">
+            <span class="fb-lbl"><i class="fa-solid fa-calendar-days"></i> {{ inf.periodLabel() }}</span>
+            <select class="fb-select" [ngModel]="inf.activePeriod()" (ngModelChange)="setInfPeriod($event)">
+              @for (m of inf.periods(); track m) { <option [value]="m">{{ m }}</option> }
+            </select>
+          </span>
+          <span class="fb-sep"></span>
+          <span class="fb-group">
+            <span class="fb-lbl"><i class="fa-solid fa-database"></i> Source</span>
+            <span class="fb-seg">
+              <button [class.on]="inf.source() === 'EMIS'" (click)="inf.setSource('EMIS')">EMIS</button>
+              <button [class.on]="inf.source() === 'UDISE+'" [disabled]="!inf.udiseReady()"
+                      (click)="inf.setSource('UDISE+')">UDISE+</button>
+            </span>
+          </span>
+        </div>
+        }
+        @if (ds.canGoBack()) {
+        <div class="back-bar">
+          <button class="back-btn" (click)="ds.goUp()"><i class="fa-solid fa-arrow-left"></i> {{ ds.backLabel() }}</button>
+          <span class="back-scope">Currently viewing: <b>{{ infScopeLabel() }}</b></span>
+          <button class="home-btn" (click)="ds.goToState()"><i class="fa-solid fa-house"></i> Tamil Nadu</button>
+        </div>
+        }
+
+        <!-- ---------- INFRA: NUMBERS ---------- -->
+        @if (activeSub() === 'numbers') {
+          <div class="view-title">
+            <i class="fa-solid fa-building-columns"></i> {{ inf.typeLabel() }} — {{ infScopeLabel() }}
+            <span class="yr">{{ inf.source() }} &middot; {{ inf.activePeriod() }}</span>
+          </div>
+
+          @if (!inf.schoolHasData()) {
+            <div class="no-data"><i class="fa-solid fa-circle-exclamation"></i> No infrastructure record for this school.</div>
+          } @else {
+          <div class="ac-kpi at-kpi">
+            @for (s of infStats(); track s.label) {
+              <div class="ac-box">
+                <div class="ac-ico"><i [class]="s.icon"></i></div>
+                <div>
+                  <div class="ac-val">{{ s.value }}{{ s.suffix }}</div>
+                  <div class="ac-lbl">{{ s.label }}</div>
+                </div>
+              </div>
+            }
+          </div>
+
+          <div class="ratio-row inf-counts">
+            @for (c of infCounts(); track c.label) {
+              <div class="ratio-card"><div class="ratio-val">{{ c.value }}</div><div class="ratio-lbl">{{ c.label }}</div></div>
+            }
+          </div>
+
+          <div class="grid-row row-two">
+            <div class="card">
+              <div class="card-title">
+                <i class="fa-solid fa-clipboard-check"></i> Data Entry — {{ inf.activePeriod() }}
+                <span class="hint">{{ fmt(inf.entry().entered) }} of {{ fmt(inf.entry().expected) }} schools</span>
+              </div>
+              <div echarts [options]="infEntryDonutOpt()" (chartInit)="registerChart('infEntryDonut', $event)" class="chart donut-chart"></div>
+            </div>
+            <div class="card">
+              <div class="card-title">
+                <i class="fa-solid fa-calendar-check"></i> Data Entry Compliance by Year
+                <span class="hint">{{ inf.activePeriod() }} highlighted</span>
+              </div>
+              <div echarts [options]="infEntryTrendOpt()" (chartInit)="registerChart('infEntryTrend', $event)" class="chart donut-chart"></div>
+            </div>
+          </div>
+
+          <div class="card table-card">
+            <div class="card-title">
+              <i class="fa-solid fa-table-list"></i> Data Entry Compliance by Year
+              <span class="tbl-export">
+                <button class="exp-btn xls" (click)="exportTable('infEntry','excel')"><i class="fa-solid fa-file-excel"></i> Excel</button>
+                <button class="exp-btn csv" (click)="exportTable('infEntry','csv')"><i class="fa-solid fa-file-csv"></i> CSV</button>
+                <button class="exp-btn pdf" (click)="exportTable('infEntry','pdf')"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+              </span>
+            </div>
+            <p-table [value]="inf.entryTrend()" styleClass="p-datatable-sm p-datatable-striped">
+              <ng-template pTemplate="header">
+                <tr>
+                  <th>Period</th><th class="num">Expected</th><th class="num">Submitted</th>
+                  <th class="num">Pending</th><th class="num">Compliance</th>
+                </tr>
+              </ng-template>
+              <ng-template pTemplate="body" let-r>
+                <tr class="clickable" [class.row-active]="r.period === inf.activePeriod()" (click)="setInfPeriod(r.period)">
+                  <td class="strong">{{ r.period }}</td>
+                  <td class="num">{{ fmt(r.expected) }}</td>
+                  <td class="num good">{{ fmt(r.entered) }}</td>
+                  <td class="num bad">{{ fmt(r.notEntered) }}</td>
+                  <td class="num" [class.bad]="r.entryPct < 70" [class.good]="r.entryPct >= 85">{{ r.entryPct }}%</td>
+                </tr>
+              </ng-template>
+            </p-table>
+          </div>
+
+          <div class="grid-row row-two">
+            @if (inf.type() !== 'building') {
+            <div class="card">
+              <div class="card-title"><i class="fa-solid fa-scale-balanced"></i> {{ inf.typeLabel() }} vs Norms</div>
+              <div echarts [options]="infAvailOpt()" (chartInit)="registerChart('infAvail', $event)" class="chart donut-chart"></div>
+            </div>
+            }
+            <div class="card">
+              <div class="card-title"><i class="fa-solid fa-screwdriver-wrench"></i> {{ inf.typeLabel() }} Condition</div>
+              <div echarts [options]="infCondOpt()" (chartInit)="registerChart('infCond', $event)" class="chart donut-chart"></div>
+            </div>
+          </div>
+
+          <div class="grid-row">
+            <div class="card">
+              <div class="card-title">
+                <i class="fa-solid fa-chart-column"></i> All Infrastructure Types — Available vs Shortfall
+                <span class="hint">pick a type in the sidebar to focus</span>
+              </div>
+              <div echarts [options]="infOverviewOpt()" (chartInit)="registerChart('infOverview', $event)" class="chart tall-chart"></div>
+            </div>
+          </div>
+
+          <div class="card table-card">
+            <div class="card-title">
+              <i class="fa-solid fa-table-list"></i> Infrastructure Overview — {{ infScopeLabel() }}
+              <span class="tbl-export">
+                <button class="exp-btn xls" (click)="exportTable('infTypes','excel')"><i class="fa-solid fa-file-excel"></i> Excel</button>
+                <button class="exp-btn csv" (click)="exportTable('infTypes','csv')"><i class="fa-solid fa-file-csv"></i> CSV</button>
+                <button class="exp-btn pdf" (click)="exportTable('infTypes','pdf')"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+              </span>
+            </div>
+            <p-table [value]="inf.allTypes()" styleClass="p-datatable-sm p-datatable-striped">
+              <ng-template pTemplate="header">
+                <tr>
+                  <th>Type</th><th class="num">Available</th><th class="num">Norms</th>
+                  <th class="num">Shortfall</th><th class="num">Surplus</th>
+                  <th class="num">Availability</th><th class="num">Coverage</th><th class="num">Good</th>
+                </tr>
+              </ng-template>
+              <ng-template pTemplate="body" let-r>
+                <tr class="clickable" [class.row-active]="r.id === inf.type()" (click)="setInfType(r.id)">
+                  <td><i [class]="r.icon" class="type-ico"></i> <span class="row-name">{{ r.label }}</span></td>
+                  <td class="num">{{ fmt(r.available) }}</td>
+                  <td class="num">{{ fmt(r.norms) }}</td>
+                  <td class="num bad">{{ fmt(r.required) }}</td>
+                  <td class="num good">{{ fmt(r.surplus) }}</td>
+                  <td class="num" [class.bad]="r.availabilityPct < 85" [class.good]="r.availabilityPct >= 100">{{ r.availabilityPct }}%</td>
+                  <td class="num" [class.bad]="r.coveragePct < 75">{{ r.coveragePct }}%</td>
+                  <td class="num" [class.bad]="r.goodPct < 70">{{ r.goodPct }}%</td>
+                </tr>
+              </ng-template>
+            </p-table>
+          </div>
+
+          @if (ds.level() !== 'school') {
+          <div class="card table-card">
+            <div class="card-title">
+              <i class="fa-solid fa-table-list"></i> {{ inf.typeLabel() }} by {{ inf.childLabel() }}
+              <span class="hint">(click a row to drill down)</span>
+              <span class="tbl-export">
+                <button class="exp-btn xls" (click)="exportTable('infChildren','excel')"><i class="fa-solid fa-file-excel"></i> Excel</button>
+                <button class="exp-btn csv" (click)="exportTable('infChildren','csv')"><i class="fa-solid fa-file-csv"></i> CSV</button>
+                <button class="exp-btn pdf" (click)="exportTable('infChildren','pdf')"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+              </span>
+            </div>
+            <p-table [value]="inf.comparisonRows()" [paginator]="true" [rows]="12" [rowsPerPageOptions]="[12,25,50]"
+                     [globalFilterFields]="['name']" styleClass="p-datatable-sm p-datatable-striped" #ifn>
+              <ng-template pTemplate="caption">
+                <div class="tbl-caption">
+                  <input type="text" class="tbl-search" placeholder="Search {{ inf.childLabel() }}..."
+                         (input)="ifn.filterGlobal($any($event.target).value, 'contains')" />
+                </div>
+              </ng-template>
+              <ng-template pTemplate="header">
+                <tr>
+                  <th pSortableColumn="name">Name <p-sortIcon field="name" /></th>
+                  <th pSortableColumn="available" class="num">Available <p-sortIcon field="available" /></th>
+                  <th pSortableColumn="norms" class="num">Norms <p-sortIcon field="norms" /></th>
+                  <th pSortableColumn="required" class="num">Shortfall <p-sortIcon field="required" /></th>
+                  <th pSortableColumn="availabilityPct" class="num">Availability <p-sortIcon field="availabilityPct" /></th>
+                  <th pSortableColumn="goodPct" class="num">Good <p-sortIcon field="goodPct" /></th>
+                  <th pSortableColumn="gapPct" class="num">Gap <p-sortIcon field="gapPct" /></th>
+                </tr>
+              </ng-template>
+              <ng-template pTemplate="body" let-r>
+                <tr class="clickable" (click)="drillChild(r.key)">
+                  <td><span class="row-name">{{ r.name }}</span><i class="fa-solid fa-chevron-right drill-ic"></i></td>
+                  <td class="num">{{ fmt(r.available) }}</td>
+                  <td class="num">{{ fmt(r.norms) }}</td>
+                  <td class="num bad">{{ fmt(r.required) }}</td>
+                  <td class="num" [class.bad]="r.availabilityPct < 85" [class.good]="r.availabilityPct >= 100">{{ r.availabilityPct }}%</td>
+                  <td class="num" [class.bad]="r.goodPct < 70">{{ r.goodPct }}%</td>
+                  <td class="num" [class.bad]="r.gapPct > 20">{{ r.gapPct }}%</td>
+                </tr>
+              </ng-template>
+              <ng-template pTemplate="emptymessage">
+                <tr><td colspan="7" class="empty">No infrastructure records at this level.</td></tr>
+              </ng-template>
+            </p-table>
+          </div>
+          }
+          }
+        }
+
+        <!-- ---------- INFRA: COMPARISON ---------- -->
+        @if (activeSub() === 'comparison') {
+          <div class="view-title">
+            <i class="fa-solid fa-code-compare"></i> {{ inf.typeLabel() }} Comparison — {{ inf.childLabel() }}
+            <span class="yr">{{ inf.source() }}</span>
+          </div>
+
+          <div class="trend-controls">
+            <label class="tc-field">
+              <span>Metric</span>
+              <select class="metric-select" [ngModel]="inf.metric()" (ngModelChange)="setInfMetric($event)">
+                @for (m of infraMetrics; track m.value) { <option [value]="m.value">{{ m.label }}</option> }
+              </select>
+            </label>
+            <span class="ac-note"><i class="fa-solid fa-circle-info"></i>
+              Shortfall Gap is the one metric where a lower value is better.
+            </span>
+          </div>
+
+          <div class="grid-row">
+            <div class="card">
+              <div class="card-title">
+                <i class="fa-solid fa-chart-simple"></i> {{ inf.metricLabel() }} ranked — click a bar to drill down
+                <span class="legend-chip">
+                  @if (inf.metricLowerIsBetter()) {
+                    <em class="sw-bad"></em> high = worse <em class="sw-good"></em> low = better
+                  } @else {
+                    <em class="sw-bad"></em> below state <em class="sw-good"></em> at or above state
+                  }
+                </span>
+                <span class="count-chip">{{ fmt(inf.comparisonRows().length) }} {{ inf.childLabel() }}</span>
+              </div>
+              <div echarts [options]="infCompareOpt()" (chartInit)="registerChart('infCompare', $event)"
+                   (chartClick)="onInfCompareClick($event)" class="chart rank-chart"></div>
+            </div>
+          </div>
+
+          <div class="card table-card">
+            <div class="card-title">
+              <i class="fa-solid fa-table-list"></i> {{ inf.typeLabel() }} — Full Comparison
+              <span class="tbl-export">
+                <button class="exp-btn xls" (click)="exportTable('infChildren','excel')"><i class="fa-solid fa-file-excel"></i> Excel</button>
+                <button class="exp-btn csv" (click)="exportTable('infChildren','csv')"><i class="fa-solid fa-file-csv"></i> CSV</button>
+                <button class="exp-btn pdf" (click)="exportTable('infChildren','pdf')"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+              </span>
+            </div>
+            <p-table [value]="inf.comparisonRows()" [paginator]="true" [rows]="15" [rowsPerPageOptions]="[15,30,50]"
+                     [globalFilterFields]="['name']" styleClass="p-datatable-sm p-datatable-striped" #ifc>
+              <ng-template pTemplate="caption">
+                <div class="tbl-caption">
+                  <input type="text" class="tbl-search" placeholder="Search..."
+                         (input)="ifc.filterGlobal($any($event.target).value, 'contains')" />
+                </div>
+              </ng-template>
+              <ng-template pTemplate="header">
+                <tr>
+                  <th pSortableColumn="name">Name <p-sortIcon field="name" /></th>
+                  <th pSortableColumn="available" class="num">Available <p-sortIcon field="available" /></th>
+                  <th pSortableColumn="norms" class="num">Norms <p-sortIcon field="norms" /></th>
+                  <th pSortableColumn="required" class="num">Shortfall <p-sortIcon field="required" /></th>
+                  <th pSortableColumn="availabilityPct" class="num">Availability <p-sortIcon field="availabilityPct" /></th>
+                  <th pSortableColumn="coveragePct" class="num">Coverage <p-sortIcon field="coveragePct" /></th>
+                  <th pSortableColumn="goodPct" class="num">Good <p-sortIcon field="goodPct" /></th>
+                </tr>
+              </ng-template>
+              <ng-template pTemplate="body" let-r>
+                <tr class="clickable" (click)="drillChild(r.key)">
+                  <td><span class="row-name">{{ r.name }}</span><i class="fa-solid fa-chevron-right drill-ic"></i></td>
+                  <td class="num">{{ fmt(r.available) }}</td>
+                  <td class="num">{{ fmt(r.norms) }}</td>
+                  <td class="num bad">{{ fmt(r.required) }}</td>
+                  <td class="num" [class.bad]="r.availabilityPct < 85">{{ r.availabilityPct }}%</td>
+                  <td class="num" [class.bad]="r.coveragePct < 75">{{ r.coveragePct }}%</td>
+                  <td class="num" [class.bad]="r.goodPct < 70">{{ r.goodPct }}%</td>
+                </tr>
+              </ng-template>
+            </p-table>
+          </div>
+        }
+
+        <!-- ---------- INFRA: ALARMING ---------- -->
+        @if (activeSub() === 'alarming') {
+          <div class="view-title">
+            <i class="fa-solid fa-triangle-exclamation"></i> Infrastructure Alarming Indicators ({{ fmt(inf.alertSummary().total) }})
+            <span class="yr">{{ inf.source() }} &middot; across all types</span>
+          </div>
+
+          <div class="alert-summary">
+            <div class="as-box high"><div class="as-num">{{ fmt(inf.alertSummary().high) }}</div><div class="as-lbl">High Severity</div></div>
+            <div class="as-box med"><div class="as-num">{{ fmt(inf.alertSummary().medium) }}</div><div class="as-lbl">Medium Severity</div></div>
+            <div class="as-box tot"><div class="as-num">{{ fmt(inf.alertSummary().total) }}</div><div class="as-lbl">Total Alerts</div></div>
+            <div class="as-box dist"><div class="as-num">{{ fmt(inf.alertSummary().districts) }}</div><div class="as-lbl">Districts Flagged</div></div>
+          </div>
+
+          <div class="grid-row">
+            <div class="card">
+              <div class="card-title"><i class="fa-solid fa-chart-column"></i> Alerts by Category</div>
+              <div echarts [options]="infAlertOpt()" (chartInit)="registerChart('infAlerts', $event)" class="chart tall-chart"></div>
+            </div>
+          </div>
+
+          <div class="grid-row row-two">
+            <div class="card">
+              <div class="card-title">
+                <i class="fa-solid fa-clipboard-check"></i> Data Entry Compliance by District — {{ inf.activePeriod() }}
+                <span class="hint">click a bar to drill in &middot; worst first</span>
+              </div>
+              <div echarts [options]="infEntryRankOpt()" (chartInit)="registerChart('infEntryRank', $event)"
+                   (chartClick)="onInfEntryClick($event)" class="chart rank-chart"></div>
+            </div>
+            <div class="card">
+              <div class="card-title">
+                <i class="fa-solid fa-ranking-star"></i> {{ inf.typeLabel() }} Shortfall by District
+                <span class="hint">click a bar to drill in</span>
+              </div>
+              <div echarts [options]="infGapOpt()" (chartInit)="registerChart('infGap', $event)"
+                   (chartClick)="onInfGapClick($event)" class="chart rank-chart"></div>
+            </div>
+          </div>
+
+          <div class="card table-card">
+            <div class="card-title">
+              <i class="fa-solid fa-table-list"></i> Data Entry Compliance by District — {{ inf.activePeriod() }}
+              <span class="hint">(click a row to drill down)</span>
+              <span class="tbl-export">
+                <button class="exp-btn xls" (click)="exportTable('infEntryRank','excel')"><i class="fa-solid fa-file-excel"></i> Excel</button>
+                <button class="exp-btn csv" (click)="exportTable('infEntryRank','csv')"><i class="fa-solid fa-file-csv"></i> CSV</button>
+                <button class="exp-btn pdf" (click)="exportTable('infEntryRank','pdf')"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+              </span>
+            </div>
+            <p-table [value]="inf.entryRanking()" [paginator]="true" [rows]="12" [rowsPerPageOptions]="[12,25,50]"
+                     [globalFilterFields]="['name']" styleClass="p-datatable-sm p-datatable-striped" #ife>
+              <ng-template pTemplate="caption">
+                <div class="tbl-caption">
+                  <input type="text" class="tbl-search" placeholder="Search district..."
+                         (input)="ife.filterGlobal($any($event.target).value, 'contains')" />
+                </div>
+              </ng-template>
+              <ng-template pTemplate="header">
+                <tr>
+                  <th pSortableColumn="name">District <p-sortIcon field="name" /></th>
+                  <th pSortableColumn="expected" class="num">Expected <p-sortIcon field="expected" /></th>
+                  <th pSortableColumn="entered" class="num">Submitted <p-sortIcon field="entered" /></th>
+                  <th pSortableColumn="notEntered" class="num">Pending <p-sortIcon field="notEntered" /></th>
+                  <th pSortableColumn="entryPct" class="num">Compliance <p-sortIcon field="entryPct" /></th>
+                </tr>
+              </ng-template>
+              <ng-template pTemplate="body" let-r>
+                <tr class="clickable" (click)="drillChild(r.key)">
+                  <td><span class="row-name">{{ r.name }}</span><i class="fa-solid fa-chevron-right drill-ic"></i></td>
+                  <td class="num">{{ fmt(r.expected) }}</td>
+                  <td class="num good">{{ fmt(r.entered) }}</td>
+                  <td class="num bad">{{ fmt(r.notEntered) }}</td>
+                  <td class="num" [class.bad]="r.entryPct < 70" [class.good]="r.entryPct >= 85">{{ r.entryPct }}%</td>
+                </tr>
+              </ng-template>
+            </p-table>
+          </div>
+
+          <div class="alert-kind-tabs">
+            <button [class.on]="alertKind() === ''" (click)="setAlertKind('')">
+              All <em>({{ fmt(inf.alertSummary().total) }})</em>
+            </button>
+            @for (k of alertKinds(); track k.kind) {
+              <button [class.on]="alertKind() === k.kind" (click)="setAlertKind(k.kind)">
+                {{ k.kind }} <em>({{ fmt(k.count) }})</em>
+              </button>
+            }
+          </div>
+
+          <div class="card table-card">
+            <div class="card-title">
+              <i class="fa-solid fa-list-check"></i> Infrastructure Alert Details
+              <span class="hint">thresholds: availability &lt; 85% of norms &middot; good condition &lt; 70% &middot; coverage &lt; 75%</span>
+              <span class="tbl-export">
+                <button class="exp-btn xls" (click)="exportTable('infAlerts','excel')"><i class="fa-solid fa-file-excel"></i> Excel</button>
+                <button class="exp-btn csv" (click)="exportTable('infAlerts','csv')"><i class="fa-solid fa-file-csv"></i> CSV</button>
+                <button class="exp-btn pdf" (click)="exportTable('infAlerts','pdf')"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+              </span>
+            </div>
+            <p-table [value]="filteredAlerts()" [paginator]="true" [rows]="15" [rowsPerPageOptions]="[15,30,60]"
+                     [globalFilterFields]="['district','kind']" styleClass="p-datatable-sm p-datatable-striped" #ifa>
+              <ng-template pTemplate="caption">
+                <div class="tbl-caption">
+                  <input type="text" class="tbl-search" placeholder="Search district or alert type..."
+                         (input)="ifa.filterGlobal($any($event.target).value, 'contains')" />
+                </div>
+              </ng-template>
+              <ng-template pTemplate="header">
+                <tr>
+                  <th pSortableColumn="severity">Severity <p-sortIcon field="severity" /></th>
+                  <th pSortableColumn="district">District <p-sortIcon field="district" /></th>
+                  <th pSortableColumn="kind">Alert <p-sortIcon field="kind" /></th>
+                  <th>Measured</th>
+                </tr>
+              </ng-template>
+              <ng-template pTemplate="body" let-a>
+                <tr class="clickable" (click)="openInfAlert(a)">
+                  <td><span class="sev" [class.sev-high]="a.severity==='high'" [class.sev-med]="a.severity==='medium'">{{ a.severity | titlecase }}</span></td>
+                  <td><span class="row-name">{{ ds.titleCase(a.district) }}</span><i class="fa-solid fa-chevron-right drill-ic"></i></td>
+                  <td>{{ a.kind }}</td>
+                  <td class="detail-cell">{{ a.detail }}</td>
+                </tr>
+              </ng-template>
+              <ng-template pTemplate="emptymessage">
+                <tr><td colspan="4" class="empty">No districts breach the infrastructure thresholds.</td></tr>
+              </ng-template>
+            </p-table>
+          </div>
+        }
+      </div>
+    </div>
+    }
+  }
+
+    <!-- ---------- CLASS 1 ENROLMENT MONITOR ---------- -->
+    @if (isClass1()) {
+      <div class="view-title">
+        <i class="fa-solid fa-baby-carriage"></i> Class 1 Entry Monitor — {{ c1.scopeLabel() }}
+        <span class="yr">{{ c1.currentYear() }} &middot; projection to {{ c1.projectionYear() }}</span>
+      </div>
+
+      @if (ds.canGoBack()) {
+      <div class="back-bar">
+        <button class="back-btn" (click)="ds.goUp()"><i class="fa-solid fa-arrow-left"></i> {{ ds.backLabel() }}</button>
+        <span class="back-scope">Currently viewing: <b>{{ c1.scopeLabel() }}</b></span>
+        <button class="home-btn" (click)="ds.goToState()"><i class="fa-solid fa-house"></i> Tamil Nadu</button>
+      </div>
+      }
+
+      @if (!c1.rows().length) {
+        <div class="no-data"><i class="fa-solid fa-circle-exclamation"></i> No Class 1 monitor data for this scope.</div>
+      } @else {
+        <div class="ac-kpi at-kpi">
+          @for (k of c1Kpis(); track k.label) {
+            <div class="ac-box">
+              <div class="ac-ico">
+                <i class="fa-solid" [class.fa-arrow-trend-down]="k.down" [class.fa-child-reaching]="!k.down"></i>
+              </div>
+              <div>
+                <div class="ac-val" [class.neg]="k.down">{{ k.value }}</div>
+                <div class="ac-lbl">{{ k.label }}</div>
+              </div>
+            </div>
+          }
+        </div>
+
+        <div class="card">
+          <div class="card-title">
+            <i class="fa-solid fa-chart-line"></i> {{ c1ChartTitle() }}
+            <span class="hint">expected from births ~6 years earlier vs actual EMIS Class 1 enrolment</span>
+          </div>
+          <div echarts [options]="c1MonitorOpt()" (chartInit)="registerChart('class1Monitor', $event)"
+               class="chart tall-chart"></div>
+          <p class="caution-note">
+            <i class="fa-solid fa-circle-info"></i> {{ c1.note() }}
+          </p>
+        </div>
+
+        <div class="card table-card">
+          <div class="card-title">
+            <i class="fa-solid fa-table-list"></i> Births → Class 1 by academic year
+          </div>
+          <p-table [value]="c1.rows()" styleClass="p-datatable-sm" [scrollable]="true" scrollHeight="360px">
+            <ng-template pTemplate="header">
+              <tr>
+                <th>Academic Year</th>
+                <th>Birth Year</th>
+                <th class="num">Births</th>
+                <th class="num">Expected Class 1</th>
+                <th class="num">Actual Class 1 (EMIS)</th>
+                <th>Status</th>
+              </tr>
+            </ng-template>
+            <ng-template pTemplate="body" let-r>
+              <tr>
+                <td>{{ r.year }}</td>
+                <td>{{ r.birthYear }}</td>
+                <td class="num">{{ fmt(r.births) }}</td>
+                <td class="num">{{ fmt(r.expected) }}</td>
+                <td class="num">{{ r.actual === null ? '—' : fmt(r.actual) }}</td>
+                <td>{{ r.projected ? 'Projected' : 'Recorded' }}</td>
+              </tr>
+            </ng-template>
+          </p-table>
+        </div>
+      }
+    }
+
+    <!-- ---------- CAUTION (all dashboards) ---------- -->
+    @if (activeSub() === 'caution' && !isClass1()) {
+      <div class="view-title">
+        <i class="fa-solid fa-circle-exclamation"></i> Caution — {{ ds.titleCase(ds.scopeLabel()) }}
+        <span class="yr">{{ fmt(cautionTotal()) }} schools flagged</span>
+      </div>
+
+      <p class="caution-note">
+        <i class="fa-solid fa-circle-info"></i>
+        Schools failing a hard check — a facility, a figure or a submission that is zero — rather
+        than merely scoring below average. Every list below downloads in full, school by school.
+        @if (isInfra()) {
+          <strong>Facility checks cover only the {{ fmt(inf.entry().entered) }} schools that
+          submitted for {{ inf.activePeriod() }};</strong> schools yet to report are listed
+          separately so missing data is not mistaken for a missing facility.
+        }
+        @if (isAcademic()) {
+          <strong>Schools with zero mark entry are excluded from every average shown elsewhere,</strong>
+          so a high district average can still hide schools that reported nothing.
+        }
+        @if (isAttendance()) {
+          <strong>Schools that never marked attendance contribute nothing to the attendance
+          percentages shown elsewhere,</strong> so they are invisible outside this view.
+        }
+      </p>
+
+      @if (!cautionActive().length) {
+        <div class="no-data"><i class="fa-solid fa-circle-check"></i> No caution conditions found in this scope.</div>
+      } @else {
+
+      <div class="caution-grid">
+        @for (c of cautionActive(); track c.id) {
+          <button class="caution-tile" [class.sel]="cautionCheck()?.id === c.id"
+                  [class.high]="c.severity === 'high'" (click)="setCaution(c.id)">
+            <div class="ct-top">
+              <i [class]="c.icon"></i>
+              <span class="ct-count">{{ fmt(c.count) }}</span>
+            </div>
+            <div class="ct-label">{{ c.label }}</div>
+            <div class="ct-hint">{{ c.hint }}</div>
+          </button>
+        }
+      </div>
+
+      @if (cautionCheck(); as c) {
+      <div class="card table-card">
+        <div class="card-title">
+          <i [class]="c.icon"></i> {{ c.label }}
+          <span class="hint">{{ c.hint }}</span>
+          <span class="count-chip" [class.bad-chip]="c.severity === 'high'">{{ fmt(c.count) }} schools</span>
+          <span class="tbl-export">
+            <button class="exp-btn xls" (click)="exportTable('caution','excel')"
+                    title="Download the full school list as Excel"><i class="fa-solid fa-file-excel"></i> Excel</button>
+            <button class="exp-btn csv" (click)="exportTable('caution','csv')"
+                    title="Download the full school list as CSV"><i class="fa-solid fa-file-csv"></i> CSV</button>
+            <button class="exp-btn pdf" (click)="exportTable('caution','pdf')"
+                    title="Download the full school list as PDF"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+          </span>
+        </div>
+        <p-table [value]="cautionRows()" [paginator]="true" [rows]="15" [rowsPerPageOptions]="[15,30,60]"
+                 [globalFilterFields]="['school','district','block','udise']"
+                 styleClass="p-datatable-sm p-datatable-striped" #ctb>
+          <ng-template pTemplate="caption">
+            <div class="tbl-caption">
+              <input type="text" class="tbl-search" placeholder="Search school, district, block or UDISE..."
+                     (input)="ctb.filterGlobal($any($event.target).value, 'contains')" />
+            </div>
+          </ng-template>
+          <ng-template pTemplate="header">
+            <tr>
+              <th pSortableColumn="district">District <p-sortIcon field="district" /></th>
+              <th pSortableColumn="block">Block <p-sortIcon field="block" /></th>
+              <th pSortableColumn="school">School <p-sortIcon field="school" /></th>
+              <th pSortableColumn="udise">UDISE <p-sortIcon field="udise" /></th>
+              <th pSortableColumn="mgmt">Management <p-sortIcon field="mgmt" /></th>
+              <th pSortableColumn="students" class="num">Students <p-sortIcon field="students" /></th>
+              <th>Finding</th>
+            </tr>
+          </ng-template>
+          <ng-template pTemplate="body" let-r>
+            <tr>
+              <td>{{ r.district }}</td>
+              <td>{{ r.block }}</td>
+              <td class="strong">{{ r.school }}</td>
+              <td class="mono">{{ r.udise }}</td>
+              <td class="small-cell">{{ r.mgmt }}</td>
+              <td class="num">{{ fmt(r.students) }}</td>
+              <td [class.bad]="c.severity === 'high'">{{ r.detail }}</td>
+            </tr>
+          </ng-template>
+          <ng-template pTemplate="emptymessage">
+            <tr><td colspan="7" class="empty">No schools match this check in the current scope.</td></tr>
+          </ng-template>
+        </p-table>
+      </div>
+      }
+
+      <div class="card table-card">
+        <div class="card-title">
+          <i class="fa-solid fa-table-list"></i> All Caution Checks — {{ ds.titleCase(ds.scopeLabel()) }}
+          <span class="hint">counts across every check</span>
+          <span class="tbl-export">
+            <button class="exp-btn xls" (click)="exportTable('cautionSummary','excel')"><i class="fa-solid fa-file-excel"></i> Excel</button>
+            <button class="exp-btn csv" (click)="exportTable('cautionSummary','csv')"><i class="fa-solid fa-file-csv"></i> CSV</button>
+            <button class="exp-btn pdf" (click)="exportTable('cautionSummary','pdf')"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+          </span>
+        </div>
+        <p-table [value]="cautionChecks()" styleClass="p-datatable-sm p-datatable-striped">
+          <ng-template pTemplate="header">
+            <tr><th>Check</th><th>Severity</th><th class="num">Schools</th><th>What it means</th></tr>
+          </ng-template>
+          <ng-template pTemplate="body" let-c>
+            <tr class="clickable" [class.row-active]="cautionCheck()?.id === c.id" (click)="setCaution(c.id)">
+              <td class="strong"><i [class]="c.icon" class="ct-ico"></i> {{ c.label }}</td>
+              <td><span class="sev" [class.sev-high]="c.severity === 'high'">{{ c.severity }}</span></td>
+              <td class="num" [class.bad]="c.count > 0">{{ fmt(c.count) }}</td>
+              <td class="small-cell">{{ c.hint }}</td>
+            </tr>
+          </ng-template>
+        </p-table>
+      </div>
+      }
+    }
+  </div>
+
+  <footer class="app-footer">
+    EMIS demo dashboard &middot; Tamil Nadu school enrolment {{ ds.data()!.years[0] }} to {{ ds.data()!.currentYear }} &middot;
+    {{ fmt(ds.data()!.districts.length) }} districts, {{ fmt(ds.data()!.blocks.length) }} blocks &middot; aggregated locally
+  </footer>
+
+  <!-- ===== Download format chooser ===== -->
+  @if (downloadTarget()) {
+  <div class="dl-backdrop" (click)="closeDownload()">
+    <div class="dl-modal" (click)="$event.stopPropagation()">
+      <div class="dl-head">
+        <i class="fa-solid fa-download"></i> Download Chart
+        <button class="dl-x" (click)="closeDownload()"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="dl-name">
+        <span>File name</span>
+        <b>{{ downloadTarget()!.title }}</b>
+      </div>
+      <div class="dl-opts">
+        <button class="dl-opt pdf" [disabled]="downloading()" (click)="download('pdf')">
+          <i class="fa-solid fa-file-pdf"></i><span>PDF</span><em>.pdf</em>
+        </button>
+        <button class="dl-opt png" [disabled]="downloading()" (click)="download('png')">
+          <i class="fa-solid fa-file-image"></i><span>PNG</span><em>.png</em>
+        </button>
+        <button class="dl-opt jpg" [disabled]="downloading()" (click)="download('jpg')">
+          <i class="fa-solid fa-image"></i><span>JPG</span><em>.jpg</em>
+        </button>
+      </div>
+      @if (downloading()) { <div class="dl-busy"><i class="fa-solid fa-spinner fa-spin"></i> Preparing download…</div> }
+    </div>
+  </div>
+  }
+
+  <!-- ===== GER: Needs API integration popup ===== -->
+  @if (gerApiPopupOpen()) {
+  <div class="dl-backdrop" (click)="closeGerApiPopup()">
+    <div class="dl-modal ger-modal" (click)="$event.stopPropagation()">
+      <div class="dl-head">
+        <i class="fa-solid fa-star"></i> Needs API Integration
+        <button class="dl-x" (click)="closeGerApiPopup()"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="ger-modal-body">
+        <p><b>Gross Enrolment Ratio for EMIS (2018 → today)</b> needs age-wise
+           population data, which EMIS does not hold.</p>
+        <p>Once the age-group population is pulled from the respective
+           departments' API and baked into the enrolment dataset, GER will be
+           computed per level (Primary, Upper Primary, Secondary, Higher Secondary)
+           exactly as it already is for UDISE+.</p>
+        <p class="ger-modal-note"><i class="fa-solid fa-circle-info"></i>
+           UDISE+ ships its own projected age-group population, so switch the
+           source to <b>UDISE+</b> to see GER up to 2025-26 today.</p>
+      </div>
+    </div>
+  </div>
+  }
+
+  @if (normsInfoOpen() && normsInfo()) {
+  <div class="dl-backdrop" (click)="closeNormsInfo()">
+    <div class="dl-modal ger-modal" (click)="$event.stopPropagation()">
+      <div class="dl-head">
+        <i class="fa-solid fa-scale-balanced"></i> Norms — {{ normsInfo()!.title }}
+        <button class="dl-x" (click)="closeNormsInfo()"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="ger-modal-body">
+        <p><b>Entitlement norm</b><br/>{{ normsInfo()!.norm }}</p>
+        <p><b>How it is calculated</b><br/>{{ normsInfo()!.calc }}</p>
+        <p class="ger-modal-note"><i class="fa-solid fa-circle-info"></i>
+           Figures cover only schools that submitted for the selected period;
+           non-submitting schools are excluded and surfaced as a separate check.</p>
+      </div>
+    </div>
+  </div>
+  }
+</div>
+} @else {
+<div class="loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading dashboard…</div>
+}
+}

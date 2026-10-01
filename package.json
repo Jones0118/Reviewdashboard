@@ -1,0 +1,61 @@
+{
+  "name": "dashboard-app",
+  "version": "0.0.0",
+  "scripts": {
+    "ng": "ng",
+    "start": "ng serve",
+    "build": "ng build",
+    "watch": "ng build --watch --configuration development",
+    "test": "ng test",
+    "gen:auth": "node scripts/gen-auth.mjs",
+    "gen:schemes": "node scripts/gen-schemes.mjs",
+    "gen:kpi": "node scripts/gen-kpi-modules.mjs",
+    "prestart": "node scripts/gen-auth.mjs && node scripts/gen-schemes.mjs && node scripts/gen-kpi-modules.mjs",
+    "prebuild": "node scripts/gen-auth.mjs && node scripts/gen-schemes.mjs && node scripts/gen-kpi-modules.mjs"
+  },
+  "prettier": {
+    "printWidth": 100,
+    "singleQuote": true,
+    "overrides": [
+      {
+        "files": "*.html",
+        "options": {
+          "parser": "angular"
+        }
+      }
+    ]
+  },
+  "private": true,
+  "packageManager": "npm@11.12.1",
+  "dependencies": {
+    "@angular/animations": "^21.2.23",
+    "@angular/common": "^21.0.0",
+    "@angular/compiler": "^21.0.0",
+    "@angular/core": "^21.0.0",
+    "@angular/forms": "^21.0.0",
+    "@angular/platform-browser": "^21.0.0",
+    "@angular/router": "^21.0.0",
+    "@fortawesome/angular-fontawesome": "^4.0.0",
+    "@fortawesome/fontawesome-free": "^7.0.0",
+    "@fortawesome/fontawesome-svg-core": "^7.3.1",
+    "@fortawesome/free-solid-svg-icons": "^7.3.1",
+    "@primeng/themes": "^21.0.4",
+    "@primeuix/themes": "^3.0.1",
+    "echarts": "^5.6.0",
+    "feather-icons": "^4.29.2",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^2.5.2",
+    "jspdf-autotable": "^3.8.4",
+    "ngx-echarts": "^21.0.0",
+    "primeicons": "^7.0.0",
+    "primeng": "^21.1.10",
+    "rxjs": "~7.8.0",
+    "tslib": "^2.3.0"
+  },
+  "devDependencies": {
+    "@angular/build": "^21.0.2",
+    "@angular/cli": "^21.0.2",
+    "@angular/compiler-cli": "^21.0.0",
+    "typescript": "~5.9.2"
+  }
+}

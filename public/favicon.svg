@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img"
+     aria-label="EMIS school education dashboard">
+  <!--
+    Favicon for the EMIS dashboard.
+
+    Designed at 16px first, since that is what a browser tab actually renders.
+    Two decisions came out of testing the mark at 16, 20, 32 and 64 px:
+
+      * the cap fills nearly the full canvas — an earlier, smaller version
+        turned into an indistinct blob once scaled down;
+      * the cap body carries a stroke in the background blue, so there is a
+        real gap between board and body. Without it the two white shapes
+        merged and the silhouette stopped reading as a graduation cap.
+
+    A gold tassel was tried and dropped: it looked good at 32px and above but
+    crowded the right edge at 16px. Brand colour is carried by the app header
+    instead, where there is room for it.
+  -->
+  <rect width="64" height="64" rx="11" fill="#173B78"/>
+
+  <!-- mortarboard -->
+  <path d="M32 10 L61 23 L32 36 L3 23 Z" fill="#ffffff"/>
+
+  <!-- cap body, outlined in the ground colour to keep it distinct from the board -->
+  <path d="M18.5 31 L32 37 L45.5 31 V44 L32 50.5 L18.5 44 Z"
+        fill="#ffffff" stroke="#173B78" stroke-width="3" stroke-linejoin="round"/>
+</svg>
