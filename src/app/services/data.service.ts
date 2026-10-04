@@ -49,10 +49,43 @@ export class DataService {
   /** True once the UDISE+ roll is available. */
   readonly udiseReady = computed(() => !!this._udise());
 
+  /**
+   * Raw SchoolRow[] for an explicit scope, independent of the current drill.
+   * Pass a block to get that block's schools, or just a district to get every
+   * school in the district. Used for school-count KPIs (zero enrolment, PTR>60…).
+   */
+  schoolRowsFor(district: string, block?: string | null): SchoolRow[] {
+    const s = this._schools();
+    if (!s) return [];
+    if (block) return s[`${district}||${block}`] ?? [];
+    const prefix = district + '||';
+    const out: SchoolRow[] = [];
+    for (const k in s) if (k.startsWith(prefix)) out.push(...s[k]);
+    return out;
+  }
+
   /** Drill state */
   readonly selectedDistrict = signal<string | null>(null);
   readonly selectedBlock = signal<string | null>(null);
   readonly selectedSchool = signal<string | null>(null);
+
+  /**
+   * Locate a school's { district, block } by UDISE across the active roll.
+   * Used to drill directly to a school from a flat per-KPI list (which carries
+   * only the UDISE, not the block). Returns null when the UDISE is unknown.
+   */
+  findSchoolLocation(udise: string): { district: string; block: string; name: string } | null {
+    const s = this._schools();
+    if (!s || !udise) return null;
+    for (const key in s) {
+      const row = s[key].find((r) => r.udise === udise);
+      if (row) {
+        const sep = key.indexOf('||');
+        return { district: key.slice(0, sep), block: key.slice(sep + 2), name: row.name };
+      }
+    }
+    return null;
+  }
 
   /** Map / KPI metric */
   readonly metric = signal<MapMetric>('students');

@@ -64,34 +64,38 @@ export const KPI_MODULES: KpiModule[] = [
   },
   {
     title: 'Enrollment', color: '#0f766e', kpis: [
-      N('stu', 'Students', 0, 'n', 'enr'),
-      P('gr', 'Enrollment change %', 1, -6, 8, 'chg', 'enr'),
-      P('girl', 'Girls %', 0, 46, 52, 'girlsPct', 'enr'),
-      P('cwsn', 'CWSN enrollment %', 1, 1, 4, 'cwsnPct', 'enr'),
-      P('dro', 'Dropout rate %', -1, 0.5, 4, 'dropRate', 'enr'),
-      F('decl', 'Schools with declined enrollment', -1, 'declSchools', 'enr'),
+      F('zenr', 'Zero enrolment schools', -1, 'zeroEnrol', 'enr'),
+      F('ztea', 'Zero teacher schools', -1, 'zeroTeacher', 'enr'),
+      F('stea', 'Single teacher schools', -1, 'singleTeacher', 'enr'),
+      F('u10', 'Under 10 students schools', -1, 'under10', 'enr'),
+      F('ptr60', 'PTR over 60 schools', -1, 'ptrOver60', 'enr'),
+      F('einc', 'Enrollment increase schools', 1, 'enrolIncreaseSchools', 'enr'),
+      F('edec', 'Schools with declined enrollment', -1, 'enrolDeclinedSchools', 'enr'),
+      P('trn', 'Transition rate — % schools not meeting 100%', -1, 0, 30, 'transitionPendingPct', 'enr'),
     ],
   },
   {
     title: 'Attendance', color: '#b45309', kpis: [
       P('a_s', 'Student attendance %', 1, 82, 97, 'att', 'att'),
       P('a_t', 'Teacher attendance %', 1, 91, 99, 'teacherAtt', 'att'),
-      P('a_c', 'Attendance marking compliance %', 1, 75, 100, 'compliance', 'att'),
-      F('a_p', 'Schools pending attendance', -1, 'attPending', 'att'),
-      N('d15', 'Potential dropouts (15 days absent)', -1, 'drop', 'att'),
-      N('tl', 'Teachers absent 30+ days', -1, 'tl', 'att'),
+      P('a_nm', 'Schools not marked attendance %', -1, 0, 25, 'schoolsNotMarkedPct', 'att'),
+      F('a_os', 'Schools marked only student attendance', -1, 'markedOnlyStudent', 'att'),
+      F('a_ot', 'Schools marked only teacher attendance', -1, 'markedOnlyTeacher', 'att'),
+      N('d15', 'Potential dropout (15 days absent)', -1, 'drop', 'att'),
+      N('tl30', 'Teacher long absent (30+ days)', -1, 'teacherLong30', 'att'),
     ],
   },
   {
     title: 'Infrastructure', color: '#7c3aed', kpis: [
-      F('gap', 'Schools with critical infra gap', -1, 'gaps', 'inf'),
-      F('i_t', 'No functional toilet', -1, 'infNoToilet', 'inf'),
-      F('i_w', 'No drinking water', -1, 'infNoWater', 'inf'),
-      F('i_c', 'No CWSN toilet', -1, 'infNoCwsnToilet', 'inf'),
+      F('gap', 'School with critical gap', -1, 'gaps', 'inf'),
+      F('i_cl', 'Zero classroom', -1, 'infZeroClassroom', 'inf'),
+      F('i_t', 'Zero toilet school', -1, 'infNoToilet', 'inf'),
+      F('i_w', 'No drinking water school', -1, 'infNoWater', 'inf'),
       F('i_e', 'No EB connection', -1, 'infNoEb', 'inf'),
-      F('i_k', 'Kitchen shed unavailable', -1, 'infNoKitchen', 'inf'),
       F('i_d', 'Building to be demolished', -1, 'infDemolish', 'inf'),
-      F('i_r', 'Repair & renovation pending', -1, 'infRepair', 'inf'),
+      F('i_cw', 'School has no compound wall', -1, 'infNoCompound', 'inf'),
+      F('i_need', 'Schools needing any infra facility', -1, 'infNeedsAny', 'inf'),
+      F('i_k', 'No kitchen shed', -1, 'infNoKitchen', 'inf'),
     ],
   },
   {
@@ -106,6 +110,7 @@ export const KPI_MODULES: KpiModule[] = [
       P('a_cmp', 'Mark-entry completion %', 1, 0, 100, 'acaCompletionPct', 'aca'),
     ],
   },
+  /* ===== TEMPORARILY DISABLED — re-enable when ready =====
   {
     title: 'Schemes Coverage', color: '#0369a1', kpis: [
       P('th_c', 'Thiran coverage %', 1, 60, 100, 'sch', 'sch'),
@@ -123,6 +128,7 @@ export const KPI_MODULES: KpiModule[] = [
       P('h_r', '14417 resolution %', 1, 70, 99, 'h14417ResPct', 'sch'),
     ],
   },
+  ===== END DISABLED ===== */
   {
     title: 'THIRAN+', color: '#4d7c0f', kpis: [
       N('t_s', 'THIRAN+ students identified', 0, 'thiranStudents', 'thiran'),
@@ -144,7 +150,7 @@ export const KPI_MODULES: KpiModule[] = [
     ],
   },
   {
-    title: 'Digital Infrastructure', color: '#0e7490', kpis: [
+    title: 'Digital Infrastructure (Middle/High/Hr.Sec)', color: '#0e7490', kpis: [
       F('g_i', 'Schools with ICT facilities', 1, 'ictSchools', 'inf'),
       F('g_y', 'ICT schools with internet', 1, 'ictInternet', 'inf'),
       F('g_n', 'ICT schools without internet', -1, 'ictNoInternet', 'inf'),
@@ -164,11 +170,12 @@ export const KPI_MODULES: KpiModule[] = [
   },
   {
     title: 'Palli Paarvai', color: '#1d4ed8', kpis: [
-      F('p_v', 'Schools visited', 1, 'palliVisited', 'palli'),
-      N('p_ob', 'Observations recorded', 1, 'palliObservations', 'palli'),
-      N('p_of', 'Officials who observed', 1, 'palliOfficials', 'palli'),
-      N('p_br', 'BRTE observations', 1, 'palliBrte', 'palli'),
-      N('p_be', 'BEO observations', 1, 'palliBeo', 'palli'),
+      P('p_co', '% of Class Observation', 1, 50, 100, 'palliClassObsPct', 'palli'),
+      P('p_sno', '% of Schools Not Observed (term)', -1, 0, 40, 'palliSchoolsNotObsPct', 'palli'),
+      P('p_ono', '% of Officials Not Observed (month)', -1, 0, 30, 'palliOfficialsNotObsPct', 'palli'),
+      P('p_s3', '% of Schools Observed 3+ Times', 1, 30, 100, 'palliSchools3PlusPct', 'palli'),
+      F('p_low', 'Low performers (observation < 75%)', -1, 'palliLowPerformers', 'palli'),
+      F('p_top', 'Top performers (observation ≥ 75%)', 1, 'palliTopPerformers', 'palli'),
     ],
   },
 ];

@@ -20,6 +20,7 @@ import { SelectModule } from 'primeng/select';
 import { MultiSelectModule } from 'primeng/multiselect';
 import { ButtonModule } from 'primeng/button';
 import { TagModule } from 'primeng/tag';
+import { AccordionModule } from 'primeng/accordion';
 
 import { CautionCheck } from './models/caution.model';
 import { AuthService } from './services/auth.service';
@@ -40,6 +41,9 @@ import { ReviewProgram } from './models/schemes.model';
 import { THEMES, THEME_STORAGE_KEY, Theme } from './models/theme';
 import { inr, inrShort } from './utils/format';
 
+/** Presentation styles for the Review (KPI component cards) landing. */
+export type ReviewStyle = 'cards' | 'compact' | 'grid' | 'table' | 'accordion' | 'kanban' | 'heatmap';
+
 @Component({
   selector: 'app-root',
   standalone: true,
@@ -53,6 +57,7 @@ import { inr, inrShort } from './utils/format';
     MultiSelectModule,
     ButtonModule,
     TagModule,
+    AccordionModule,
   ],
   templateUrl: './app.html',
   styleUrl: './app.scss',
@@ -162,9 +167,11 @@ export class App implements OnInit {
     if (this.activeTab() === 'Review Dashboard') {
       return this.ALL_SUB_MENUS.filter((s) => s.id === 'cards');
     }
-    return this.activeTab() === 'Infrastructure'
-      ? this.ALL_SUB_MENUS.filter((s) => s.id !== 'trend')
-      : this.ALL_SUB_MENUS;
+    // "District Review" (cards) belongs only to the Review Dashboard; other
+    // dashboards drop it. Infrastructure additionally has no Trend view.
+    return this.ALL_SUB_MENUS.filter((s) =>
+      s.id !== 'cards' && (this.activeTab() === 'Infrastructure' ? s.id !== 'trend' : true),
+    );
   });
   activeSub = signal<'cards' | 'numbers' | 'trend' | 'comparison' | 'alarming' | 'caution'>('numbers');
 
@@ -440,10 +447,13 @@ export class App implements OnInit {
     const PCT = new Set(['att', 'teacherAtt', 'compliance', 'academicAvg', 'academicChange',
       'sch', 'tnSparkPct', 'breakfastPct', 'h14417ResPct', 'scholarEligibilityPct',
       'smcClosureRate', 'palliCompletionPct', 'chg', 'girlsPct', 'dropRate', 'thiranSharePct',
+      'palliClassObsPct', 'palliSchoolsNotObsPct', 'palliOfficialsNotObsPct', 'palliSchools3PlusPct',
       // real-data percentages
       'acaLanguageAvg', 'acaEnglishAvg', 'acaMathsAvg', 'acaScienceAvg', 'acaSocialAvg',
       'acaCompletionPct', 'thiranBaselinePct', 'thiranBloPct', 'ictFunctionalPct',
-      'ictInternetPct', 'infGapPct', 'scholarPaySuccessPct', 'cwsnPct', 'slasPct']);
+      'ictInternetPct', 'infGapPct', 'scholarPaySuccessPct', 'cwsnPct', 'slasPct',
+      // new enrollment/attendance percentages
+      'schoolsNotMarkedPct', 'ptr', 'transitionPendingPct']);
     const keys: (keyof DrillRow)[] = ['ns', 'n', 'teaching', 'att', 'teacherAtt', 'compliance',
       'drop', 'tl', 'gaps', 'academicAvg', 'academicChange', 'sch', 'cases', 'tnSparkPct',
       'breakfastPct', 'cmOpen', 'h14417Open', 'h14417Critical', 'h14417ResPct', 'girlsPct',
@@ -459,11 +469,19 @@ export class App implements OnInit {
       'infNoPlayground', 'infNoFirstAid', 'infNoFire', 'infNoRamp', 'infClassShortage',
       // ---- percentages (also listed in PCT above) ----
       'acaLanguageAvg', 'acaEnglishAvg', 'acaMathsAvg', 'acaScienceAvg', 'acaSocialAvg',
-      'acaCompletionPct', 'thiranBaselinePct', 'thiranBloPct', 'ictFunctionalPct',
+      'acaCompletionPct', 'thiranBaselinePct', 'thiranBloPct', 'thiranSharePct', 'ictFunctionalPct',
       'ictInternetPct', 'infGapPct', 'scholarPaySuccessPct', 'cwsnPct', 'slasPct',
       // ---- synthetic counts still referenced by catalog KPIs ----
       'declSchools', 'attPending', 'breakfastExcept', 'cmCritical',
-      'scholarPayFailed', 'scholarNpciInactive', 'acaUp', 'acaDown'];
+      'scholarPayFailed', 'scholarNpciInactive', 'acaUp', 'acaDown',
+      // ---- new Enrollment school-count + Attendance fields ----
+      'zeroEnrol', 'zeroTeacher', 'singleTeacher', 'under10', 'ptrOver60',
+      'enrolIncreaseSchools', 'enrolDeclinedSchools', 'notMoved',
+      'boys', 'girls', 'ptr', 'schoolsNotMarkedPct', 'transitionPendingPct',
+      'boysAbsent', 'girlsAbsent', 'teacherAbsent', 'teacherLong30',
+      // ---- Palli Parvai KPIs ----
+      'palliClassObsPct', 'palliSchoolsNotObsPct', 'palliOfficialsNotObsPct',
+      'palliSchools3PlusPct', 'palliLowPerformers', 'palliTopPerformers'];
     for (const k of keys) {
       const kk = k as string;
       if (PCT.has(kk)) {
@@ -513,6 +531,14 @@ export class App implements OnInit {
         .filter((def) => active.size === 0 || active.has(`${def.topic}:${def.id}`))
         .map((def) => {
           const raw = def.field && def.field !== 'DERIVED' ? (vals[def.field] ?? null) : null;
+          // Student / Teacher attendance %: raw is the PRESENT %, so
+          //   green = present (raw), red = absent (100 - raw).
+          const attPresent = (def.id === 'a_s' || def.id === 'a_t') && raw != null;
+          // Schools not-marked %: raw is the NOT-MARKED %, so
+          //   green = marked (100 - raw), red = not marked (raw).
+          const markedPct = def.id === 'a_nm' && raw != null;
+          const showPresAbs = attPresent || markedPct;
+          const r = raw as number;
           return {
             id: def.id,
             label: def.label,
@@ -521,16 +547,77 @@ export class App implements OnInit {
             value: this.kpiFormat(def, raw),
             band: this.kpiBand(def, raw),
             hasData: raw != null,
+            showPresAbs,
+            present: attPresent ? Math.round(r * 10) / 10 : markedPct ? Math.round((100 - r) * 10) / 10 : null,
+            absent: attPresent ? Math.round((100 - r) * 10) / 10 : markedPct ? Math.round(r * 10) / 10 : null,
           };
         }),
     })).filter((t) => t.kpis.length > 0);
   });
 
+  /**
+   * Presentation style for the Review (KPI component cards) landing. 'cards' is
+   * the original layout; the others re-skin the same data differently. Persisted
+   * to localStorage so a chosen style survives reloads.
+   */
+  readonly reviewStyleOptions: { label: string; value: ReviewStyle; icon: string }[] = [
+    { label: 'Cards (default)', value: 'cards', icon: 'fa-solid fa-table-cells-large' },
+    { label: 'Compact list', value: 'compact', icon: 'fa-solid fa-list' },
+    { label: 'KPI grid', value: 'grid', icon: 'fa-solid fa-border-all' },
+    { label: 'Table view', value: 'table', icon: 'fa-solid fa-table' },
+    { label: 'Accordion', value: 'accordion', icon: 'fa-solid fa-bars-staggered' },
+    { label: 'Status board', value: 'kanban', icon: 'fa-solid fa-columns' },
+    { label: 'Heatmap', value: 'heatmap', icon: 'fa-solid fa-th' },
+  ];
+  readonly reviewStyle = signal<ReviewStyle>(this.readReviewStyle());
+  setReviewStyle(v: ReviewStyle): void {
+    this.reviewStyle.set(v);
+    try { localStorage.setItem('reviewStyle', v); } catch { /* storage unavailable */ }
+  }
+  private readReviewStyle(): ReviewStyle {
+    try {
+      const v = localStorage.getItem('reviewStyle') as ReviewStyle | null;
+      if (v && ['cards', 'compact', 'grid', 'table', 'accordion', 'kanban', 'heatmap'].includes(v)) return v;
+    } catch { /* storage unavailable */ }
+    return 'cards';
+  }
+
+  /** All KPIs flattened for the table/kanban/heatmap styles. */
+  readonly kpiFlatRows = computed(() =>
+    this.kpiTiles().flatMap((mod) =>
+      mod.kpis.map((k) => ({ module: mod.title, color: mod.color, ...k })),
+    ),
+  );
+
+  /** KPIs grouped by RAG band for the Status board (kanban) style. */
+  readonly kpiKanban = computed(() => {
+    const rows = this.kpiFlatRows();
+    const pick = (band: string) => rows.filter((k) => k.band === band);
+    return [
+      { key: 'bad', label: 'Critical', icon: 'fa-solid fa-triangle-exclamation', items: pick('bad') },
+      { key: 'warn', label: 'Watch', icon: 'fa-solid fa-circle-exclamation', items: pick('warn') },
+      { key: 'good', label: 'Good', icon: 'fa-solid fa-circle-check', items: pick('good') },
+      { key: 'none', label: 'No RAG', icon: 'fa-solid fa-circle-minus', items: pick('none') },
+    ].filter((c) => c.items.length > 0);
+  });
+
+  /** Count of a module's KPIs in a given RAG band (accordion header pills). */
+  moduleBandCount(mod: { kpis: { band: string }[] }, band: string): number {
+    return mod.kpis.filter((k) => k.band === band).length;
+  }
+
   /** Open a whole module's drill-down (topic level) via the View details button. */
-  openModule(topic: string): void {
+  openModule(topic: string, moduleTitle?: string): void {
     this.selectedKpi.set(null);
-    this.selectedDomain.set(topic);
-    this.rv.setTopic(topic as any);
+    // Digital Infrastructure shares the 'inf' catalog topic but has its own
+    // drill lens/tab ('dinf'), so route it there.
+    const t = (moduleTitle ?? '').startsWith('Digital Infrastructure') ? 'dinf' : topic;
+    this.selectedDomain.set(t);
+    this.rv.closeKpiSchoolList();
+    this.rv.setSelectedModule(moduleTitle ?? null);
+    this.rv.setTopic(t as any);
+    // Palli Parvai "View details" lands on the first KPI's designation drill.
+    if (t === 'palli') this.rv.openPalliDrill('p_co'); else this.rv.closePalliDrill();
     setTimeout(() => {
       document.getElementById('rv-drilldown')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 60);
@@ -542,23 +629,67 @@ export class App implements OnInit {
   selectedDomain = signal<string | null>(null);
 
   /** Open a KPI's drill-down inline on the same page (per-KPI + per-topic). */
-  openKpi(kpiId: string, topic: string): void {
+  openKpi(kpiId: string, topic: string, moduleTitle?: string): void {
     const def = KPI_MODULES.flatMap((m) => m.kpis).find((k) => k.id === kpiId && k.topic === topic) ?? null;
+    // Digital Infrastructure shares the 'inf' catalog topic but drills under 'dinf'.
+    const t = (moduleTitle ?? '').startsWith('Digital Infrastructure') ? 'dinf' : topic;
     this.selectedKpi.set(def);
-    this.selectedDomain.set(topic);
-    this.rv.setTopic(topic as any);
-    // if the KPI maps to a real field, sort the drill table by it
-    if (def?.field && def.field !== 'DERIVED') this.rv.setSort(def.field);
+    this.selectedDomain.set(t);
+    this.rv.setSelectedModule(moduleTitle ?? null);
+    this.rv.setTopic(t as any);
+    // Palli Parvai KPIs use a dedicated designation (stakeholder) drill-down.
+    if (this.rv.hasPalliDrill(kpiId)) {
+      this.rv.closeKpiSchoolList();
+      this.rv.openPalliDrill(kpiId);
+    } else if (this.rv.hasKpiSchoolList(kpiId)) {
+      // Flag KPIs that resolve to a per-school condition (e.g. zero enrolment,
+      // single teacher, PTR>60) open a focused list of only the matching schools.
+      this.rv.closePalliDrill();
+      this.rv.openKpiSchoolList(kpiId);
+    } else {
+      this.rv.closePalliDrill();
+      this.rv.closeKpiSchoolList();
+      // otherwise, if the KPI maps to a real field, sort the drill table by it
+      if (def?.field && def.field !== 'DERIVED') this.rv.setSort(def.field);
+    }
     setTimeout(() => {
       document.getElementById('rv-drilldown')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 60);
+  }
+
+  /**
+   * Switch the drill topic via the tab bar. Clears any open per-KPI context so
+   * the header, columns and rows all follow the newly selected topic (fixes the
+   * stale header when changing tabs after opening a KPI).
+   */
+  onTopicTab(topic: string): void {
+    this.selectedKpi.set(null);
+    this.selectedDomain.set(topic);
+    this.rv.setSelectedModule(null);
+    this.rv.closeKpiSchoolList();
+    if (topic === 'palli') this.rv.openPalliDrill('p_co'); else this.rv.closePalliDrill();
+    this.rv.setTopic(topic as any);
   }
 
   /** Close the inline drill-down and return to the tile grid. */
   closeDomain(): void {
     this.selectedKpi.set(null);
     this.selectedDomain.set(null);
+    this.rv.setSelectedModule(null);
+    this.rv.closeKpiSchoolList();
+    this.rv.closePalliDrill();
     this.ds.goToState();
+  }
+
+  /**
+   * Open a single school's all-component profile from the per-KPI list.
+   * This does NOT drill the dashboard down — the row already carries the
+   * school's full cross-component DrillRow (attendance, academic, infra,
+   * schemes…), so we just open the read-only profile drawer on it. The KPI
+   * list and the current scope stay exactly where they are.
+   */
+  openSchoolFromKpiList(row: DrillRow): void {
+    this.rv.openDrawer(row);
   }
 
   /** Header label for the open drill (KPI label, else module title). */
@@ -566,6 +697,7 @@ export class App implements OnInit {
     const kpi = this.selectedKpi();
     if (kpi) return kpi.label;
     const topic = this.selectedDomain();
+    if (topic === 'dinf') return 'Digital Infrastructure';
     return KPI_MODULES.find((m) => m.kpis[0]?.topic === topic)?.title ?? '';
   });
 
@@ -711,6 +843,7 @@ export class App implements OnInit {
       case 'pct': return `${(Math.round((Number(v) || 0) * 10) / 10)}%`;
       case 'pctSigned': { const n = Number(v) || 0; return `${n > 0 ? '+' : ''}${Math.round(n * 10) / 10}%`; }
       case 'ptSigned': { const n = Number(v) || 0; return `${n > 0 ? '+' : ''}${Math.round(n * 10) / 10} pt`; }
+      case 'yesno': return (Number(v) || 0) > 0 ? 'Yes' : 'No';
       default: return String(v ?? '');
     }
   }
@@ -2027,6 +2160,10 @@ export class App implements OnInit {
     if (t === 'Review Dashboard') {
       this.activeSub.set('cards');
       this.selectedDomain.set(null);
+    } else if (this.activeSub() === 'cards') {
+      // "District Review" (cards) exists only on the Review Dashboard; other
+      // tabs fall back to Numbers.
+      this.activeSub.set('numbers');
     }
   }
 

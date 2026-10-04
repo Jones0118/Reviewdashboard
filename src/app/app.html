@@ -257,9 +257,18 @@
     @if (activeSub() === 'cards') {
     <div class="dr-wrap">
       <div class="dr-head">
-        <h1 class="dr-title">State Monitoring &amp; Review</h1>
-        <span class="dr-scope">{{ ds.scopeLabel() }} &middot; {{ rv.currentYear() }} &middot; {{ rv.programLabel() }}
-          &middot; State → District → Block → School · tap any KPI to drill down</span>
+        <div class="dr-head-main">
+          <h1 class="dr-title">State Monitoring &amp; Review</h1>
+          <span class="dr-scope">{{ ds.scopeLabel() }} &middot; {{ rv.currentYear() }} &middot; {{ rv.programLabel() }}
+            &middot; State → District → Block → School · tap any KPI to drill down</span>
+        </div>
+        <!-- Style switcher: re-skins the component landing (data unchanged) -->
+        <div class="dr-style-switch">
+          <i class="fa-solid fa-wand-magic-sparkles"></i>
+          <p-select [options]="reviewStyleOptions" [ngModel]="reviewStyle()"
+                    (ngModelChange)="setReviewStyle($event)"
+                    optionLabel="label" optionValue="value" styleClass="ms" [style]="{ minWidth: '170px' }" />
+        </div>
       </div>
 
       <!-- 12-module KPI tile grid (component overview) -->
@@ -276,24 +285,146 @@
         }
       </div>
       }
-      <div class="kpi-tiles">
+      @if (reviewStyle() === 'table') {
+      <!-- ===== Table style: all KPIs as a flat sortable table ===== -->
+      <div class="card table-card kpi-table-card">
+        <p-table [value]="kpiFlatRows()" styleClass="p-datatable-sm" [scrollable]="true"
+                 [rows]="10" [rowsPerPageOptions]="[10,20,50]" [paginator]="kpiFlatRows().length > 0" [rowHover]="true">
+          <ng-template pTemplate="header">
+            <tr>
+              <th>Component</th>
+              <th>KPI</th>
+              <th class="num">Value</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </ng-template>
+          <ng-template pTemplate="body" let-k>
+            <tr class="rv-row" (click)="openKpi(k.id, k.topic, k.module)">
+              <td><span class="kpi-tag-dot" [style.background]="k.color"></span> {{ k.module }}</td>
+              <td class="strong">{{ k.label }}</td>
+              <td class="num">
+                @if (k.showPresAbs) {
+                  <span class="pa-present">{{ k.present }}%</span><span class="pa-sep">/</span><span class="pa-absent">{{ k.absent }}%</span>
+                } @else {
+                  <b [class.muted]="!k.hasData">{{ k.value }}</b>
+                }
+              </td>
+              <td>
+                <span class="kpi-dot" [class.g]="k.band === 'good'" [class.a]="k.band === 'warn'"
+                      [class.r]="k.band === 'bad'" [class.n]="k.band === 'none'"></span>
+                <span class="kpi-band-lbl">{{ k.band === 'good' ? 'Good' : k.band === 'warn' ? 'Watch' : k.band === 'bad' ? 'Critical' : '—' }}</span>
+              </td>
+              <td class="num"><i class="fa-solid fa-chevron-right text-muted"></i></td>
+            </tr>
+          </ng-template>
+        </p-table>
+      </div>
+      } @else if (reviewStyle() === 'accordion') {
+      <!-- ===== Accordion style: one collapsible panel per component ===== -->
+      <p-accordion [value]="0" styleClass="kpi-accordion">
+        @for (mod of kpiTiles(); track mod.title; let idx = $index) {
+          <p-accordion-panel [value]="idx">
+            <p-accordion-header>
+              <span class="acc-head" [style.--kc]="mod.color">
+                <span class="acc-dot" [style.background]="mod.color"></span>
+                <b>{{ mod.title }}</b>
+                <span class="acc-counts">
+                  <span class="acc-pill r">{{ moduleBandCount(mod, 'bad') }}</span>
+                  <span class="acc-pill a">{{ moduleBandCount(mod, 'warn') }}</span>
+                  <span class="acc-pill g">{{ moduleBandCount(mod, 'good') }}</span>
+                </span>
+              </span>
+            </p-accordion-header>
+            <p-accordion-content>
+              @for (k of mod.kpis; track k.id) {
+                <button class="kpi-row" (click)="openKpi(k.id, k.topic, mod.title)">
+                  <span class="kpi-dot" [class.g]="k.band === 'good'" [class.a]="k.band === 'warn'"
+                        [class.r]="k.band === 'bad'" [class.n]="k.band === 'none'"></span>
+                  <span class="kpi-lb">{{ k.label }}</span>
+                  @if (k.showPresAbs) {
+                    <b class="kpi-presabs"><span class="pa-present">{{ k.present }}%</span><span class="pa-sep">/</span><span class="pa-absent">{{ k.absent }}%</span></b>
+                  } @else {
+                    <b [class.muted]="!k.hasData">{{ k.value }}</b>
+                  }
+                  <i class="fa-solid fa-chevron-right"></i>
+                </button>
+              }
+              <button class="kpi-view" (click)="openModule(mod.topic, mod.title)">View details <i class="fa-solid fa-arrow-right"></i></button>
+            </p-accordion-content>
+          </p-accordion-panel>
+        }
+      </p-accordion>
+      } @else if (reviewStyle() === 'kanban') {
+      <!-- ===== Status board: KPIs grouped by RAG band ===== -->
+      <div class="kpi-kanban">
+        @for (col of kpiKanban(); track col.key) {
+          <div class="kan-col" [class.r]="col.key === 'bad'" [class.a]="col.key === 'warn'"
+               [class.g]="col.key === 'good'" [class.n]="col.key === 'none'">
+            <div class="kan-head"><i [class]="col.icon"></i> {{ col.label }} <span class="kan-n">{{ col.items.length }}</span></div>
+            <div class="kan-body">
+              @for (k of col.items; track k.module + k.id) {
+                <button class="kan-card" (click)="openKpi(k.id, k.topic, k.module)">
+                  <span class="kan-mod" [style.color]="k.color">{{ k.module }}</span>
+                  <span class="kan-lbl">{{ k.label }}</span>
+                  <span class="kan-val">
+                    @if (k.showPresAbs) {
+                      <span class="pa-present">{{ k.present }}%</span><span class="pa-sep">/</span><span class="pa-absent">{{ k.absent }}%</span>
+                    } @else { {{ k.value }} }
+                  </span>
+                </button>
+              }
+            </div>
+          </div>
+        }
+      </div>
+      } @else if (reviewStyle() === 'heatmap') {
+      <!-- ===== Heatmap: component rows, a colored cell per KPI ===== -->
+      <div class="kpi-heatmap">
+        @for (mod of kpiTiles(); track mod.title) {
+          <div class="hm-row">
+            <div class="hm-rowlbl" [style.--kc]="mod.color">{{ mod.title }}</div>
+            <div class="hm-cells">
+              @for (k of mod.kpis; track k.id) {
+                <button class="hm-cell" [class.g]="k.band === 'good'" [class.a]="k.band === 'warn'"
+                        [class.r]="k.band === 'bad'" [class.n]="k.band === 'none'"
+                        (click)="openKpi(k.id, k.topic, mod.title)" [title]="k.label + ': ' + k.value">
+                  <span class="hm-val">{{ k.value }}</span>
+                  <span class="hm-lbl">{{ k.label }}</span>
+                </button>
+              }
+            </div>
+          </div>
+        }
+      </div>
+      } @else {
+      <div class="kpi-tiles" [class.style-compact]="reviewStyle() === 'compact'" [class.style-grid]="reviewStyle() === 'grid'">
         @for (mod of kpiTiles(); track mod.title) {
           <section class="kpi-tile" [style.--kc]="mod.color">
             <h2>{{ mod.title }}</h2>
             @for (k of mod.kpis; track k.id) {
-              <button class="kpi-row" (click)="openKpi(k.id, k.topic)" [title]="k.hasData ? 'Drill down ' + k.label : k.label + ' — no data source yet'">
+              <button class="kpi-row" (click)="openKpi(k.id, k.topic, mod.title)" [title]="k.hasData ? 'Drill down ' + k.label : k.label + ' — no data source yet'">
                 <span class="kpi-dot"
                       [class.g]="k.band === 'good'" [class.a]="k.band === 'warn'"
                       [class.r]="k.band === 'bad'" [class.n]="k.band === 'none'"></span>
                 <span class="kpi-lb">{{ k.label }}</span>
-                <b [class.muted]="!k.hasData">{{ k.value }}</b>
+                @if (k.showPresAbs) {
+                  <b class="kpi-presabs">
+                    <span class="pa-present">{{ k.present }}%</span>
+                    <span class="pa-sep">/</span>
+                    <span class="pa-absent">{{ k.absent }}%</span>
+                  </b>
+                } @else {
+                  <b [class.muted]="!k.hasData">{{ k.value }}</b>
+                }
                 <i class="fa-solid fa-chevron-right"></i>
               </button>
             }
-            <button class="kpi-view" (click)="openModule(mod.topic)">View details <i class="fa-solid fa-arrow-right"></i></button>
+            <button class="kpi-view" (click)="openModule(mod.topic, mod.title)">View details <i class="fa-solid fa-arrow-right"></i></button>
           </section>
         }
       </div>
+      }
       }
 
       <!-- inline drill-down (District -> Block -> School) for the selected component -->
@@ -302,7 +433,12 @@
         <div class="dr-drill-bar">
           <button class="dr-back" (click)="closeDomain()"><i class="fa-solid fa-arrow-left"></i> All components</button>
           <div class="dr-drill-title">
-            <i class="fa-solid fa-layer-group"></i> {{ selectedDomainName() }} — {{ rv.drillUnitLabel() }}s in {{ ds.scopeLabel() }}
+            <i class="fa-solid fa-layer-group"></i>
+            @if (rv.palliKpiId()) {
+              {{ rv.palliKpiLabel() }} — Districts in {{ ds.scopeLabel() }}
+            } @else {
+              {{ selectedDomainName() }} — {{ rv.drillUnitLabel() }}s in {{ ds.scopeLabel() }}
+            }
           </div>
           @if (ds.canGoBack()) {
             <button class="dr-back ghost" (click)="ds.goUp()"><i class="fa-solid fa-turn-up"></i> {{ ds.backLabel() }}</button>
@@ -310,24 +446,291 @@
           }
         </div>
 
-        <!-- KPI topic switcher -->
+        @if (selectedDomain() === 'palli') {
+        <!-- ===== Palli Parvai dedicated drill (designation / stakeholder columns) ===== -->
+        <!-- Component topic switcher (shared across all view-details pages) -->
         <div class="rv-topics">
           @for (t of rv.topics; track t.id) {
-            <button [class.on]="rv.activeTopic() === t.id" (click)="rv.setTopic(t.id)">
+            <button [class.on]="rv.activeTopic() === t.id" (click)="onTopicTab(t.id)">
               <i [class]="t.icon"></i> {{ t.label }}
             </button>
           }
         </div>
-
         <div class="card table-card">
           <div class="card-title">
-            <i class="fa-solid fa-table-list"></i> {{ rv.drillUnitLabel() }}s — {{ ds.scopeLabel() }}
-            <span class="hint">click a row to
-              {{ ds.level() === 'state' ? 'open that district' : ds.selectedBlock() ? 'open the school profile' : 'open that block' }}</span>
-            <!-- KPI filter: lists ONLY the active component's KPIs; controls which columns show -->
+            <i class="fa-solid fa-clipboard-check"></i> {{ rv.palliKpiLabel() }} — {{ ds.scopeLabel() }}
+            <p-tag value="Assumed data" severity="warn" styleClass="ml-2" />
+            <button class="kpi-filter-clear" (click)="closeDomain()" style="margin-left:auto">
+              <i class="fa-solid fa-arrow-left"></i> Back to all KPIs
+            </button>
+          </div>
+
+          <!-- Palli KPI switcher tabs -->
+          <div class="rv-topics palli-tabs">
+            @for (t of rv.palliKpiTabs; track t.id) {
+              <button [class.on]="(rv.palliKpiId() || 'p_co') === t.id" (click)="rv.setPalliKpi(t.id)">{{ t.label }}</button>
+            }
+          </div>
+
+          @switch (rv.palliKpiId() || 'p_co') {
+            @case ('p_co') {
+              @if (!rv.palliDesignation()) {
+                <!-- KPI 1: District × designation % matrix (click a designation column) -->
+                <p-table [value]="rv.palliDistrictMatrix()" styleClass="p-datatable-sm" [scrollable]="true" [rowHover]="true" sortMode="single">
+                  <ng-template pTemplate="header">
+                    <tr>
+                      <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
+                      <th pSortableColumn="district">District <p-sortIcon field="district" /></th>
+                      @for (d of rv.PALLI_DESIGNATIONS; track d) {
+                        <th class="num"><button class="th-sort" (click)="rv.selectPalliDesignation(d)">{{ d }} <i class="fa-solid fa-arrow-down-short-wide"></i></button></th>
+                      }
+                      <th class="num" pSortableColumn="overall">Overall Observation % <p-sortIcon field="overall" /></th>
+                    </tr>
+                  </ng-template>
+                  <ng-template pTemplate="body" let-r>
+                    <tr>
+                      <td class="num">{{ r.sno }}</td><td class="strong">{{ r.district }}</td>
+                      @for (d of rv.PALLI_DESIGNATIONS; track d) {
+                        <td class="num"><button class="palli-cell" (click)="rv.selectPalliDesignation(d)"
+                              [class.bad]="r.cells[d] < 75" [class.good]="r.cells[d] >= 75">{{ r.cells[d] }}%</button></td>
+                      }
+                      <td class="num strong" [class.bad]="r.overall < 75" [class.good]="r.overall >= 75">{{ r.overall }}%</td>
+                    </tr>
+                  </ng-template>
+                  <ng-template pTemplate="footer">
+                    <tr class="rv-total">
+                      <td class="strong" colspan="2">State Average</td>
+                      @for (d of rv.PALLI_DESIGNATIONS; track d) { <td class="num strong">{{ rv.palliMatrixTotals().cells[d] }}%</td> }
+                      <td class="num strong">{{ rv.palliMatrixTotals().overall }}%</td>
+                    </tr>
+                  </ng-template>
+                </p-table>
+              } @else {
+                <!-- KPI 1 designation drill -->
+                <div class="palli-subbar">
+                  <button class="dr-back ghost" (click)="rv.selectPalliDesignation(null)"><i class="fa-solid fa-arrow-left"></i> All designations</button>
+                  <b>Designation: {{ rv.palliDesignation() }}</b>
+                </div>
+                <p-table [value]="rv.palliDesignationDrill()" styleClass="p-datatable-sm" [scrollable]="true" [rowHover]="true" sortMode="single">
+                  <ng-template pTemplate="header">
+                    <tr>
+                      <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
+                      <th pSortableColumn="district">District <p-sortIcon field="district" /></th>
+                      <th pSortableColumn="designation">Designation <p-sortIcon field="designation" /></th>
+                      <th class="num" pSortableColumn="officials">No. of Officials <p-sortIcon field="officials" /></th>
+                      <th class="num" pSortableColumn="target">Target <p-sortIcon field="target" /></th>
+                      <th class="num" pSortableColumn="observed">Observed <p-sortIcon field="observed" /></th>
+                      <th class="num" pSortableColumn="pct">Observation % <p-sortIcon field="pct" /></th>
+                    </tr>
+                  </ng-template>
+                  <ng-template pTemplate="body" let-r>
+                    <tr>
+                      <td class="num">{{ r.sno }}</td><td class="strong">{{ r.district }}</td><td>{{ r.designation }}</td>
+                      <td class="num">{{ fmt(r.officials) }}</td><td class="num">{{ fmt(r.target) }}</td><td class="num">{{ fmt(r.observed) }}</td>
+                      <td class="num" [class.bad]="r.pct < 75" [class.good]="r.pct >= 75">{{ r.pct }}%</td>
+                    </tr>
+                  </ng-template>
+                </p-table>
+              }
+            }
+            @case ('p_sno') {
+              <!-- KPI 2: District → Block → School drill (schools not observed in the term) -->
+              @if (!rv.palliSnoDistrict()) {
+                <!-- Level 1: not-observed count per district -->
+                <p-table [value]="rv.palliSnoByDistrict()" styleClass="p-datatable-sm" [scrollable]="true" [rowHover]="true" sortMode="single">
+                  <ng-template pTemplate="header">
+                    <tr>
+                      <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
+                      <th pSortableColumn="district">District <p-sortIcon field="district" /></th>
+                      <th class="num" pSortableColumn="count">Schools Not Observed <p-sortIcon field="count" /></th>
+                    </tr>
+                  </ng-template>
+                  <ng-template pTemplate="body" let-r>
+                    <tr class="rv-row" (click)="rv.palliSnoSelectDistrict(r.key)">
+                      <td class="num">{{ r.sno }}</td>
+                      <td class="strong">{{ r.district }} <i class="fa-solid fa-chevron-right text-muted"></i></td>
+                      <td class="num bad">{{ fmt(r.count) }}</td>
+                    </tr>
+                  </ng-template>
+                </p-table>
+              } @else if (!rv.palliSnoBlock()) {
+                <!-- Level 2: not-observed count per block -->
+                <div class="palli-subbar">
+                  <button class="dr-back ghost" (click)="rv.palliSnoReset()"><i class="fa-solid fa-arrow-left"></i> All districts</button>
+                  <b>District: {{ ds.titleCase(rv.palliSnoDistrict()!) }}</b>
+                </div>
+                <p-table [value]="rv.palliSnoByBlock()" styleClass="p-datatable-sm" [scrollable]="true" [rowHover]="true" sortMode="single">
+                  <ng-template pTemplate="header">
+                    <tr>
+                      <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
+                      <th pSortableColumn="block">Block <p-sortIcon field="block" /></th>
+                      <th class="num" pSortableColumn="count">Schools Not Observed <p-sortIcon field="count" /></th>
+                    </tr>
+                  </ng-template>
+                  <ng-template pTemplate="body" let-r>
+                    <tr class="rv-row" (click)="rv.palliSnoSelectBlock(r.key)">
+                      <td class="num">{{ r.sno }}</td>
+                      <td class="strong">{{ r.block }} <i class="fa-solid fa-chevron-right text-muted"></i></td>
+                      <td class="num bad">{{ fmt(r.count) }}</td>
+                    </tr>
+                  </ng-template>
+                </p-table>
+              } @else {
+                <!-- Level 3: school list -->
+                <div class="palli-subbar">
+                  <button class="dr-back ghost" (click)="rv.palliSnoReset()"><i class="fa-solid fa-arrow-left"></i> All districts</button>
+                  <button class="dr-back ghost" (click)="rv.palliSnoSelectBlock(null)"><i class="fa-solid fa-turn-up"></i> {{ ds.titleCase(rv.palliSnoDistrict()!) }}</button>
+                  <b>Block: {{ ds.titleCase(rv.palliSnoBlock()!) }}</b>
+                </div>
+                <p-table [value]="rv.palliSnoSchools()" styleClass="p-datatable-sm" [scrollable]="true" [rows]="10" [rowsPerPageOptions]="[10,20,50]" [paginator]="rv.palliSnoSchools().length > 0" [rowHover]="true" sortMode="single">
+                  <ng-template pTemplate="header">
+                    <tr>
+                      <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
+                      <th pSortableColumn="district">District <p-sortIcon field="district" /></th>
+                      <th pSortableColumn="block">Block <p-sortIcon field="block" /></th>
+                      <th pSortableColumn="udise">UDISE Code <p-sortIcon field="udise" /></th>
+                      <th pSortableColumn="school">School Name <p-sortIcon field="school" /></th>
+                      <th pSortableColumn="category">Category <p-sortIcon field="category" /></th>
+                      <th class="num" pSortableColumn="observationCount">Observation Count <p-sortIcon field="observationCount" /></th>
+                    </tr>
+                  </ng-template>
+                  <ng-template pTemplate="body" let-r>
+                    <tr><td class="num">{{ r.sno }}</td><td>{{ r.district }}</td><td>{{ r.block }}</td><td>{{ r.udise }}</td><td class="strong">{{ r.school }}</td><td>{{ r.category }}</td><td class="num bad">{{ r.observationCount }}</td></tr>
+                  </ng-template>
+                </p-table>
+              }
+            }
+            @case ('p_ono') {
+              <!-- KPI 3: District × designation not-observed counts → officials list -->
+              @if (!rv.palliOnoDistrict()) {
+                <p-table [value]="rv.palliOnoMatrix()" styleClass="p-datatable-sm" [scrollable]="true" [rowHover]="true" sortMode="single">
+                  <ng-template pTemplate="header">
+                    <tr>
+                      <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
+                      <th pSortableColumn="district">District <p-sortIcon field="district" /></th>
+                      @for (d of rv.PALLI_DESIGNATIONS; track d) { <th class="num">{{ d }}</th> }
+                      <th class="num" pSortableColumn="total">Total Not Observed <p-sortIcon field="total" /></th>
+                    </tr>
+                  </ng-template>
+                  <ng-template pTemplate="body" let-r>
+                    <tr>
+                      <td class="num">{{ r.sno }}</td><td class="strong">{{ r.district }}</td>
+                      @for (d of rv.PALLI_DESIGNATIONS; track d) {
+                        <td class="num"><button class="palli-cell" [class.bad]="r.cells[d] > 0" (click)="rv.palliOnoSelect(r.key, d)">{{ r.cells[d] }}</button></td>
+                      }
+                      <td class="num strong bad">{{ fmt(r.total) }}</td>
+                    </tr>
+                  </ng-template>
+                  <ng-template pTemplate="footer">
+                    <tr class="rv-total">
+                      <td class="strong" colspan="2">Grand Total</td>
+                      @for (d of rv.PALLI_DESIGNATIONS; track d) { <td class="num strong">{{ fmt(rv.palliOnoMatrixTotals().cells[d]) }}</td> }
+                      <td class="num strong">{{ fmt(rv.palliOnoMatrixTotals().total) }}</td>
+                    </tr>
+                  </ng-template>
+                </p-table>
+              } @else {
+                <!-- Officials (by name) who made 0 observations -->
+                <div class="palli-subbar">
+                  <button class="dr-back ghost" (click)="rv.palliOnoReset()"><i class="fa-solid fa-arrow-left"></i> All districts</button>
+                  <b>{{ ds.titleCase(rv.palliOnoDistrict()!) }} · {{ rv.palliOnoDesignation() }}</b>
+                </div>
+                <p-table [value]="rv.palliOnoOfficials()" styleClass="p-datatable-sm" [scrollable]="true" [rows]="10" [rowsPerPageOptions]="[10,20,50]" [paginator]="rv.palliOnoOfficials().length > 0" [rowHover]="true" sortMode="single">
+                  <ng-template pTemplate="header">
+                    <tr>
+                      <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
+                      <th pSortableColumn="district">District <p-sortIcon field="district" /></th>
+                      <th pSortableColumn="userName">User Name <p-sortIcon field="userName" /></th>
+                      <th pSortableColumn="designation">Designation <p-sortIcon field="designation" /></th>
+                      <th class="num" pSortableColumn="target">Target <p-sortIcon field="target" /></th>
+                      <th class="num" pSortableColumn="observed">Observed Count <p-sortIcon field="observed" /></th>
+                    </tr>
+                  </ng-template>
+                  <ng-template pTemplate="body" let-r>
+                    <tr><td class="num">{{ r.sno }}</td><td>{{ r.district }}</td><td class="strong">{{ r.userName }}</td><td>{{ r.designation }}</td><td class="num">{{ fmt(r.target) }}</td><td class="num bad">{{ r.observed }}</td></tr>
+                  </ng-template>
+                </p-table>
+              }
+            }
+            @case ('p_s3') {
+              <!-- KPI 4: schools observed 3+ times, per-designation observation counts -->
+              <p-table [value]="rv.palliSchools3Plus()" styleClass="p-datatable-sm" [scrollable]="true" [rows]="10" [rowsPerPageOptions]="[10,20,50]" [paginator]="rv.palliSchools3Plus().length > 0" [rowHover]="true" sortMode="single">
+                <ng-template pTemplate="header">
+                  <tr>
+                    <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
+                    <th pSortableColumn="district">District <p-sortIcon field="district" /></th>
+                    <th pSortableColumn="block">Block <p-sortIcon field="block" /></th>
+                    <th pSortableColumn="udise">UDISE Code <p-sortIcon field="udise" /></th>
+                    <th pSortableColumn="school">School Name <p-sortIcon field="school" /></th>
+                    <th pSortableColumn="category">Category <p-sortIcon field="category" /></th>
+                    @for (d of rv.PALLI_DESIGNATIONS; track d) { <th class="num">{{ d }}</th> }
+                    <th class="num" pSortableColumn="total">Total <p-sortIcon field="total" /></th>
+                  </tr>
+                </ng-template>
+                <ng-template pTemplate="body" let-r>
+                  <tr>
+                    <td class="num">{{ r.sno }}</td><td>{{ r.district }}</td><td>{{ r.block }}</td><td>{{ r.udise }}</td><td class="strong">{{ r.school }}</td><td>{{ r.category }}</td>
+                    @for (d of rv.PALLI_DESIGNATIONS; track d) {
+                      <td class="num">
+                        @if (r.cells[d] > 0) {
+                          <button class="palli-cell good" (click)="rv.openPalliObsPopup(r, d, r.cells[d])" title="View official details">{{ r.cells[d] }}</button>
+                        } @else { {{ r.cells[d] }} }
+                      </td>
+                    }
+                    <td class="num strong">{{ r.total }}</td>
+                  </tr>
+                </ng-template>
+                <ng-template pTemplate="footer">
+                  <tr class="rv-total">
+                    <td class="strong" colspan="6">Grand Total ({{ fmt(rv.palliS3Totals().count) }} schools)</td>
+                    @for (d of rv.PALLI_DESIGNATIONS; track d) { <td class="num strong">{{ fmt(rv.palliS3Totals().cells[d]) }}</td> }
+                    <td class="num strong">{{ fmt(rv.palliS3Totals().total) }}</td>
+                  </tr>
+                </ng-template>
+              </p-table>
+            }
+            @default {
+              <!-- KPI 5 / 6: low / top performers (district + designation) -->
+              <p-table [value]="rv.palliKpiId() === 'p_low' ? rv.palliLowPerformerRows() : rv.palliTopPerformerRows()"
+                       styleClass="p-datatable-sm" [scrollable]="true" [rows]="10" [rowsPerPageOptions]="[10,20,50]" [paginator]="true" [rowHover]="true" sortMode="single">
+                <ng-template pTemplate="header">
+                  <tr>
+                    <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
+                    <th pSortableColumn="district">District <p-sortIcon field="district" /></th>
+                    <th pSortableColumn="designation">Designation <p-sortIcon field="designation" /></th>
+                    <th class="num" pSortableColumn="target">Target <p-sortIcon field="target" /></th>
+                    <th class="num" pSortableColumn="observed">Observation Count <p-sortIcon field="observed" /></th>
+                    <th class="num" pSortableColumn="pct">Observation % <p-sortIcon field="pct" /></th>
+                  </tr>
+                </ng-template>
+                <ng-template pTemplate="body" let-r>
+                  <tr><td class="num">{{ r.sno }}</td><td class="strong">{{ r.district }}</td><td>{{ r.designation }}</td><td class="num">{{ fmt(r.target) }}</td><td class="num">{{ fmt(r.observed) }}</td><td class="num" [class.bad]="r.pct < 75" [class.good]="r.pct >= 75">{{ r.pct }}%</td></tr>
+                </ng-template>
+              </p-table>
+            }
+          }
+        </div>
+        } @else if (rv.kpiListId()) {
+        <!-- Component topic switcher (shared across all view-details pages) -->
+        <div class="rv-topics">
+          @for (t of rv.topics; track t.id) {
+            <button [class.on]="rv.activeTopic() === t.id" (click)="onTopicTab(t.id)">
+              <i [class]="t.icon"></i> {{ t.label }}
+            </button>
+          }
+        </div>
+        <!-- ===== Per-KPI school list (flag KPI drill): only matching schools, module KPIs as columns ===== -->
+        <div class="card table-card">
+          <div class="card-title">
+            <i class="fa-solid fa-list-check"></i> {{ rv.kpiListLabel() }} — {{ ds.scopeLabel() }}
+            @if (rv.kpiListAssumed()) {
+              <p-tag value="Assumed data" severity="warn" styleClass="ml-2" />
+            }
+            <span class="hint">{{ fmt(rv.kpiSchoolListCount()) }} school(s) match this flag · all module KPIs shown · click a row to view this school across all components</span>
+            <!-- same KPI column filter as the main drill table -->
             <span class="dr-kpi-filter">
               <i class="fa-solid fa-filter"></i>
-              <p-multiSelect [options]="rv.topicColumnOptions()" [ngModel]="rv.colFilterKeys()"
+              <p-multiSelect [options]="rv.kpiListColumnOptions()" [ngModel]="rv.colFilterKeys()"
                              (ngModelChange)="rv.setColFilter($event)"
                              optionLabel="label" optionValue="value" placeholder="All KPIs"
                              [filter]="false" display="chip" [maxSelectedLabels]="3" styleClass="ms" />
@@ -335,13 +738,26 @@
                 <button class="kpi-filter-clear" (click)="rv.clearColFilter()"><i class="fa-solid fa-rotate-left"></i> Clear</button>
               }
             </span>
+            <button class="kpi-filter-clear" (click)="rv.closeKpiSchoolList()">
+              <i class="fa-solid fa-arrow-left"></i> Back to all KPIs
+            </button>
           </div>
-          <p-table [value]="rv.sortedDrillRows()" styleClass="p-datatable-sm" [scrollable]="true"
-                   [rows]="15" [paginator]="rv.sortedDrillRows().length > 15" [rowHover]="true">
+          @if (rv.kpiSchoolListCount() === 0) {
+            <div class="ac-loading"><i class="fa-solid fa-circle-check"></i> No schools match this flag in {{ ds.scopeLabel() }}.</div>
+          } @else {
+          <p-table [value]="rv.kpiDrillRows()" styleClass="p-datatable-sm" [scrollable]="true"
+                   [rows]="10" [rowsPerPageOptions]="[10,20,50]"
+                   [paginator]="rv.kpiSchoolListCount() > 0" [rowHover]="true">
             <ng-template pTemplate="header">
               <tr>
-                <th>{{ rv.drillUnitLabel() }}</th>
-                @for (c of rv.topicColumns(); track c.key) {
+                <th class="num">S. No</th>
+                <th>District</th>
+                <th>Block</th>
+                <th>UDISE Code</th>
+                <th>School Name</th>
+                <th>School Category</th>
+                <th class="num">Total Students</th>
+                @for (c of rv.kpiListColumns(); track c.key) {
                   <th class="num">
                     <button class="th-sort" (click)="rv.setSort(c.key)">
                       {{ c.label }}
@@ -353,13 +769,16 @@
                 }
               </tr>
             </ng-template>
-            <ng-template pTemplate="body" let-r>
-              <tr class="rv-row" (click)="rv.drillRow(r)">
-                <td class="strong">
-                  {{ r.name }}
-                  @if (r.ns > 1 && ds.level() !== 'state') { <span class="text-muted">({{ fmt(r.ns) }} schools)</span> }
-                </td>
-                @for (c of rv.topicColumns(); track c.key) {
+            <ng-template pTemplate="body" let-r let-i="rowIndex">
+              <tr class="rv-row" (click)="openSchoolFromKpiList(r)">
+                <td class="num">{{ i + 1 }}</td>
+                <td>{{ r.district }}</td>
+                <td>{{ r.block }}</td>
+                <td>{{ r.udise || '—' }}</td>
+                <td class="strong">{{ r.name }}</td>
+                <td>{{ r.ctype || '—' }}</td>
+                <td class="num">{{ fmt(r.n) }}</td>
+                @for (c of rv.kpiListColumns(); track c.key) {
                   <td [class.num]="c.fmt !== 'text'">
                     @if (c.fmt === 'text') {
                       {{ ddVal(r, c) }}
@@ -373,8 +792,119 @@
                 }
               </tr>
             </ng-template>
+            <ng-template pTemplate="footer">
+              <tr class="rv-total">
+                <td class="strong" colspan="6">Grand Total ({{ fmt(rv.kpiSchoolListCount()) }} schools)</td>
+                <td class="num strong">{{ fmt(rv.kpiListTotalN()) }}</td>
+                @for (c of rv.kpiListColumns(); track c.key) {
+                  <td class="num strong">{{ rv.aggregateColumn(rv.kpiDrillRows(), c) }}</td>
+                }
+              </tr>
+            </ng-template>
+          </p-table>
+          }
+        </div>
+        } @else {
+        <div class="rv-topics">
+          @for (t of rv.topics; track t.id) {
+            <button [class.on]="rv.activeTopic() === t.id" (click)="onTopicTab(t.id)">
+              <i [class]="t.icon"></i> {{ t.label }}
+            </button>
+          }
+        </div>
+
+        <div class="card table-card">
+          <div class="card-title">
+            <i class="fa-solid fa-table-list"></i> {{ rv.drillUnitLabel() }}s — {{ ds.scopeLabel() }}
+            <span class="hint">click a row to
+              {{ ds.level() === 'state' ? 'open that district' : ds.selectedBlock() ? 'open the school profile' : 'open that block' }}</span>
+            <!-- KPI filter: lists ONLY the active component's KPIs; controls which columns show -->
+            <span class="dr-kpi-filter">
+              <i class="fa-solid fa-filter"></i>
+              <p-multiSelect [options]="ds.selectedBlock() ? rv.kpiListColumnOptions() : rv.topicColumnOptions()" [ngModel]="rv.colFilterKeys()"
+                             (ngModelChange)="rv.setColFilter($event)"
+                             optionLabel="label" optionValue="value" placeholder="All KPIs"
+                             [filter]="false" display="chip" [maxSelectedLabels]="3" styleClass="ms" />
+              @if (rv.colFilterKeys().length) {
+                <button class="kpi-filter-clear" (click)="rv.clearColFilter()"><i class="fa-solid fa-rotate-left"></i> Clear</button>
+              }
+            </span>
+          </div>
+          <p-table [value]="rv.sortedDrillRows()" styleClass="p-datatable-sm" [scrollable]="true"
+                   [rows]="10" [rowsPerPageOptions]="[10,20,50]"
+                   [paginator]="rv.sortedDrillRows().length > 0" [rowHover]="true">
+            <ng-template pTemplate="header">
+              <tr>
+                @if (ds.selectedBlock()) {
+                  <!-- school level: same rich header as the KPI school list -->
+                  <th class="num">S. No</th>
+                  <th>District</th>
+                  <th>Block</th>
+                  <th>UDISE Code</th>
+                  <th>School Name</th>
+                  <th>School Category</th>
+                  <th class="num">Total Students</th>
+                } @else {
+                  <th>{{ rv.drillUnitLabel() }}</th>
+                }
+                @for (c of (ds.selectedBlock() ? rv.kpiListColumns() : rv.topicColumns()); track c.key) {
+                  <th class="num">
+                    <button class="th-sort" (click)="rv.setSort(c.key)">
+                      {{ c.label }}
+                      <i class="fa-solid" [class.fa-sort]="rv.sortCol() !== c.key"
+                         [class.fa-sort-up]="rv.sortCol() === c.key && rv.sortDir() === 1"
+                         [class.fa-sort-down]="rv.sortCol() === c.key && rv.sortDir() === -1"></i>
+                    </button>
+                  </th>
+                }
+              </tr>
+            </ng-template>
+            <ng-template pTemplate="body" let-r let-i="rowIndex">
+              <tr class="rv-row" (click)="rv.drillRow(r)">
+                @if (ds.selectedBlock()) {
+                  <td class="num">{{ i + 1 }}</td>
+                  <td>{{ r.district }}</td>
+                  <td>{{ r.block }}</td>
+                  <td>{{ r.udise || '—' }}</td>
+                  <td class="strong">{{ r.name }}</td>
+                  <td>{{ r.ctype || '—' }}</td>
+                  <td class="num">{{ fmt(r.n) }}</td>
+                } @else {
+                  <td class="strong">
+                    {{ r.name }}
+                    @if (r.ns > 1 && ds.level() !== 'state') { <span class="text-muted">({{ fmt(r.ns) }} schools)</span> }
+                  </td>
+                }
+                @for (c of (ds.selectedBlock() ? rv.kpiListColumns() : rv.topicColumns()); track c.key) {
+                  <td [class.num]="c.fmt !== 'text'">
+                    @if (c.fmt === 'text') {
+                      {{ ddVal(r, c) }}
+                    } @else if (c.tone && ddHasData(r, c) && c.tone(ddNum(r, c), r)) {
+                      <p-tag [value]="ddVal(r, c)"
+                             [severity]="c.tone!(ddNum(r,c),r) === 'bad' ? 'danger' : c.tone!(ddNum(r,c),r) === 'warn' ? 'warn' : 'success'" />
+                    } @else {
+                      {{ ddVal(r, c) }}
+                    }
+                  </td>
+                }
+              </tr>
+            </ng-template>
+            <ng-template pTemplate="footer">
+              <tr class="rv-total">
+                @if (ds.selectedBlock()) {
+                  <td class="strong" colspan="6">Grand Total ({{ fmt(rv.sortedDrillRows().length) }} schools)</td>
+                  <td class="num strong">{{ fmt(rv.totalN()) }}</td>
+                } @else {
+                  <td class="strong">Grand Total ({{ fmt(rv.sortedDrillRows().length) }})</td>
+                }
+                @for (c of (ds.selectedBlock() ? rv.kpiListColumns() : rv.topicColumns()); track c.key) {
+                  <td class="num strong">{{ rv.aggregateColumn(rv.sortedDrillRows(), c) }}</td>
+                }
+              </tr>
+            </ng-template>
           </p-table>
         </div>
+        }
       </div>
       }
     </div>
@@ -895,7 +1425,12 @@
         </div>
         <div class="rv-modal-body">
           <p class="rv-modal-sub">
-            {{ ds.titleCase(ds.selectedBlock() || '') }} block &middot; {{ fmt(rv.drawerRow()?.n || 0) }} students
+            @if (rv.drawerRow()?.block) {
+              {{ rv.drawerRow()?.block }} block, {{ rv.drawerRow()?.district }}
+            } @else {
+              {{ ds.titleCase(ds.selectedBlock() || '') }} block
+            }
+            &middot; {{ fmt(rv.drawerRow()?.n || 0) }} students
           </p>
 
           <div class="rv-metrics">
@@ -934,6 +1469,33 @@
     }
     @if (rv.assignToast()) {
       <div class="rv-toast"><i class="fa-solid fa-circle-check"></i> {{ rv.assignToast() }}</div>
+    }
+
+    <!-- ===== Palli Parvai: official observation detail popup (KPI 4) ===== -->
+    @if (rv.palliObsPopupOpen()) {
+    <div class="dl-backdrop" (click)="rv.closePalliObsPopup()">
+      <div class="dl-modal rv-modal" (click)="$event.stopPropagation()">
+        <div class="dl-head">
+          <i class="fa-solid fa-user-check"></i> {{ rv.palliObsPopup()?.designation }} — Observation Details
+          <button class="dl-x" (click)="rv.closePalliObsPopup()"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="rv-modal-body">
+          <p class="rv-modal-sub">
+            {{ rv.palliObsPopup()?.school }} &middot; {{ rv.palliObsPopup()?.district }}
+            &middot; UDISE {{ rv.palliObsPopup()?.udise }}
+            &middot; {{ rv.palliObsPopup()?.officials?.length }} observation(s)
+          </p>
+          <p-table [value]="rv.palliObsPopup()?.officials || []" styleClass="p-datatable-sm" [rowHover]="true">
+            <ng-template pTemplate="header">
+              <tr><th class="num">S. No</th><th>User Name</th><th>Date Observed</th><th>Class Observed</th></tr>
+            </ng-template>
+            <ng-template pTemplate="body" let-o>
+              <tr><td class="num">{{ o.sno }}</td><td class="strong">{{ o.userName }}</td><td>{{ o.date }}</td><td>{{ o.classObserved }}</td></tr>
+            </ng-template>
+          </p-table>
+        </div>
+      </div>
+    </div>
     }
     }
 

@@ -10,6 +10,8 @@ import {
   SchemesDistrict,
 } from '../models/schemes.model';
 import { KpiModuleNode, KpiModulesData, ScholarshipScheme } from '../models/kpi-modules.model';
+import { KPI_MODULES, KpiDef } from '../models/kpi-catalog.model';
+import { SchoolRow } from '../models/enrollment.model';
 import {
   AcademicRealAsset, ThiranRealAsset, PalliRealAsset, DigitalInfraRealAsset,
   AcademicReal, ThiranReal, PalliReal, DigitalInfraReal,
@@ -776,15 +778,90 @@ export class ReviewService {
     { id: 'enr', label: 'Enrollment', icon: 'fa-solid fa-user-graduate' },
     { id: 'att', label: 'Attendance', icon: 'fa-solid fa-clipboard-check' },
     { id: 'inf', label: 'Infrastructure', icon: 'fa-solid fa-building-columns' },
+    { id: 'dinf', label: 'Digital Infra', icon: 'fa-solid fa-desktop' },
     { id: 'aca', label: 'Academic', icon: 'fa-solid fa-graduation-cap' },
-    { id: 'sch', label: 'Schemes & Grievances', icon: 'fa-solid fa-hand-holding-heart' },
+    // 'sch' (Schemes & Grievances) temporarily removed — re-add when those
+    // modules are re-enabled in the KPI catalog.
     { id: 'thiran', label: 'THIRAN+', icon: 'fa-solid fa-user-graduate' },
     { id: 'scholarship', label: 'Scholarship', icon: 'fa-solid fa-award' },
     { id: 'smc', label: 'SMC', icon: 'fa-solid fa-people-group' },
     { id: 'palli', label: 'Palli Parvai', icon: 'fa-solid fa-clipboard-check' },
   ];
   readonly activeTopic = signal<DrillTopic>('att');
-  setTopic(t: DrillTopic): void { this.activeTopic.set(t); this.sortCol.set(null); }
+  setTopic(t: DrillTopic): void {
+    this.activeTopic.set(t);
+    this.sortCol.set(null);
+    // Switching topic tabs exits any open per-KPI school list so the header,
+    // columns and rows follow the newly selected topic.
+    this.kpiListId.set(null);
+  }
+
+  /**
+   * The main-dashboard module whose "View details" / KPI opened the drill-down.
+   * Drives the KPI filter so it lists exactly the module's KPIs (same labels as
+   * the tile on the landing grid), rather than a separate per-topic column set.
+   * null = no module context (falls back to the per-topic columns).
+   */
+  readonly selectedModuleTitle = signal<string | null>(null);
+  setSelectedModule(title: string | null): void { this.selectedModuleTitle.set(title); }
+
+  /** The KPI definitions of the selected module, if any. */
+  private readonly selectedModuleKpis = computed<KpiDef[]>(() => {
+    const title = this.selectedModuleTitle();
+    if (!title) return [];
+    return KPI_MODULES.find((m) => m.title === title)?.kpis ?? [];
+  });
+
+  /**
+   * Drill columns derived from the selected module's KPIs — one column per KPI
+   * that maps to a real DrillRow field, labelled exactly as on the main
+   * dashboard tile. Empty when there is no module context.
+   */
+  private readonly moduleColumns = computed<DrillColumn[]>(() => {
+    const kpis = this.selectedModuleKpis();
+    if (!kpis.length) return [];
+    // Only drive columns from the module while its own topic is active; once the
+    // user switches to another topic tab, fall back to that topic's columns.
+    const moduleTopic = kpis[0]?.topic;
+    if (moduleTopic && moduleTopic !== this.activeTopic()) return [];
+    const seen = new Set<string>();
+    const cols: DrillColumn[] = [];
+    for (const def of kpis) {
+      const field = def.field;
+      if (!field || field === 'DERIVED' || seen.has(field)) continue;
+      seen.add(field);
+      cols.push({
+        key: field,
+        label: def.label,
+        fmt: def.fmt === 'pct' ? 'pct' : 'num',
+        tone: this.moduleKpiTone(def),
+      });
+    }
+    return cols;
+  });
+
+  /**
+   * Cell colour for a module-driven column, honouring the KPI's good direction:
+   *  - percentage KPIs use the catalog lo/hi band (red below lo, green above hi);
+   *  - "lower is better" flags/counts turn amber when > 0 (an exception exists);
+   *  - "higher is better" flags/counts turn green when > 0, amber when 0;
+   *  - neutral KPIs (dir 0) get no colour.
+   */
+  private moduleKpiTone(def: KpiDef): DrillColumn['tone'] {
+    if (def.dir === 0) return undefined;
+    if (def.fmt === 'pct' && def.lo != null && def.hi != null) {
+      const lo = def.lo, hi = def.hi, dir = def.dir;
+      return (v: number) => {
+        let s = (v - lo) / ((hi - lo) || 1);
+        if (dir < 0) s = 1 - s;
+        s = Math.max(0, Math.min(1, s));
+        return s > 0.66 ? 'good' : s > 0.33 ? 'warn' : 'bad';
+      };
+    }
+    // counts / flags
+    if (def.dir < 0) return (v: number) => (v > 0 ? 'warn' : 'good');
+    return (v: number) => (v > 0 ? 'good' : 'warn');
+  }
 
   /**
    * Per-topic column (KPI) filter for the drill table. Keyed by topic; the
@@ -813,27 +890,56 @@ export class ReviewService {
     this.allTopicColumns().map((c) => ({ label: c.label, value: c.key })),
   );
 
-  /** Column model per topic, matching the prototype's per-lens columns. */
+  /**
+   * The columns the drill table and KPI filter use. When a main-dashboard
+   * module opened the drill-down, these are the module's KPIs (so the filter
+   * lists exactly the same KPIs as the tile); otherwise they fall back to the
+   * per-topic prototype columns.
+   */
   readonly allTopicColumns = computed<DrillColumn[]>(() => {
+    const mod = this.moduleColumns();
+    return mod.length ? mod : this.defaultTopicColumns();
+  });
+
+  /** Column model per topic, matching the prototype's per-lens columns. */
+  private readonly defaultTopicColumns = computed<DrillColumn[]>(() => {
     switch (this.activeTopic()) {
       case 'enr':
         return [
-          { key: 'n', label: 'Students', fmt: 'num' },
-          { key: 'chg', label: 'Change vs last year', fmt: 'pctSigned', tone: (v) => (v < -2 ? 'bad' : v < 0 ? 'warn' : 'good') },
-          { key: 'drop', label: 'Potential dropout', fmt: 'num' },
-          { key: 'ns', label: 'Schools', fmt: 'num' },
+          { key: 'boys', label: 'Boys', fmt: 'num' },
+          { key: 'girls', label: 'Girls', fmt: 'num' },
+          { key: 'n', label: 'Total Students', fmt: 'num' },
+          { key: 'teaching', label: 'Teachers', fmt: 'num' },
+          { key: 'notMoved', label: 'Not moved to next class', fmt: 'num', tone: (v) => (v > 0 ? 'warn' : 'good') },
+          { key: 'chg', label: 'Enrollment change', fmt: 'pctSigned', tone: (v) => (v < -2 ? 'bad' : v < 0 ? 'warn' : 'good') },
+          { key: 'ptr', label: 'PTR', fmt: 'num1', tone: (v) => (v > 40 ? 'bad' : v > 30 ? 'warn' : 'good') },
+          { key: 'dropRate', label: 'Dropout rate', fmt: 'pct', tone: (v) => (v > 4 ? 'bad' : v > 2 ? 'warn' : 'good') },
+          { key: 'drop', label: 'Dropout students', fmt: 'num' },
         ];
       case 'att':
         return [
-          { key: 'att', label: 'Student attendance', fmt: 'pct', bar: true, tone: (v) => (v < 88 ? 'bad' : v < 91 ? 'warn' : 'good') },
-          { key: 'drop', label: 'Potential dropout (15 days)', fmt: 'num' },
-          { key: 'tl', label: 'Teachers on long leave (est.)', fmt: 'num' },
-          { key: 'n', label: 'Students', fmt: 'num' },
+          { key: 'boysAbsent', label: 'Boys absent', fmt: 'num' },
+          { key: 'girlsAbsent', label: 'Girls absent', fmt: 'num' },
+          { key: 'n', label: 'Total Students', fmt: 'num' },
+          { key: 'teaching', label: 'Total Teachers', fmt: 'num' },
+          { key: 'teacherAbsent', label: 'Teachers absent', fmt: 'num' },
+          { key: 'markedStatus', label: 'Marked status', fmt: 'text' },
+          { key: 'drop', label: 'Potential dropout (15d)', fmt: 'num' },
+          { key: 'teacherLong30', label: 'Teacher absent 30+ days (est.)', fmt: 'num' },
         ];
       case 'inf':
         return [
           { key: 'gaps', label: 'Schools with gaps', fmt: 'num', tone: (v, r) => (r.ns > 1 ? (v / r.ns > 0.3 ? 'bad' : 'warn') : (v >= 2 ? 'bad' : v ? 'warn' : 'good')) },
           { key: 'gapl', label: 'Main gap', fmt: 'text' },
+          { key: 'n', label: 'Students', fmt: 'num' },
+        ];
+      case 'dinf':
+        return [
+          { key: 'ictSchools', label: 'ICT schools', fmt: 'num', tone: (v) => (v > 0 ? 'good' : 'bad') },
+          { key: 'ictInternet', label: 'With internet', fmt: 'num' },
+          { key: 'ictNoInternet', label: 'Without internet', fmt: 'num', tone: (v) => (v > 0 ? 'warn' : 'good') },
+          { key: 'ictFunctionalPct', label: 'Functional %', fmt: 'pct', bar: true, barMax: 100, tone: (v) => (v < 50 ? 'bad' : v < 75 ? 'warn' : 'good') },
+          { key: 'ictNotFunctional', label: 'Not functional', fmt: 'num', tone: (v) => (v > 0 ? 'bad' : 'good') },
           { key: 'n', label: 'Students', fmt: 'num' },
         ];
       case 'aca':
@@ -872,11 +978,12 @@ export class ReviewService {
         ];
       case 'palli':
         return [
-          { key: 'palliVisited', label: 'Schools visited', fmt: 'num' },
-          { key: 'palliObservations', label: 'Observations', fmt: 'num' },
-          { key: 'palliOfficials', label: 'Officials', fmt: 'num' },
-          { key: 'palliBrte', label: 'BRTE', fmt: 'num' },
-          { key: 'palliBeo', label: 'BEO', fmt: 'num' },
+          { key: 'palliClassObsPct', label: '% Class Observation', fmt: 'pct', bar: true, barMax: 100, tone: (v) => (v < 75 ? 'bad' : v < 85 ? 'warn' : 'good') },
+          { key: 'palliSchoolsNotObsPct', label: '% Schools Not Observed', fmt: 'pct', tone: (v) => (v > 30 ? 'bad' : v > 15 ? 'warn' : 'good') },
+          { key: 'palliOfficialsNotObsPct', label: '% Officials Not Observed', fmt: 'pct', tone: (v) => (v > 20 ? 'bad' : v > 10 ? 'warn' : 'good') },
+          { key: 'palliSchools3PlusPct', label: '% Schools Observed 3+ Times', fmt: 'pct', tone: (v) => (v < 40 ? 'bad' : v < 60 ? 'warn' : 'good') },
+          { key: 'palliLowPerformers', label: 'Low performers (<75%)', fmt: 'num', tone: (v) => (v > 0 ? 'warn' : 'good') },
+          { key: 'palliTopPerformers', label: 'Top performers (≥75%)', fmt: 'num', tone: (v) => (v > 0 ? 'good' : undefined) },
         ];
       default:
         return [
@@ -899,6 +1006,122 @@ export class ReviewService {
     const filtered = all.filter((c) => keep.has(c.key));
     // never render an empty table; fall back to all if the selection matched nothing
     return filtered.length ? filtered : all;
+  });
+
+  /**
+   * Columns for the per-KPI school list. For an Infrastructure KPI the grid
+   * uses a dedicated FACILITY column set (classrooms, toilets, water, lab,
+   * compound wall, demolition, kitchen…). For every other module it uses that
+   * module's KPIs. The KPI column filter applies on top.
+   */
+  readonly kpiListColumns = computed<DrillColumn[]>(() => {
+    const all = this.kpiListBaseColumns();
+    const sel = this.colFilterKeys();
+    if (!sel.length) return all;
+    const keep = new Set(sel);
+    const filtered = all.filter((c) => keep.has(c.key));
+    return filtered.length ? filtered : all;
+  });
+
+  /** Column options for the per-KPI school-list filter. */
+  readonly kpiListColumnOptions = computed(() =>
+    this.kpiListBaseColumns().map((c) => ({ label: c.label, value: c.key })),
+  );
+
+  /** Unfiltered base columns for the per-KPI school list (per-topic layout). */
+  private readonly kpiListBaseColumns = computed<DrillColumn[]>(() => {
+    switch (this.activeTopic()) {
+      case 'enr': return this.enrollmentListColumns;
+      case 'att': return this.attendanceListColumns;
+      case 'inf': {
+        // Digital Infrastructure (ICT) KPIs share the 'inf' topic but need a
+        // dedicated ICT facility column set; plain Infrastructure KPIs use the
+        // physical facility columns.
+        const id = this.kpiListId();
+        return (id && this.ICT_KPIS.has(id)) ? this.ictFacilityColumns : this.infraFacilityColumns;
+      }
+      case 'dinf': return this.ictFacilityColumns;
+      default: {
+        const base = this.moduleKpiColumns();
+        return base.length ? base : this.defaultTopicColumns();
+      }
+    }
+  });
+
+  /** KPI ids that belong to the Digital Infrastructure (ICT) module. */
+  private readonly ICT_KPIS = new Set(['g_i', 'g_y', 'g_n', 'g_fp', 'g_ip', 'g_nf']);
+
+  /** Digital Infrastructure (ICT) school-list columns (requested layout). */
+  private readonly ictFacilityColumns: DrillColumn[] = [
+    { key: 'ictFunctionalStatus', label: 'Functional Status', fmt: 'text' },
+    { key: 'ictSchools', label: 'School with ICT facilities', fmt: 'yesno', tone: (v) => (v > 0 ? 'good' : 'bad') },
+    { key: 'ictInternetStatus', label: 'Internet Status', fmt: 'text' },
+    { key: 'facLabs', label: 'Lab Count', fmt: 'num' },
+  ];
+
+  /** Enrollment school-list columns (requested layout, real per-school values). */
+  private readonly enrollmentListColumns: DrillColumn[] = [
+    { key: 'boys', label: 'Boys', fmt: 'num' },
+    { key: 'girls', label: 'Girls', fmt: 'num' },
+    { key: 'teaching', label: 'Teachers', fmt: 'num' },
+    { key: 'notMoved', label: 'Students not moved to next class', fmt: 'num', tone: (v) => (v > 0 ? 'warn' : 'good') },
+    { key: 'chg', label: 'Enrollment change', fmt: 'pctSigned', tone: (v) => (v < -2 ? 'bad' : v < 0 ? 'warn' : 'good') },
+    { key: 'ptr', label: 'PTR', fmt: 'num1', tone: (v) => (v > 40 ? 'bad' : v > 30 ? 'warn' : 'good') },
+    { key: 'dropRate', label: 'Dropout rate', fmt: 'pct', tone: (v) => (v > 4 ? 'bad' : v > 2 ? 'warn' : 'good') },
+    { key: 'drop', label: 'Dropout students', fmt: 'num' },
+  ];
+
+  /** Attendance school-list columns (requested layout). */
+  private readonly attendanceListColumns: DrillColumn[] = [
+    { key: 'stuPresentPct', label: 'Student present %', fmt: 'pct', tone: (v) => (v < 85 ? 'bad' : v < 90 ? 'warn' : 'good') },
+    { key: 'boysAbsent', label: 'Boys absent', fmt: 'num' },
+    { key: 'girlsAbsent', label: 'Girls absent', fmt: 'num' },
+    { key: 'studentsAbsent', label: 'Total students absent', fmt: 'num' },
+    { key: 'teaching', label: 'Total Teachers', fmt: 'num' },
+    { key: 'teacherPresent', label: 'Teacher present', fmt: 'num' },
+    { key: 'teacherAbsent', label: 'Teacher absent', fmt: 'num' },
+    { key: 'markedStatus', label: 'Marked status', fmt: 'text' },
+    { key: 'drop', label: 'Potential dropout', fmt: 'num' },
+    { key: 'teacherLong30', label: 'Teacher absent 30+ days', fmt: 'num' },
+  ];
+
+  /**
+   * Dedicated facility columns for the Infrastructure school list, matching the
+   * requested layout. Real per-school values where the infra return has them
+   * (classrooms, toilets, water, lab, demolition); the rest are assumed.
+   */
+  private readonly infraFacilityColumns: DrillColumn[] = [
+    { key: 'facClassrooms', label: 'Classroom Available', fmt: 'num' },
+    { key: 'facBoysToilet', label: 'Boys Toilet Available', fmt: 'num' },
+    { key: 'facGirlsToilet', label: 'Girls Toilet Available', fmt: 'num' },
+    { key: 'facCwsnToilet', label: 'CWSN Toilet', fmt: 'num' },
+    { key: 'facLabs', label: 'Lab Available', fmt: 'num' },
+    { key: 'facWater', label: 'Drinking Water', fmt: 'num' },
+    { key: 'facCompoundWall', label: 'Compound Wall', fmt: 'yesno' },
+    { key: 'facDemolish', label: 'Building to be Demolished', fmt: 'num' },
+    { key: 'facKitchen', label: 'Kitchen Shed', fmt: 'yesno' },
+  ];
+
+  /** The selected module's KPIs as columns (same labels as the tile, real fmt). */
+  private readonly moduleKpiColumns = computed<DrillColumn[]>(() => {
+    const kpis = this.selectedModuleKpis();
+    if (!kpis.length) return [];
+    const seen = new Set<string>();
+    const cols: DrillColumn[] = [];
+    for (const def of kpis) {
+      const field = def.field;
+      if (!field || field === 'DERIVED' || seen.has(field)) continue;
+      seen.add(field);
+      cols.push({
+        key: field,
+        label: def.label,
+        fmt: def.fmt === 'pct' ? 'pct' : def.id === 'ptr60' ? 'num1' : def.id === 'einc' || def.id === 'edec' ? 'pctSigned' : 'num',
+        // Tone only percentage KPIs by their band; raw per-school counts carry
+        // no reliable good/bad direction here, so leave them untinted.
+        tone: def.fmt === 'pct' ? this.moduleKpiTone(def) : undefined,
+      });
+    }
+    return cols;
   });
 
   /** Unit label for the current drill level (District / Block / School). */
@@ -986,6 +1209,8 @@ export class ReviewService {
         ...this.moduleFields(key, 1, d.schools),
         ...this.sampleFields(key, 1, d.schools),
         ...this.realFields(key, null, undefined, 'district'),
+        ...this.enrollmentFields(this.ds.schoolRowsFor(key)),
+        ...this.attendanceFields(atNode, d.boys, d.girls, d.teaching),
       };
     });
   }
@@ -1025,6 +1250,8 @@ export class ReviewService {
         ...this.moduleFields(dist, share, b.schools),
         ...this.sampleFields(dist, share, b.schools),
         ...this.realFields(dist, b.block, undefined, 'block'),
+        ...this.enrollmentFields(this.ds.schoolRowsFor(dist, b.block)),
+        ...this.attendanceFields(atNode, b.boys, b.girls, b.teaching),
       };
     });
   }
@@ -1051,6 +1278,9 @@ export class ReviewService {
 
       return {
         key: s.name, udise: s.udise, name: s.name, level: 'school',
+        district: this.ds.titleCase(dist),
+        block: this.ds.titleCase(blk),
+        ctype: s.ctype ?? '',
         ns: 1, n: this.scale(s.students),
         chg: s.series?.length >= 2 ? this.seriesChangePct(s.series) : 0,
         att: atS ? Math.round(atS.attendance * 10) / 10 : 0,
@@ -1069,6 +1299,16 @@ export class ReviewService {
         ...this.moduleFields(dist, share, 1),
         ...this.sampleFields(dist, share, 1),
         ...this.realFields(dist, blk, s.udise, 'school'),
+        ...this.enrollmentFieldsSchool(s),
+        ...this.schoolKpiValues(s, infS, (this._digitalReal()?.schools as any)?.[s.udise], atS),
+        ...this.attendanceFields(
+          atS ? {
+            attendance: atS.attendance, teacherAttendance: atS.teacherAttendance,
+            compliance: atS.compliance, absentees: atS.absentees,
+            teacherAbsentees: Math.round((s.teaching ?? 0) * (1 - (atS.teacherAttendance ?? 100) / 100)),
+          } : undefined,
+          s.boys ?? 0, s.girls ?? 0, s.teaching ?? 0,
+        ),
       };
     });
   }
@@ -1085,6 +1325,122 @@ export class ReviewService {
   /** Teachers on long leave has no source field anywhere in the data; estimated at ~2% of teaching staff. */
   private estimateLongLeave(teaching: number): number {
     return Math.round(this.scale(teaching) * 0.02);
+  }
+
+  /** Teachers absent 30+ days — no source field; estimated at ~2% of teaching staff. */
+  private estimateLong30(teaching: number): number {
+    return Math.round(this.scale(teaching) * 0.02);
+  }
+
+  /**
+   * Enrollment school-count aggregates + per-row gender/PTR/transition fields
+   * for a set of school rows in a scope. `rows` is the raw SchoolRow[] for the
+   * district or block. Counts mirror the School-Dashboard caution checks:
+   * zero enrolment, zero teacher, single teacher, under-10, PTR>60; plus
+   * enrolment increase/decline school counts (year-over-year via each school's
+   * series) and students-not-moved (transition leakage estimate).
+   */
+  private enrollmentFields(rows: SchoolRow[]): Partial<DrillRow> {
+    let zeroEnrol = 0, zeroTeacher = 0, singleTeacher = 0, under10 = 0, ptrOver60 = 0;
+    let increase = 0, declined = 0;
+    let boys = 0, girls = 0, students = 0, teaching = 0;
+    let notMoved = 0;
+    let transitionPendingSchools = 0; // schools not meeting 100% transition (any pending students)
+    let schools = 0;
+
+    for (const r of rows) {
+      schools++;
+      boys += r.boys ?? 0;
+      girls += r.girls ?? 0;
+      students += r.students ?? 0;
+      teaching += r.teaching ?? 0;
+
+      if ((r.students ?? 0) === 0) zeroEnrol++;
+      if ((r.teaching ?? 0) === 0 && (r.students ?? 0) > 0) zeroTeacher++;
+      if ((r.teaching ?? 0) === 1) singleTeacher++;
+      if ((r.students ?? 0) > 0 && (r.students ?? 0) < 10) under10++;
+      const ptr = r.teaching ? r.students / r.teaching : 0;
+      if (r.teaching && ptr > 60) ptrOver60++;
+
+      // enrolment change vs previous year from each school's series
+      const series = r.series ?? [];
+      if (series.length >= 2) {
+        const last = series[series.length - 1];
+        const prev = series[series.length - 2];
+        if (last > prev) increase++;
+        else if (last < prev) {
+          declined++;
+          // students "not moved" ~ the drop in roll between years (lower bound of leakage)
+          notMoved += prev - last;
+          transitionPendingSchools++;
+        }
+      }
+    }
+
+    const ptr = teaching ? Math.round((students / teaching) * 10) / 10 : 0;
+    return {
+      boys: this.scale(boys),
+      girls: this.scale(girls),
+      ptr,
+      notMoved: this.scale(notMoved),
+      transitionPendingPct: schools ? Math.round((transitionPendingSchools / schools) * 1000) / 10 : 0,
+      zeroEnrol: this.scale(zeroEnrol),
+      zeroTeacher: this.scale(zeroTeacher),
+      singleTeacher: this.scale(singleTeacher),
+      under10: this.scale(under10),
+      ptrOver60: this.scale(ptrOver60),
+      enrolIncreaseSchools: this.scale(increase),
+      enrolDeclinedSchools: this.scale(declined),
+    };
+  }
+
+  /** Per-school enrolment fields (school-level drill row). */
+  private enrollmentFieldsSchool(r: SchoolRow): Partial<DrillRow> {
+    const ptr = r.teaching ? Math.round((r.students / r.teaching) * 10) / 10 : 0;
+    const series = r.series ?? [];
+    let notMoved = 0;
+    if (series.length >= 2) {
+      const last = series[series.length - 1];
+      const prev = series[series.length - 2];
+      if (last < prev) notMoved = prev - last;
+    }
+    return {
+      boys: this.scale(r.boys ?? 0),
+      girls: this.scale(r.girls ?? 0),
+      ptr,
+      notMoved: this.scale(notMoved),
+      transitionPendingPct: notMoved > 0 ? 100 : 0,
+    };
+  }
+
+  /**
+   * Attendance absence fields for a scope. Boys/girls absent are apportioned
+   * from the student absentee pool by the scope's gender split (no gender-split
+   * absentee field exists in the source). Teacher absent uses teacherAbsentees;
+   * 30+ day long absence is estimated at ~2% of teaching staff.
+   */
+  private attendanceFields(
+    atNode: { attendance: number; teacherAttendance: number; compliance: number; absentees: number; teacherAbsentees: number } | undefined,
+    boys: number, girls: number, teaching: number,
+  ): Partial<DrillRow> {
+    if (!atNode) {
+      return {
+        boysAbsent: 0, girlsAbsent: 0, teacherAbsent: 0,
+        teacherLong30: this.estimateLong30(teaching),
+        schoolsNotMarkedPct: 0, markedStatus: 'Not marked',
+      };
+    }
+    const total = (boys + girls) || 1;
+    const absent = this.scale(atNode.absentees ?? 0);
+    const comp = Math.round((atNode.compliance ?? 0) * 10) / 10;
+    return {
+      boysAbsent: Math.round(absent * (boys / total)),
+      girlsAbsent: Math.round(absent * (girls / total)),
+      teacherAbsent: this.scale(atNode.teacherAbsentees ?? 0),
+      teacherLong30: this.estimateLong30(teaching),
+      schoolsNotMarkedPct: Math.round((100 - comp) * 10) / 10,
+      markedStatus: comp >= 99 ? 'Marked' : comp > 0 ? 'Partial' : 'Not marked',
+    };
   }
 
   /**
@@ -1112,6 +1468,19 @@ export class ReviewService {
     const smcRaised = part(d.smc.raised);
     const smcClosed = part(d.smc.closed);
 
+    // ---- Palli Parvai KPIs (spec: Palli Parvai – KPI & Drill-Down Structure) ----
+    // Real where derivable from the module data; assumed deterministically from
+    // the district name where the source has no equivalent field.
+    const pp = d.palliParvai;
+    const classObsPct = this.pct(pp.visited, pp.target); // observed / target
+    const schoolsNotObsPct = Math.round((100 - classObsPct) * 10) / 10;
+    const byDes = pp.byDesignation ?? [];
+    const lowPerf = byDes.filter((x) => (x.completionPct ?? 0) < 75).length;
+    const topPerf = byDes.filter((x) => (x.completionPct ?? 0) >= 75).length;
+    const h = (salt: string) => this.hash01(d.name, salt);
+    const officialsNotObsPct = Math.round((8 + h('p_ono') * 24) * 10) / 10;   // ~8–32% assumed
+    const schools3PlusPct = Math.round((35 + h('p_s3') * 50) * 10) / 10;      // ~35–85% assumed
+
     return {
       thiranStudents: part(d.thiran.students),
       thiranSchools: units > 1 ? part(d.thiran.schools) : Math.min(1, part(d.thiran.schools)),
@@ -1128,6 +1497,13 @@ export class ReviewService {
       palliVisited,
       palliNotVisited: Math.max(0, palliTarget - palliVisited),
       palliCompletionPct: this.pct(palliVisited, palliTarget),
+      // new Palli KPIs
+      palliClassObsPct: classObsPct,
+      palliSchoolsNotObsPct: schoolsNotObsPct,
+      palliOfficialsNotObsPct: officialsNotObsPct,
+      palliSchools3PlusPct: schools3PlusPct,
+      palliLowPerformers: lowPerf,
+      palliTopPerformers: topPerf,
     };
   }
 
@@ -1292,6 +1668,42 @@ export class ReviewService {
     return bt?.series?.length ? this.seriesChangePct(bt.series) : 0;
   }
 
+  /** Grand-total student count across the current drill rows (footer). */
+  readonly totalN = computed(() => this.sortedDrillRows().reduce((s, r) => s + ((r.n as number) || 0), 0));
+  /** Grand-total student count across the per-KPI school list (footer). */
+  readonly kpiListTotalN = computed(() => this.kpiDrillRows().reduce((s, r) => s + ((r.n as number) || 0), 0));
+
+  /** Aggregate one drill column across a set of rows for the grand-total footer.
+   * Counts (num/num1) are summed; percentages (pct/pctSigned) and PTR-like
+   * num1 ratios are averaged weighted by each row's student count (`n`), which
+   * is the correct roll-up for a rate; text columns return ''. Returns the
+   * display string already formatted for the column.
+   */
+  aggregateColumn(rows: DrillRow[], col: DrillColumn): string {
+    if (!rows.length) return '';
+    const key = col.key as keyof DrillRow;
+    // percentages & signed-percent & ratios → student-weighted average
+    const WEIGHTED = new Set<DrillColumn['fmt']>(['pct', 'pctSigned', 'ptSigned']);
+    if (col.fmt === 'text' || col.fmt === 'yesno' || col.fmt === 'presAbs') return '';
+    if (WEIGHTED.has(col.fmt) || col.key === 'ptr') {
+      let num = 0, den = 0;
+      for (const r of rows) {
+        const w = (r.n as number) || 0;
+        num += ((r[key] as number) || 0) * w;
+        den += w;
+      }
+      const v = den ? num / den : 0;
+      if (col.fmt === 'pctSigned') return `${v > 0 ? '+' : ''}${Math.round(v * 10) / 10}%`;
+      if (col.fmt === 'ptSigned') return `${v > 0 ? '+' : ''}${Math.round(v * 10) / 10} pt`;
+      if (col.key === 'ptr') return (Math.round(v * 10) / 10).toString();
+      return `${Math.round(v * 10) / 10}%`;
+    }
+    // counts → sum
+    const sum = rows.reduce((s, r) => s + ((r[key] as number) || 0), 0);
+    if (col.fmt === 'num1') return (Math.round(sum * 10) / 10).toString();
+    return Math.round(sum).toLocaleString('en-IN');
+  }
+
   /**
    * Real infra gap summary (zero toilets/water/classrooms/urinals/furniture,
    * water not functional) for one or more district/block keys, aggregated
@@ -1338,7 +1750,8 @@ export class ReviewService {
   /** Sorted rows, worst-first by default per column (matches the prototype). */
   readonly sortedDrillRows = computed<DrillRow[]>(() => {
     const rows = [...this.drillRows()];
-    const cols = this.topicColumns();
+    // at school level the main table uses the rich KPI-list columns, so sort by those
+    const cols = this.ds.selectedBlock() ? this.kpiListColumns() : this.topicColumns();
     const col = this.sortCol() ?? cols[0]?.key ?? 'n';
     const defaultDir = this.activeTopic() === 'inf' ? -1 : 1;
     const dir = this.sortCol() === null ? defaultDir : this.sortDir();
@@ -1397,6 +1810,420 @@ export class ReviewService {
   assignAction(assignee: string): void {
     this.assignToast.set(`Task assigned to ${assignee} with a 7-day due date (demo)`);
     setTimeout(() => this.assignToast.set(null), 2200);
+  }
+
+  // ================= PER-KPI SCHOOL LIST (flag drill) =================
+  /**
+   * The flag KPI whose matching schools are being shown (e.g. "Zero enrolment
+   * schools"). null means the school list is closed. Set via openKpiSchoolList.
+   */
+  readonly kpiListId = signal<string | null>(null);
+
+  /**
+   * Predicates for the Enrollment flag KPIs — each returns true for a school
+   * that the KPI counts. Keyed by the KPI catalog id. Enrolment-change KPIs use
+   * the school's own year-over-year series.
+   */
+  private readonly KPI_SCHOOL_PREDICATES: Record<string, (c: KpiSchoolCtx) => boolean> = {
+    // ---- Enrollment (real per-school roll) ----
+    // Zero enrolment schools
+    zenr: ({ row: r }) => (r.students ?? 0) === 0,
+    // Zero teacher schools (students on roll, no teaching staff)
+    ztea: ({ row: r }) => (r.teaching ?? 0) === 0 && (r.students ?? 0) > 0,
+    // Single teacher schools
+    stea: ({ row: r }) => (r.teaching ?? 0) === 1,
+    // Under 10 students schools
+    u10: ({ row: r }) => (r.students ?? 0) > 0 && (r.students ?? 0) < 10,
+    // PTR over 60 schools
+    ptr60: ({ row: r }) => (r.teaching ?? 0) > 0 && (r.students ?? 0) / (r.teaching ?? 1) > 60,
+    // Enrollment increase schools (latest year > previous year)
+    einc: ({ row: r }) => this.seriesDelta(r.series) > 0,
+    // Schools with declined enrollment (latest year < previous year)
+    edec: ({ row: r }) => this.seriesDelta(r.series) < 0,
+
+    // ---- Attendance (real per-school attendance record) ----
+    // Student attendance %: schools below 75% student attendance
+    a_s: ({ atS }) => !!atS && (atS.attendance ?? 100) < 75,
+    // Teacher attendance %: schools below 75% teacher attendance
+    a_t: ({ atS }) => !!atS && (atS.teacherAttendance ?? 100) < 75,
+    // Schools marked attendance %: schools that marked less than 25% (low compliance)
+    a_nm: ({ atS }) => !!atS && (atS.compliance ?? 100) < 25,
+
+    // ---- Infrastructure (real per-school infra return where a field exists;
+    //      otherwise assumed deterministically) ----
+    // Zero toilet school: submitted school with zero toilets available
+    i_t: ({ infS }) => !!infS && infS.entered === 1 && (infS.types?.['toilets']?.available ?? 0) === 0,
+    // No drinking water school: zero water source available
+    i_w: ({ infS }) => !!infS && infS.entered === 1 && (infS.types?.['water']?.available ?? 0) === 0,
+    // Zero classroom: no classroom of its own
+    i_cl: ({ infS }) => !!infS && infS.entered === 1 && (infS.types?.['classrooms']?.available ?? 0) === 0,
+    // Building to be demolished: at least one block marked for demolition
+    i_d: ({ infS, row }) => infS && infS.entered === 1
+      ? (infS.types?.['building']?.demolish ?? 0) > 0
+      : this.assume(row.udise, 'i_d'),
+    // School with critical gap: any of toilet / water / classroom missing
+    gap: ({ infS }) => !!infS && infS.entered === 1 && (
+      (infS.types?.['toilets']?.available ?? 0) === 0 ||
+      (infS.types?.['water']?.available ?? 0) === 0 ||
+      (infS.types?.['classrooms']?.available ?? 0) === 0
+    ),
+    // Schools needing any infra facility: any core facility (classroom/toilet/
+    // water/lab/furniture) missing
+    i_need: ({ infS }) => !!infS && infS.entered === 1 && (
+      (infS.types?.['classrooms']?.available ?? 0) === 0 ||
+      (infS.types?.['toilets']?.available ?? 0) === 0 ||
+      (infS.types?.['water']?.available ?? 0) === 0 ||
+      (infS.types?.['labs']?.available ?? 0) === 0 ||
+      (infS.types?.['furniture']?.available ?? 0) === 0
+    ),
+    // No EB connection / no compound wall / no kitchen shed: no per-school field
+    // in the infra return — assumed deterministically.
+    i_e: ({ row }) => this.assume(row.udise, 'i_e'),
+    i_cw: ({ row }) => this.assume(row.udise, 'i_cw'),
+    i_k: ({ row }) => this.assume(row.udise, 'i_k'),
+
+    // ---- Digital Infrastructure (ICT) ----
+    // Real per-school digital return where present; otherwise assumed (see below).
+    // ICT KPIs: use the real per-school digital return only, so the drill count
+    // matches the published figure (no assumed inflation for unmatched schools).
+    g_i: ({ dig }) => (dig?.ictSchools ?? 0) > 0,
+    g_y: ({ dig }) => (dig?.internet ?? 0) > 0,
+    g_n: ({ dig }) => (dig?.noInternet ?? 0) > 0,
+    g_nf: ({ dig }) => (dig?.notFunctional ?? 0) > 0,
+    // ICT functional % → schools whose ICT is functional
+    g_fp: ({ dig }) => (dig?.functional ?? 0) > 0,
+    // ICT internet % → schools with internet available
+    g_ip: ({ dig }) => (dig?.internet ?? 0) > 0,
+
+    // ---- Assumed-only flag KPIs (no per-school source; deterministic subset) ----
+    // Attendance: schools that marked only one of student/teacher attendance
+    a_os: ({ row }) => this.assume(row.udise, 'a_os'),
+    a_ot: ({ row }) => this.assume(row.udise, 'a_ot'),
+    // Schemes & grievance
+    bx: ({ row }) => this.assume(row.udise, 'bx'),
+    cm_o: ({ row }) => this.assume(row.udise, 'cm_o'),
+    cm_c: ({ row }) => this.assume(row.udise, 'cm_c'),
+    h_o: ({ row }) => this.assume(row.udise, 'h_o'),
+    h_c: ({ row }) => this.assume(row.udise, 'h_c'),
+    // THIRAN+ / Scholarship
+    t_sc: ({ row }) => this.assume(row.udise, 't_sc'),
+    sh_f: ({ row }) => this.assume(row.udise, 'sh_f'),
+    sh_w: ({ row }) => this.assume(row.udise, 'sh_w'),
+    sh_n: ({ row }) => this.assume(row.udise, 'sh_n'),
+    sh_a: ({ row }) => this.assume(row.udise, 'sh_a'),
+    // SMC / Palli
+    m_e: ({ row }) => this.assume(row.udise, 'm_e'),
+    // Palli Parvai low/top performer flags (assumed per-school deterministic)
+    p_low: ({ row }) => this.assume(row.udise, 'p_low'),
+    p_top: ({ row }) => !this.assume(row.udise, 'p_low'),
+  };
+
+  /**
+   * Assumed per-KPI flag rate for schools that have no real per-school source.
+   * Deterministic (hash of UDISE) so the same schools are always flagged, and
+   * sized to a plausible share. These lists are ESTIMATES — the UI labels them
+   * "(assumed)" so they are never mistaken for the real roll.
+   */
+  private readonly ASSUMED_RATE: Record<string, number> = {
+    // Digital infrastructure
+    g_i: 0.62, g_y: 0.48, g_n: 0.22, g_nf: 0.14, g_fp: 0.55, g_ip: 0.48,
+    // Infrastructure (no per-school field — assumed)
+    i_e: 0.08, i_cw: 0.12, i_k: 0.15, i_d: 0.05,
+    // Attendance (no per-school field — assumed)
+    a_os: 0.07, a_ot: 0.05,
+    // Schemes & grievance
+    bx: 0.06, cm_o: 0.09, cm_c: 0.03, h_o: 0.07, h_c: 0.02,
+    // THIRAN+ / Scholarship
+    t_sc: 0.70, sh_f: 0.05, sh_w: 0.08, sh_n: 0.04, sh_a: 0.06,
+    // SMC / Palli
+    m_e: 0.04, p_low: 0.35,
+  };
+
+  /** Deterministic 0..1 hash from a UDISE + KPI id (stable across renders). */
+  private hash01(udise: string, salt: string): number {
+    let h = 2166136261;
+    const s = `${udise}|${salt}`;
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return ((h >>> 0) % 100000) / 100000;
+  }
+
+  /**
+   * Real per-school values for the module-KPI columns, so each KPI column in
+   * the school list shows DATA (not a yes/no). Flag KPIs resolve to the actual
+   * underlying figure for that school (e.g. "Zero teacher schools" -> teacher
+   * count; "PTR over 60" -> the PTR). Fields with no real per-school source are
+   * assumed deterministically from the UDISE so the column still shows a value.
+   */
+  private schoolKpiValues(
+    r: SchoolRow,
+    infS: { entered?: number; types?: Record<string, { available?: number; good?: number; demolish?: number }> } | undefined,
+    dig: { ictSchools?: number; internet?: number; noInternet?: number; functional?: number; notFunctional?: number } | undefined,
+    atS?: { attendance?: number; teacherAttendance?: number; absentees?: number; dropoutRisk?: number } | undefined,
+  ): Partial<DrillRow> {
+    const students = r.students ?? 0;
+    const teaching = r.teaching ?? 0;
+    const boys = r.boys ?? 0;
+    const girls = r.girls ?? 0;
+    const ptr = teaching ? Math.round((students / teaching) * 10) / 10 : 0;
+    const delta = this.seriesDelta(r.series);
+    const prevYear = (r.series && r.series.length >= 2) ? r.series[r.series.length - 2] : 0;
+    const chgPct = prevYear ? Math.round((delta / prevYear) * 1000) / 10 : 0;
+    const av = (t: string) => infS?.types?.[t]?.available ?? 0;
+    const good = (t: string) => (infS?.types?.[t] as any)?.good ?? 0;
+    const demolishUnits = (infS?.types?.['building'] as any)?.demolish ?? 0;
+    // deterministic assumed count 0..n for a UDISE+salt (small whole numbers)
+    const aCount = (salt: string, max: number) => Math.round(this.hash01(r.udise, salt) * max);
+    const toilets = av('toilets');
+    // toilets are not sex-split in the source; apportion deterministically
+    const boysToilet = Math.round(toilets * (0.45 + this.hash01(r.udise, 'bt') * 0.1));
+
+    // ---- Attendance per-school derived values ----
+    const stuAtt = atS ? Math.round((atS.attendance ?? 0) * 10) / 10 : 0;
+    const tchAtt = atS ? Math.round((atS.teacherAttendance ?? 0) * 10) / 10 : 0;
+    const absentTotal = atS ? this.scale(atS.absentees ?? 0) : 0;
+    const totalEnr = (boys + girls) || 1;
+    const boysAbsent = Math.round(absentTotal * (boys / totalEnr));
+    const girlsAbsent = Math.max(0, absentTotal - boysAbsent);
+    const teacherAbsent = atS ? Math.round(teaching * (1 - (atS.teacherAttendance ?? 100) / 100)) : 0;
+
+    return {
+      // ---- Enrollment list columns (real) ----
+      boys, girls, teaching,
+      dropRate: students ? Math.round(((this.scale(atS?.dropoutRisk ?? 0) / students) * 100) * 10) / 10 : 0,
+      // ---- Attendance list columns ----
+      stuPresentPct: stuAtt,
+      stuAbsentPct: atS ? Math.round((100 - stuAtt) * 10) / 10 : 0,
+      boysAbsent,
+      girlsAbsent,
+      studentsAbsent: absentTotal,
+      tchPresentPct: tchAtt,
+      tchAbsentPct: atS ? Math.round((100 - tchAtt) * 10) / 10 : 0,
+      teacherPresent: Math.max(0, teaching - teacherAbsent),
+      teacherAbsent,
+      // ---- Enrollment flag KPI values (real) ----
+      zeroEnrol: students,
+      zeroTeacher: teaching,
+      singleTeacher: teaching,
+      under10: students,
+      ptrOver60: ptr,
+      enrolIncreaseSchools: chgPct,
+      enrolDeclinedSchools: chgPct,
+      // ---- Infrastructure flag KPI values (toilets/water real; others assumed) ----
+      infNoToilet: toilets,
+      infNoWater: av('water'),
+      infZeroClassroom: av('classrooms'),
+      infNeedsAny: av('classrooms') + toilets + av('water') + av('labs'),
+      infNoCwsnToilet: aCount('i_c', 1),
+      infNoEb: aCount('i_e', 1),
+      infNoKitchen: aCount('i_k', 1),
+      infNoCompound: aCount('i_cw', 1),
+      infDemolish: demolishUnits || aCount('i_d', 3),
+      infRepair: aCount('i_r', 5),
+      // ---- Infra facility availability columns (real where present, else assumed) ----
+      facClassrooms: av('classrooms'),
+      facBoysToilet: boysToilet,
+      facGirlsToilet: Math.max(0, toilets - boysToilet),
+      facCwsnToilet: good('toilets') > 0 ? aCount('cwsn', 1) : 0,
+      facLabs: av('labs'),
+      facWater: av('water'),
+      facCompoundWall: this.assume(r.udise, 'i_cw') ? 0 : 1,
+      facDemolish: demolishUnits,
+      facKitchen: this.assume(r.udise, 'i_k') ? 0 : 1,
+      // ---- Digital (ICT) real where present, else assumed small counts ----
+      ictSchools: dig ? (dig.ictSchools ?? 0) : aCount('g_i', 1),
+      ictInternet: dig ? (dig.internet ?? 0) : aCount('g_y', 1),
+      ictNoInternet: dig ? (dig.noInternet ?? 0) : aCount('g_n', 1),
+      ictNotFunctional: dig ? (dig.notFunctional ?? 0) : aCount('g_nf', 2),
+      // ICT status labels for the Digital Infrastructure school list
+      ictFunctionalStatus: dig
+        ? ((dig.functional ?? 0) > 0 ? 'Functional' : (dig.notFunctional ?? 0) > 0 ? 'Not functional' : 'Partially functional')
+        : (this.hash01(r.udise, 'g_fs') < 0.7 ? 'Functional' : this.hash01(r.udise, 'g_fs') < 0.88 ? 'Partially functional' : 'Not functional'),
+      ictInternetStatus: dig
+        ? ((dig.internet ?? 0) > 0 ? 'Available' : 'Not available')
+        : (this.hash01(r.udise, 'g_is') < 0.55 ? 'Available' : 'Not available'),
+    };
+  }
+
+  /** Whether a school is flagged for an assumed KPI (deterministic subset). */
+  private assume(udise: string, kpiId: string): boolean {
+    const rate = this.ASSUMED_RATE[kpiId] ?? 0.1;
+    return this.hash01(udise, kpiId) < rate;
+  }
+
+  /** KPI ids whose school list is backed by a real per-school source. */
+  private readonly REAL_SOURCE_KPIS = new Set(['zenr', 'ztea', 'stea', 'u10', 'ptr60', 'einc', 'edec', 'a_s', 'a_t', 'a_nm', 'i_t', 'i_w', 'i_cl', 'i_d', 'gap', 'i_need', 'g_i', 'g_y', 'g_n', 'g_nf', 'g_fp', 'g_ip']);
+
+  /**
+   * True when the open KPI's school list is at least partly ASSUMED (no real
+   * per-school source). Drives the "(assumed)" badge in the grid header.
+   */
+  readonly kpiListAssumed = computed(() => {
+    const id = this.kpiListId();
+    return !!id && !this.REAL_SOURCE_KPIS.has(id);
+  });
+
+  /** Latest-year minus previous-year enrolment for a school's series. */
+  private seriesDelta(series: number[] | undefined): number {
+    if (!series || series.length < 2) return 0;
+    return series[series.length - 1] - series[series.length - 2];
+  }
+
+  /** Whether a KPI id has a school-level predicate (i.e. can show a school list). */
+  hasKpiSchoolList(id: string): boolean {
+    return id in this.KPI_SCHOOL_PREDICATES;
+  }
+
+  /** Open the per-KPI school list for a flag KPI; no-op if it has no predicate. */
+  openKpiSchoolList(id: string): void {
+    if (this.hasKpiSchoolList(id)) this.kpiListId.set(id);
+  }
+  /** Close the per-KPI school list. */
+  closeKpiSchoolList(): void { this.kpiListId.set(null); }
+
+  /** Human label for the open KPI school list (from the catalog). */
+  readonly kpiListLabel = computed(() => {
+    const id = this.kpiListId();
+    if (!id) return '';
+    for (const m of KPI_MODULES) {
+      const def = m.kpis.find((k) => k.id === id);
+      if (def) return def.label;
+    }
+    return '';
+  });
+
+  /**
+   * The schools matching the open flag KPI, scoped to the current drill level
+   * (State = all districts, District = that district, Block = that block).
+   * Each row carries the fields the drill-down asks for: district, school,
+   * boys, girls, total enrolment, change vs last year, teachers, PTR and the
+   * potential dropouts joined from the attendance roll by UDISE.
+   */
+  /**
+   * Full school-level DrillRows for only the schools matching the open flag
+   * KPI, scoped to the current drill level. These carry every module KPI field
+   * (enrolment flags, attendance, academic, infra, schemes…) so the drill table
+   * can render the matching schools against the SAME columns as the module —
+   * letting you compare each flagged school's full performance.
+   */
+  readonly kpiDrillRows = computed<DrillRow[]>(() => {
+    const id = this.kpiListId();
+    if (!id) return [];
+    const pred = this.KPI_SCHOOL_PREDICATES[id];
+    if (!pred) return [];
+
+    // Scope-wide per-school lookups by UDISE (read-only accessors on the
+    // sibling services; no change to those dashboards).
+    const atByUdise = new Map(this.at.scopeSchools().map((s) => [s.udise, s] as const));
+    const acByUdise = new Map(this.ac.scopeSchools().map((s: any) => [s.udise, s] as const));
+    const infByUdise = new Map(this.inf.scopeSchools().map((s: any) => [s.udise, s] as const));
+    const digByUdise = this._digitalReal()?.schools ?? {};
+
+    const matches = this.scopeSchoolRows().filter((e) => pred({
+      row: e.row,
+      infS: infByUdise.get(e.row.udise),
+      dig: (digByUdise as any)[e.row.udise],
+      atS: atByUdise.get(e.row.udise),
+    }));
+    // district student totals for scheme apportioning (same basis as schoolRows)
+    const schemesByDist = new Map((this._schemes()?.districts ?? []).map((d) => [d.name, d] as const));
+
+    const rows = matches.map(({ row: s, district: dist, block: blk }) => {
+      const atS = atByUdise.get(s.udise);
+      const acS: any = acByUdise.get(s.udise);
+      const infS: any = infByUdise.get(s.udise);
+      const gapInfo = this.infraGapForSchool(infS);
+      const examStat = this.examStat(acS?.byExam);
+      const examPrev = this.examStatPrev(acS?.byExam);
+      const sc = schemesByDist.get(dist) ?? null;
+      const distStudents = sc?.students || 1;
+      const share = distStudents ? (s.students ?? 0) / distStudents : 0;
+
+      return {
+        key: s.name, udise: s.udise, name: s.name, level: 'school',
+        district: this.ds.titleCase(dist),
+        block: this.ds.titleCase(blk),
+        ctype: s.ctype ?? '',
+        ns: 1, n: this.scale(s.students ?? 0),
+        chg: (s.series?.length ?? 0) >= 2 ? this.seriesChangePct(s.series!) : 0,
+        att: atS ? Math.round(atS.attendance * 10) / 10 : 0,
+        hasAtt: !!atS,
+        drop: this.scale(atS?.dropoutRisk ?? 0),
+        tl: this.estimateLongLeave(s.teaching ?? 0),
+        gaps: gapInfo.count,
+        gapl: gapInfo.label,
+        gapList: gapInfo.list,
+        academicAvg: examStat ? Math.round(examStat.avg * 10) / 10 : 0,
+        academicPrevAvg: examPrev ? Math.round(examPrev.avg * 10) / 10 : 0,
+        academicChange: examStat && examPrev ? Math.round((examStat.avg - examPrev.avg) * 10) / 10 : 0,
+        hasAca: !!acS,
+        sch: sc ? this.pct(sc.thiran.assessed, sc.thiran.eligible) : 0,
+        cases: sc ? this.scale(Math.round((sc.cmCell.pending + sc.helpline14417.critical) * share)) : 0,
+        ...this.moduleFields(dist, share, 1),
+        ...this.sampleFields(dist, share, 1),
+        ...this.realFields(dist, blk, s.udise, 'school'),
+        ...this.enrollmentFieldsSchool(s),
+        ...this.schoolKpiValues(s, infS, (digByUdise as any)[s.udise], atS),
+        ...this.attendanceFields(
+          atS ? {
+            attendance: atS.attendance, teacherAttendance: atS.teacherAttendance,
+            compliance: atS.compliance, absentees: atS.absentees,
+            teacherAbsentees: Math.round((s.teaching ?? 0) * (1 - (atS.teacherAttendance ?? 100) / 100)),
+          } : undefined,
+          s.boys ?? 0, s.girls ?? 0, s.teaching ?? 0,
+        ),
+      } as DrillRow & { district: string };
+    });
+
+    // apply the shared column sort (same controls as the main drill table);
+    // default to the first per-school column, worst-first.
+    const cols = this.kpiListColumns();
+    const col = this.sortCol() ?? cols[0]?.key ?? 'n';
+    const defaultDir = this.activeTopic() === 'inf' ? -1 : 1;
+    const dir = this.sortCol() === null ? defaultDir : this.sortDir();
+    return rows.sort((a, b) => {
+      const x = (a as any)[col] ?? 0;
+      const y = (b as any)[col] ?? 0;
+      if (typeof x === 'string' || typeof y === 'string') return String(x).localeCompare(String(y)) * dir;
+      return (x - y) * dir;
+    });
+  });
+
+  /** Count of schools in the open KPI list. */
+  readonly kpiSchoolListCount = computed(() => this.kpiDrillRows().length);
+
+  /**
+   * All SchoolRow for the current drill scope, each paired with its district
+   * and block keys. State -> every school; District -> that district's blocks;
+   * Block -> that block.
+   */
+  private scopeSchoolRows(): { row: SchoolRow; district: string; block: string }[] {
+    const level = this.ds.level();
+    const dist = this.ds.selectedDistrict();
+    const blk = this.ds.selectedBlock();
+    const out: { row: SchoolRow; district: string; block: string }[] = [];
+
+    if (level === 'block' && dist && blk) {
+      for (const row of this.ds.schoolRowsFor(dist, blk)) out.push({ row, district: dist, block: blk });
+      return out;
+    }
+    if (level === 'school' && dist && blk) {
+      for (const row of this.ds.schoolRowsFor(dist, blk)) {
+        if (row.name === this.ds.selectedSchool()) out.push({ row, district: dist, block: blk });
+      }
+      return out;
+    }
+    // district or state: walk the relevant blocks so each school keeps its block
+    const blocks = this.ds.data()?.blocks ?? [];
+    const wantDistricts = level === 'district' && dist
+      ? new Set([dist])
+      : new Set(this.ds.districts().map((d) => d.name));
+    for (const b of blocks) {
+      if (!wantDistricts.has(b.district)) continue;
+      for (const row of this.ds.schoolRowsFor(b.district, b.block)) {
+        out.push({ row, district: b.district, block: b.block });
+      }
+    }
+    return out;
   }
 
   // ================= NEEDS ATTENTION INSIGHTS =================
@@ -1748,13 +2575,21 @@ export class ReviewService {
   readonly palliKpis = computed(() => {
     const p = this.moduleNode()?.palliParvai;
     if (!p) return [];
+    const classObs = this.pct(p.visited, p.target);
+    const notObs = Math.round((100 - classObs) * 10) / 10;
+    const scopeKey = this.ds.selectedDistrict() ?? 'TN';
+    const officialsNotObs = Math.round((8 + this.hash01(scopeKey, 'p_ono') * 24) * 10) / 10;
+    const schools3Plus = Math.round((35 + this.hash01(scopeKey, 'p_s3') * 50) * 10) / 10;
+    const byDes = p.byDesignation ?? [];
+    const low = byDes.filter((x) => (x.completionPct ?? 0) < 75).length;
+    const top = byDes.filter((x) => (x.completionPct ?? 0) >= 75).length;
     return [
-      { label: 'Total Target Schools', value: this.fmt(this.scale(p.target)), icon: 'fa-solid fa-bullseye', tone: '' },
-      { label: 'Schools Visited', value: this.fmt(this.scale(p.visited)), icon: 'fa-solid fa-circle-check', tone: '' },
-      { label: 'Schools Not Visited', value: this.fmt(this.scale(p.notVisited)), icon: 'fa-solid fa-circle-xmark', tone: 'bad' },
-      { label: 'Visit Completion %', value: `${p.completionPct}%`, icon: 'fa-solid fa-percent', tone: '' },
-      { label: 'Total Observations', value: this.fmt(this.scale(p.observations)), icon: 'fa-solid fa-clipboard-check', tone: '' },
-      { label: 'Pending Observations', value: this.fmt(this.scale(p.pendingObservations)), icon: 'fa-solid fa-hourglass-half', tone: 'warn' },
+      { label: '% of Class Observation', value: `${classObs}%`, icon: 'fa-solid fa-chalkboard-user', tone: classObs < 75 ? 'bad' : '' },
+      { label: '% of Schools Not Observed (term)', value: `${notObs}%`, icon: 'fa-solid fa-building-circle-xmark', tone: notObs > 30 ? 'bad' : notObs > 15 ? 'warn' : '' },
+      { label: '% of Officials Not Observed (month)', value: `${officialsNotObs}%`, icon: 'fa-solid fa-user-xmark', tone: officialsNotObs > 20 ? 'bad' : officialsNotObs > 10 ? 'warn' : '' },
+      { label: '% of Schools Observed 3+ Times', value: `${schools3Plus}%`, icon: 'fa-solid fa-repeat', tone: schools3Plus < 40 ? 'bad' : schools3Plus < 60 ? 'warn' : '' },
+      { label: 'Low performers (< 75%)', value: this.fmt(low), icon: 'fa-solid fa-arrow-trend-down', tone: low > 0 ? 'warn' : '' },
+      { label: 'Top performers (≥ 75%)', value: this.fmt(top), icon: 'fa-solid fa-arrow-trend-up', tone: '' },
     ];
   });
   readonly palliByDesignation = computed(() => {
@@ -1781,10 +2616,293 @@ export class ReviewService {
   /** Whether the zero-visit official list is expanded. */
   readonly palliOfficialsOpen = signal(false);
   togglePalliOfficials(): void { this.palliOfficialsOpen.update((v) => !v); }
+
+  // ================= PALLI PARVAI — DEDICATED DRILL (spec structure) =================
+  /**
+   * Stakeholder designations (columns) for the Palli Parvai drill-downs, from
+   * the spec "Palli Parvai – KPI & Drill-Down Structure".
+   */
+  readonly PALLI_DESIGNATIONS = ['CEO', 'DEO – Secondary', 'DEO – Primary', 'APO', 'DC', 'BEO', 'BRTE', 'DIET Principal'];
+
+  /** Which Palli KPI's drill is open (null = none). Set from openKpi. */
+  readonly palliKpiId = signal<string | null>(null);
+  /** Optional designation selected within KPI 1 (opens the designation drill). */
+  readonly palliDesignation = signal<string | null>(null);
+
+  readonly palliDrillKpis = new Set(['p_co', 'p_sno', 'p_ono', 'p_s3', 'p_low', 'p_top']);
+  hasPalliDrill(id: string): boolean { return this.palliDrillKpis.has(id); }
+  /** The Palli KPI tabs (id + short label) for switching tables within the drill. */
+  readonly palliKpiTabs: { id: string; label: string }[] = [
+    { id: 'p_co', label: '% Class Observation' },
+    { id: 'p_sno', label: '% Schools Not Observed' },
+    { id: 'p_ono', label: '% Officials Not Observed' },
+    { id: 'p_s3', label: '% Schools 3+ Times' },
+    { id: 'p_low', label: 'Low performers' },
+    { id: 'p_top', label: 'Top performers' },
+  ];
+  setPalliKpi(id: string): void { this.palliKpiId.set(id); this.palliDesignation.set(null); this.palliSnoReset(); this.palliOnoReset(); }
+  openPalliDrill(id: string): void { if (this.hasPalliDrill(id)) { this.palliKpiId.set(id); this.palliDesignation.set(null); this.palliSnoReset(); this.palliOnoReset(); } }
+  closePalliDrill(): void { this.palliKpiId.set(null); this.palliDesignation.set(null); this.palliSnoReset(); this.palliOnoReset(); this.palliObsPopup.set(null); }
+  selectPalliDesignation(d: string | null): void { this.palliDesignation.set(d); }
+
+  /** Human label for the open Palli KPI (from the catalog). */
+  readonly palliKpiLabel = computed(() => {
+    const id = this.palliKpiId();
+    if (!id) return '';
+    for (const m of KPI_MODULES) { const def = m.kpis.find((k) => k.id === id); if (def) return def.label; }
+    return '';
+  });
+
+  /** Districts in the current scope (state = all; district = just that one). */
+  private palliScopeDistricts(): string[] {
+    const dist = this.ds.selectedDistrict();
+    if (dist) return [dist];
+    return this.ds.districts().map((d) => d.name);
+  }
+
+  /** Deterministic observation % for a district+designation (stable, 60–95%). */
+  private palliObsPct(district: string, designation: string): number {
+    return Math.round((60 + this.hash01(`${district}|${designation}`, 'obs') * 35) * 10) / 10;
+  }
+
+  /** KPI 1 — District rows with a % per designation (stakeholder columns). */
+  readonly palliDistrictMatrix = computed(() =>
+    this.palliScopeDistricts().map((d, i) => {
+      const cells: Record<string, number> = {};
+      let sum = 0;
+      for (const des of this.PALLI_DESIGNATIONS) { cells[des] = this.palliObsPct(d, des); sum += cells[des]; }
+      const overall = Math.round((sum / this.PALLI_DESIGNATIONS.length) * 10) / 10;
+      return { sno: i + 1, district: this.ds.titleCase(d), cells, overall };
+    }),
+  );
+
+  /** KPI 1 designation drill — one row per district for the clicked designation. */
+  readonly palliDesignationDrill = computed(() => {
+    const des = this.palliDesignation();
+    if (!des) return [];
+    return this.palliScopeDistricts().map((d, i) => {
+      const officials = 8 + Math.round(this.hash01(`${d}|${des}`, 'off') * 14); // 8–22
+      const target = officials * 40; // 40 target classes per official (assumed)
+      const pct = this.palliObsPct(d, des);
+      const observed = Math.round(target * pct / 100);
+      return { sno: i + 1, district: this.ds.titleCase(d), designation: des, officials, target, observed, pct };
+    });
+  });
+
+  /** KPI 2 — schools with zero observations in the term (assumed subset). */
+  readonly palliSchoolsNotObserved = computed(() => {
+    const rows = this.scopeSchoolRows().filter((e) => this.hash01(e.row.udise, 'p_sno') < 0.28);
+    return rows.map((e, i) => ({
+      sno: i + 1, district: this.ds.titleCase(e.district), block: this.ds.titleCase(e.block),
+      udise: e.row.udise, school: e.row.name, category: e.row.ctype ?? '—', observationCount: 0,
+    }));
+  });
+
+  // ---- KPI 2 District → Block → School drill ----
+  /** Selected district / block within the KPI-2 not-observed drill. */
+  readonly palliSnoDistrict = signal<string | null>(null);
+  readonly palliSnoBlock = signal<string | null>(null);
+  palliSnoSelectDistrict(d: string | null): void { this.palliSnoDistrict.set(d); this.palliSnoBlock.set(null); }
+  palliSnoSelectBlock(b: string | null): void { this.palliSnoBlock.set(b); }
+  palliSnoReset(): void { this.palliSnoDistrict.set(null); this.palliSnoBlock.set(null); }
+
+  /** All not-observed school entries across the whole scope (raw, with keys). */
+  private palliSnoAll = computed(() =>
+    this.scopeSchoolRows()
+      .filter((e) => this.hash01(e.row.udise, 'p_sno') < 0.28)
+      .map((e) => ({ districtKey: e.district, blockKey: e.block, row: e.row })),
+  );
+
+  /** KPI 2 level 1 — not-observed school COUNT per district. */
+  readonly palliSnoByDistrict = computed(() => {
+    const map = new Map<string, number>();
+    for (const e of this.palliSnoAll()) map.set(e.districtKey, (map.get(e.districtKey) ?? 0) + 1);
+    return [...map.entries()]
+      .map(([key, count], i) => ({ sno: i + 1, key, district: this.ds.titleCase(key), count }))
+      .sort((a, b) => b.count - a.count)
+      .map((r, i) => ({ ...r, sno: i + 1 }));
+  });
+
+  /** KPI 2 level 2 — not-observed school COUNT per block in the selected district. */
+  readonly palliSnoByBlock = computed(() => {
+    const dist = this.palliSnoDistrict();
+    if (!dist) return [];
+    const map = new Map<string, number>();
+    for (const e of this.palliSnoAll()) if (e.districtKey === dist) map.set(e.blockKey, (map.get(e.blockKey) ?? 0) + 1);
+    return [...map.entries()]
+      .map(([key, count]) => ({ key, district: this.ds.titleCase(dist), block: this.ds.titleCase(key), count }))
+      .sort((a, b) => b.count - a.count)
+      .map((r, i) => ({ ...r, sno: i + 1 }));
+  });
+
+  /** KPI 2 level 3 — the school list for the selected district + block. */
+  readonly palliSnoSchools = computed(() => {
+    const dist = this.palliSnoDistrict();
+    const blk = this.palliSnoBlock();
+    if (!dist || !blk) return [];
+    return this.palliSnoAll()
+      .filter((e) => e.districtKey === dist && e.blockKey === blk)
+      .map((e, i) => ({
+        sno: i + 1, district: this.ds.titleCase(dist), block: this.ds.titleCase(blk),
+        udise: e.row.udise, school: e.row.name, category: e.row.ctype ?? '—', observationCount: 0,
+      }));
+  });
+
+  /** KPI 3 — officials-not-observed per district (assumed counts). */
+  readonly palliOfficialsNotObserved = computed(() =>
+    this.palliScopeDistricts().map((d, i) => {
+      const total = 25 + Math.round(this.hash01(d, 'p_tot') * 25); // 25–50
+      const notObs = Math.round(total * (0.08 + this.hash01(d, 'p_ono') * 0.22)); // 8–30%
+      const observed = total - notObs;
+      const pct = total ? Math.round((notObs / total) * 1000) / 10 : 0;
+      return { sno: i + 1, district: this.ds.titleCase(d), total, observed, notObs, pct };
+    }),
+  );
+
+  // ---- KPI 3 District → Designation → Officials drill ----
+  /** Selected district + designation within the KPI-3 officials-not-observed drill. */
+  readonly palliOnoDistrict = signal<string | null>(null);
+  readonly palliOnoDesignation = signal<string | null>(null);
+  palliOnoSelect(district: string, designation: string): void { this.palliOnoDistrict.set(district); this.palliOnoDesignation.set(designation); }
+  palliOnoReset(): void { this.palliOnoDistrict.set(null); this.palliOnoDesignation.set(null); }
+
+  /** Number of officials of a designation in a district who made 0 observations. */
+  private palliOnoCount(district: string, designation: string): number {
+    const base = 2 + Math.round(this.hash01(`${district}|${designation}`, 'p_ono_n') * 6); // 2–8
+    return base;
+  }
+
+  /** KPI 3 level 1 — District × designation not-observed counts (+ district total). */
+  readonly palliOnoMatrix = computed(() =>
+    this.palliScopeDistricts().map((d, i) => {
+      const cells: Record<string, number> = {};
+      let total = 0;
+      for (const des of this.PALLI_DESIGNATIONS) { cells[des] = this.palliOnoCount(d, des); total += cells[des]; }
+      return { sno: i + 1, key: d, district: this.ds.titleCase(d), cells, total };
+    }),
+  );
+
+  /** KPI 3 level 2 — the officials (by name) who made 0 observations. */
+  readonly palliOnoOfficials = computed(() => {
+    const d = this.palliOnoDistrict();
+    const des = this.palliOnoDesignation();
+    if (!d || !des) return [];
+    const n = this.palliOnoCount(d, des);
+    const out: { sno: number; district: string; userName: string; designation: string; target: number; observed: number }[] = [];
+    for (let i = 0; i < n; i++) {
+      const seed = this.hash01(`${d}|${des}|${i}`, 'p_ono_u');
+      const target = 20 + Math.round(seed * 40); // 20–60 target classes
+      out.push({
+        sno: i + 1, district: this.ds.titleCase(d),
+        userName: this.palliOfficialName(d, des, i),
+        designation: des, target, observed: 0,
+      });
+    }
+    return out;
+  });
+
+  /** Deterministic official display name for the KPI-3 drill. */
+  private palliOfficialName(district: string, designation: string, idx: number): string {
+    const first = ['Arun', 'Priya', 'Kumar', 'Devi', 'Raja', 'Lakshmi', 'Suresh', 'Meena', 'Vijay', 'Geetha'];
+    const code = designation.replace(/[^A-Z]/g, '').slice(0, 3) || 'OFF';
+    const h = Math.floor(this.hash01(`${district}|${designation}|${idx}`, 'nm') * first.length);
+    return `${first[h]} (${code}-${100 + idx})`;
+  }
+
+  /** KPI 4 — schools observed 3+ times, with per-designation observation counts. */
+  readonly palliSchools3Plus = computed(() => {
+    const rows = this.scopeSchoolRows().filter((e) => this.hash01(e.row.udise, 'p_s3') < 0.6);
+    return rows.map((e, i) => {
+      const cells: Record<string, number> = {};
+      let total = 0;
+      for (const des of this.PALLI_DESIGNATIONS) {
+        const c = Math.round(this.hash01(e.row.udise, des) * 4); // 0–4 observations
+        cells[des] = c; total += c;
+      }
+      return {
+        sno: i + 1, district: this.ds.titleCase(e.district), block: this.ds.titleCase(e.block),
+        udise: e.row.udise, school: e.row.name, category: e.row.ctype ?? '—', cells, total,
+      };
+    }).filter((r) => r.total >= 3);
+  });
+
+  // ---- KPI 4 observation-detail popup (user details for a school + designation) ----
+  readonly palliObsPopup = signal<{
+    school: string; udise: string; district: string; designation: string;
+    officials: { sno: number; userName: string; date: string; classObserved: string }[];
+  } | null>(null);
+  readonly palliObsPopupOpen = computed(() => this.palliObsPopup() !== null);
+  closePalliObsPopup(): void { this.palliObsPopup.set(null); }
+
+  /** Open the user-detail popup for a KPI-4 cell (school × designation count). */
+  openPalliObsPopup(row: { udise: string; school: string; district: string }, designation: string, count: number): void {
+    if (!count) return;
+    const classes = ['Class 1-A', 'Class 2-B', 'Class 3-A', 'Class 4-B', 'Class 5-A', 'Class 6-B', 'Class 7-A', 'Class 8-B'];
+    const officials = Array.from({ length: count }, (_, i) => {
+      const seed = this.hash01(`${row.udise}|${designation}|${i}`, 'p_s3_u');
+      const day = 1 + Math.floor(seed * 27);
+      return {
+        sno: i + 1,
+        userName: this.palliOfficialName(row.district, designation, i),
+        date: `${String(day).padStart(2, '0')}-09-2026`,
+        classObserved: classes[Math.floor(this.hash01(`${row.udise}|${designation}|${i}`, 'cls') * classes.length)],
+      };
+    });
+    this.palliObsPopup.set({
+      school: row.school, udise: row.udise, district: row.district, designation, officials,
+    });
+  }
+
+  /** KPI 5/6 — district+designation combos below / at-or-above 75%. */
+  private palliPerformerRows(low: boolean) {
+    const out: { sno: number; district: string; designation: string; target: number; observed: number; pct: number }[] = [];
+    let n = 0;
+    for (const d of this.palliScopeDistricts()) {
+      for (const des of this.PALLI_DESIGNATIONS) {
+        const pct = this.palliObsPct(d, des);
+        if (low ? pct < 75 : pct >= 75) {
+          const officials = 8 + Math.round(this.hash01(`${d}|${des}`, 'off') * 14);
+          const target = officials * 40;
+          out.push({ sno: ++n, district: this.ds.titleCase(d), designation: des, target, observed: Math.round(target * pct / 100), pct });
+        }
+      }
+    }
+    return out;
+  }
+  readonly palliLowPerformerRows = computed(() => this.palliPerformerRows(true));
+  readonly palliTopPerformerRows = computed(() => this.palliPerformerRows(false));
+
+  // ---- Palli footer totals ----
+  private sumBy<T>(rows: T[], pick: (r: T) => number): number { return rows.reduce((s, r) => s + (pick(r) || 0), 0); }
+  private avgBy<T>(rows: T[], pick: (r: T) => number): number { return rows.length ? Math.round((this.sumBy(rows, pick) / rows.length) * 10) / 10 : 0; }
+
+  /** Column totals for the KPI-1 district × designation matrix (avg % per designation + overall). */
+  readonly palliMatrixTotals = computed(() => {
+    const rows = this.palliDistrictMatrix();
+    const cells: Record<string, number> = {};
+    for (const des of this.PALLI_DESIGNATIONS) cells[des] = this.avgBy(rows, (r) => r.cells[des]);
+    return { cells, overall: this.avgBy(rows, (r) => r.overall) };
+  });
+  readonly palliOnoMatrixTotals = computed(() => {
+    const rows = this.palliOnoMatrix();
+    const cells: Record<string, number> = {};
+    for (const des of this.PALLI_DESIGNATIONS) cells[des] = this.sumBy(rows, (r) => r.cells[des]);
+    return { cells, total: this.sumBy(rows, (r) => r.total) };
+  });
+  readonly palliOnoTotals = computed(() => {
+    const rows = this.palliOfficialsNotObserved();
+    return { total: this.sumBy(rows, (r) => r.total), observed: this.sumBy(rows, (r) => r.observed), notObs: this.sumBy(rows, (r) => r.notObs), pct: this.avgBy(rows, (r) => r.pct) };
+  });
+  readonly palliS3Totals = computed(() => {
+    const rows = this.palliSchools3Plus();
+    const cells: Record<string, number> = {};
+    for (const des of this.PALLI_DESIGNATIONS) cells[des] = this.sumBy(rows, (r) => r.cells[des]);
+    return { cells, total: this.sumBy(rows, (r) => r.total), count: rows.length };
+  });
 }
 
 /** Topic tabs for the drill-down table, matching the prototype's lenses. */
-export type DrillTopic = 'enr' | 'att' | 'inf' | 'aca' | 'sch'
+export type DrillTopic = 'enr' | 'att' | 'inf' | 'dinf' | 'aca' | 'sch'
   | 'thiran' | 'scholarship' | 'smc' | 'palli';
 
 /** A row of KPI cards for one domain, rendered on a single line. */
@@ -1816,10 +2934,22 @@ export interface ProtoKpi {
 export interface DrillColumn {
   key: string;
   label: string;
-  fmt: 'num' | 'num1' | 'pct' | 'pctSigned' | 'ptSigned' | 'text';
+  fmt: 'num' | 'num1' | 'pct' | 'pctSigned' | 'ptSigned' | 'text' | 'yesno' | 'presAbs';
   bar?: boolean;
   barMax?: number;
   tone?: (value: number, row: DrillRow) => 'bad' | 'warn' | 'good' | undefined;
+}
+
+/**
+ * Context passed to a per-KPI school predicate: the enrolment roll row plus the
+ * school's infrastructure return (joined by UDISE), so infra flag KPIs can be
+ * evaluated against real per-school data.
+ */
+export interface KpiSchoolCtx {
+  row: SchoolRow;
+  infS?: { entered?: number; types?: Record<string, { available?: number; good?: number; functional?: number; demolish?: number; needRepair?: number }> } | undefined;
+  dig?: { ictSchools?: number; internet?: number; noInternet?: number; functional?: number; notFunctional?: number } | undefined;
+  atS?: { attendance?: number; teacherAttendance?: number; compliance?: number } | undefined;
 }
 
 /** One row of the drill-down table: a district, block, or school. */
@@ -1828,6 +2958,33 @@ export interface DrillRow {
   udise?: string;
   name: string;
   level: 'district' | 'block' | 'school';
+  /** Parent district (title-cased) — only set for per-KPI school-list rows. */
+  district?: string;
+  /** Parent block (title-cased) — only set for per-KPI school-list rows. */
+  block?: string;
+  /** School category type (e.g. Primary / Upper Primary …) — per-KPI list rows. */
+  ctype?: string;
+  /** Infra flag KPI per-school values (per-KPI list rows). */
+  infZeroClassroom?: number;
+  infNeedsAny?: number;
+  infNoCompound?: number;
+  /** Infra facility availability columns (per-KPI list rows). */
+  facClassrooms?: number;
+  facBoysToilet?: number;
+  facGirlsToilet?: number;
+  facCwsnToilet?: number;
+  facLabs?: number;
+  facWater?: number;
+  facCompoundWall?: number;
+  facDemolish?: number;
+  facKitchen?: number;
+  /** Attendance list derived columns (per-KPI list rows). */
+  stuPresentPct?: number;
+  stuAbsentPct?: number;
+  studentsAbsent?: number;
+  tchPresentPct?: number;
+  tchAbsentPct?: number;
+  teacherPresent?: number;
   ns: number;
   n: number;
   chg: number;
@@ -1866,6 +3023,13 @@ export interface DrillRow {
   palliVisited?: number;
   palliNotVisited?: number;
   palliCompletionPct?: number;
+  /** Palli Parvai KPI fields (spec-driven). */
+  palliClassObsPct?: number;
+  palliSchoolsNotObsPct?: number;
+  palliOfficialsNotObsPct?: number;
+  palliSchools3PlusPct?: number;
+  palliLowPerformers?: number;
+  palliTopPerformers?: number;
 
   // ---- extra real KPI fields for the KPI-catalog tile grid ----
   teaching?: number;
@@ -1928,6 +3092,9 @@ export interface DrillRow {
   ictFunctional?: number;
   ictPartial?: number;
   ictNotFunctional?: number;
+  /** ICT status labels for the Digital Infrastructure school list. */
+  ictFunctionalStatus?: string;
+  ictInternetStatus?: string;
   ictFunctionalPct?: number;
   ictInternetPct?: number;
   infNoPlayground?: number;
@@ -1937,6 +3104,47 @@ export interface DrillRow {
   infClassShortage?: number;
   infGapPct?: number;
   smcEmergencyOpen?: number;
+
+  // ---- new Enrollment drill + KPI fields ----
+  boys?: number;
+  girls?: number;
+  ptr?: number;                 // pupil-teacher ratio (students/teaching)
+  notMoved?: number;            // students not moved to next class (transition leakage)
+  transitionPendingPct?: number; // % of schools not meeting 100% transition
+  schoolsNotMarkedPct?: number; // attendance: 100 - compliance
+  // school-count aggregates (counted over schools in scope)
+  zeroEnrol?: number;
+  zeroTeacher?: number;
+  singleTeacher?: number;
+  under10?: number;
+  ptrOver60?: number;
+  enrolIncreaseSchools?: number;  // schools with enrollment increase vs last year
+  enrolDeclinedSchools?: number;  // schools with declined enrollment vs last year
+
+  // ---- new Attendance drill fields ----
+  boysAbsent?: number;
+  girlsAbsent?: number;
+  teacherAbsent?: number;         // teachers absent (today / latest)
+  teacherLong30?: number;         // teachers absent 30+ days (est.)
+  markedStatus?: string;          // 'Marked' | 'Partial' | 'Not marked'
+}
+
+/** One row of the per-KPI school list (flag-KPI drill-down). */
+export interface KpiSchoolRow {
+  district: string;
+  school: string;
+  udise: string;
+  boys: number;
+  girls: number;
+  students: number;
+  teaching: number;
+  ptr: number;
+  /** Year-over-year enrolment change, percent (signed). */
+  changePct: number;
+  /** Year-over-year enrolment change, absolute students (signed). */
+  changeAbs: number;
+  /** Potential dropouts (students absent 15+ days), joined from attendance. */
+  drop: number;
 }
 
 /** One district's synthetic sample KPI values (kpi-sample.json). */
