@@ -421,6 +421,19 @@
               </button>
             }
             <button class="kpi-view" (click)="openModule(mod.topic, mod.title)">View details <i class="fa-solid fa-arrow-right"></i></button>
+            @if (mod.title === 'Academic Performance') {
+              <div class="kpi-period">
+                <span class="kpi-period-lbl">Assessment:</span>
+                <button class="kpi-period-btn" [class.on]="rv.examPeriod() === 'All'"
+                        (click)="rv.setExamPeriod('All')" title="All (trend)">All</button>
+                <button class="kpi-period-btn" [class.on]="rv.examPeriod() === 'Quarterly'"
+                        (click)="rv.setExamPeriod('Quarterly')" title="Quarterly">Q</button>
+                <button class="kpi-period-btn" [class.on]="rv.examPeriod() === 'Half Yearly'"
+                        (click)="rv.setExamPeriod('Half Yearly')" title="Half-Yearly">H</button>
+                <button class="kpi-period-btn" [class.on]="rv.examPeriod() === 'Annual'"
+                        (click)="rv.setExamPeriod('Annual')" title="Annual">A</button>
+              </div>
+            }
           </section>
         }
       </div>
@@ -1493,6 +1506,69 @@
               <tr><td class="num">{{ o.sno }}</td><td class="strong">{{ o.userName }}</td><td>{{ o.date }}</td><td>{{ o.classObserved }}</td></tr>
             </ng-template>
           </p-table>
+        </div>
+      </div>
+    </div>
+    }
+
+    <!-- ===== Academic: School → Class → Subject drill (spec) ===== -->
+    @if (rv.acaDrillOpen()) {
+    <div class="dl-backdrop" (click)="rv.closeAcademicDrill()">
+      <div class="dl-modal rv-modal" (click)="$event.stopPropagation()">
+        <div class="dl-head">
+          <i class="fa-solid fa-graduation-cap"></i> {{ rv.acaDrillSchool() }} — Academic ({{ rv.examPeriod() }})
+          @if (rv.acaDrillAssumed()) { <p-tag value="Assumed data" severity="warn" styleClass="ml-2" /> }
+          <button class="dl-x" (click)="rv.closeAcademicDrill()"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="rv-modal-body">
+          @if (!rv.acaDrillClass()) {
+            <p class="rv-modal-sub">Class-wise performance · click a class to see subjects</p>
+            @if (!rv.acaClassRows().length) {
+              <div class="ac-loading"><i class="fa-solid fa-circle-info"></i> No class-wise academic data for this school.</div>
+            } @else {
+            <p-table [value]="rv.acaClassRows()" styleClass="p-datatable-sm" [rowHover]="true" sortMode="single">
+              <ng-template pTemplate="header">
+                <tr>
+                  <th pSortableColumn="label">Class <p-sortIcon field="label" /></th>
+                  <th class="num" pSortableColumn="pass">Pass % <p-sortIcon field="pass" /></th>
+                  <th class="num" pSortableColumn="avg">Average Mark <p-sortIcon field="avg" /></th>
+                  <th class="num" pSortableColumn="improve">Improvement <p-sortIcon field="improve" /></th>
+                </tr>
+              </ng-template>
+              <ng-template pTemplate="body" let-c>
+                <tr class="rv-row" (click)="rv.selectAcaClass(c.cls)">
+                  <td class="strong">{{ c.label }} <i class="fa-solid fa-chevron-right text-muted"></i></td>
+                  <td class="num" [class.bad]="c.pass < 50" [class.good]="c.pass >= 75">{{ c.pass }}%</td>
+                  <td class="num">{{ c.avg }}</td>
+                  <td class="num" [class.bad]="c.improve < 0" [class.good]="c.improve > 0">{{ c.improve > 0 ? '+' : '' }}{{ c.improve }}</td>
+                </tr>
+              </ng-template>
+            </p-table>
+            }
+          } @else {
+            <div class="palli-subbar">
+              <button class="dr-back ghost" (click)="rv.selectAcaClass(null)"><i class="fa-solid fa-arrow-left"></i> All classes</button>
+              <b>Class {{ rv.acaDrillClass() }} — Subject-wise</b>
+            </div>
+            <p-table [value]="rv.acaSubjectRows()" styleClass="p-datatable-sm" [rowHover]="true" sortMode="single">
+              <ng-template pTemplate="header">
+                <tr>
+                  <th pSortableColumn="subject">Subject <p-sortIcon field="subject" /></th>
+                  <th class="num" pSortableColumn="pass">Pass % <p-sortIcon field="pass" /></th>
+                  <th class="num" pSortableColumn="avg">Average Mark <p-sortIcon field="avg" /></th>
+                  <th class="num" pSortableColumn="improve">Improvement <p-sortIcon field="improve" /></th>
+                </tr>
+              </ng-template>
+              <ng-template pTemplate="body" let-s>
+                <tr>
+                  <td class="strong">{{ s.subject }}</td>
+                  <td class="num" [class.bad]="s.pass < 50" [class.good]="s.pass >= 75">{{ s.pass }}%</td>
+                  <td class="num">{{ s.avg }}</td>
+                  <td class="num" [class.bad]="s.improve < 0" [class.good]="s.improve > 0">{{ s.improve > 0 ? '+' : '' }}{{ s.improve }}</td>
+                </tr>
+              </ng-template>
+            </p-table>
+          }
         </div>
       </div>
     </div>

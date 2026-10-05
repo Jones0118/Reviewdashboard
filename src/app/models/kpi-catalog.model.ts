@@ -100,14 +100,12 @@ export const KPI_MODULES: KpiModule[] = [
   },
   {
     title: 'Academic Performance', color: '#be123c', kpis: [
-      P('sc', 'Overall academic score %', 1, 45, 80, 'academicAvg', 'aca'),
-      P('sm', 'Improvement over last year %', 1, -3, 9, 'academicChange', 'aca'),
-      P('a_lan', 'Tamil/Language avg %', 1, 35, 80, 'acaLanguageAvg', 'aca'),
-      P('a_eng', 'English avg %', 1, 35, 80, 'acaEnglishAvg', 'aca'),
-      P('a_mat', 'Maths avg %', 1, 35, 80, 'acaMathsAvg', 'aca'),
-      P('a_sci', 'Science avg %', 1, 35, 80, 'acaScienceAvg', 'aca'),
-      P('a_soc', 'Social avg %', 1, 35, 80, 'acaSocialAvg', 'aca'),
-      P('a_cmp', 'Mark-entry completion %', 1, 0, 100, 'acaCompletionPct', 'aca'),
+      P('a_pass', 'Pass Percentage %', 1, 40, 95, 'acaPassPct', 'aca'),
+      P('a_avg', 'Average Mark', 1, 35, 80, 'academicAvg', 'aca'),
+      P('a_yoy', 'Year-on-Year Improvement %', 1, -5, 10, 'academicChange', 'aca'),
+      P('a_e2e', 'Exam-to-Exam Improvement (PP)', 1, -5, 10, 'acaExamToExam', 'aca'),
+      P('a_cov', 'Assessment Coverage %', 1, 60, 100, 'acaCoveragePct', 'aca'),
+      P('a_cmp', 'Mark Entry Completion %', 1, 0, 100, 'acaCompletionPct', 'aca'),
     ],
   },
   /* ===== TEMPORARILY DISABLED — re-enable when ready =====

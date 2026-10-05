@@ -1217,6 +1217,17 @@ tr.clickable { cursor: pointer; }
 
 /* Grand-total footer row across drill grids */
 .rv-total td { background: #f3f5f8; border-top: 2px solid var(--dr-line, #dfe5ec); font-weight: 700; color: #1b2430; }
+
+/* Academic exam-period toggle (Q/H/A) below the Academic Performance tile */
+.kpi-period { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--dr-line, #dfe5ec); }
+.kpi-period-lbl { font-size: 11.5px; color: #66738a; margin-right: 2px; }
+.kpi-period-btn {
+  all: unset; cursor: pointer; min-width: 24px; height: 24px; padding: 0 7px; display: grid; place-items: center;
+  border: 1px solid var(--dr-line, #dfe5ec); border-radius: 6px; font-size: 12px; font-weight: 700;
+  color: #465060; background: #fff;
+}
+.kpi-period-btn:hover { background: #f3f5f8; }
+.kpi-period-btn.on { background: var(--kc, #be123c); color: #fff; border-color: var(--kc, #be123c); }
 .kpi-row {
   all: unset; box-sizing: border-box; display: grid;
   grid-template-columns: 10px 1fr auto 12px; gap: 8px; align-items: center;

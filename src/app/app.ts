@@ -450,7 +450,8 @@ export class App implements OnInit {
       'palliClassObsPct', 'palliSchoolsNotObsPct', 'palliOfficialsNotObsPct', 'palliSchools3PlusPct',
       // real-data percentages
       'acaLanguageAvg', 'acaEnglishAvg', 'acaMathsAvg', 'acaScienceAvg', 'acaSocialAvg',
-      'acaCompletionPct', 'thiranBaselinePct', 'thiranBloPct', 'ictFunctionalPct',
+      'acaCompletionPct', 'acaPassPct', 'acaExamToExam', 'acaCoveragePct',
+      'thiranBaselinePct', 'thiranBloPct', 'ictFunctionalPct',
       'ictInternetPct', 'infGapPct', 'scholarPaySuccessPct', 'cwsnPct', 'slasPct',
       // new enrollment/attendance percentages
       'schoolsNotMarkedPct', 'ptr', 'transitionPendingPct']);
@@ -471,6 +472,7 @@ export class App implements OnInit {
       'acaLanguageAvg', 'acaEnglishAvg', 'acaMathsAvg', 'acaScienceAvg', 'acaSocialAvg',
       'acaCompletionPct', 'thiranBaselinePct', 'thiranBloPct', 'thiranSharePct', 'ictFunctionalPct',
       'ictInternetPct', 'infGapPct', 'scholarPaySuccessPct', 'cwsnPct', 'slasPct',
+      'acaPassPct', 'acaExamToExam', 'acaCoveragePct',
       // ---- synthetic counts still referenced by catalog KPIs ----
       'declSchools', 'attPending', 'breakfastExcept', 'cmCritical',
       'scholarPayFailed', 'scholarNpciInactive', 'acaUp', 'acaDown',
@@ -678,6 +680,7 @@ export class App implements OnInit {
     this.rv.setSelectedModule(null);
     this.rv.closeKpiSchoolList();
     this.rv.closePalliDrill();
+    this.rv.closeAcademicDrill();
     this.ds.goToState();
   }
 

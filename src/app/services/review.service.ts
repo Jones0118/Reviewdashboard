@@ -554,7 +554,120 @@ export class ReviewService {
     ];
   });
 
-  // ================= PROTOTYPE CHART DATA =================
+  // ================= ACADEMIC SCHOOL → CLASS → SUBJECT DRILL (spec) =================
+  /** Which school's academic class/subject detail is open (UDISE), + selected class. */
+  readonly acaDrillUdise = signal<string | null>(null);
+  readonly acaDrillSchool = signal<string>('');
+  readonly acaDrillClass = signal<number | null>(null);
+  readonly acaDrillOpen = computed(() => this.acaDrillUdise() !== null);
+  openAcademicDrill(udise: string, school: string): void { this.acaDrillUdise.set(udise); this.acaDrillSchool.set(school); this.acaDrillClass.set(null); }
+  closeAcademicDrill(): void { this.acaDrillUdise.set(null); this.acaDrillClass.set(null); }
+  selectAcaClass(cls: number | null): void { this.acaDrillClass.set(cls); }
+
+  /** The open school's AcademicSchool record (by UDISE, current scope). */
+  private readonly acaDrillRecord = computed(() => {
+    const u = this.acaDrillUdise();
+    if (!u) return null;
+    return (this.ac.scopeSchools() as any[]).find((s) => s.udise === u) ?? null;
+  });
+
+  /** The exam period to use for the drill (All → latest/Annual). */
+  private acaDrillPeriod(order: string[]): string {
+    const p = this.examPeriod();
+    return (p && p !== 'All' && order.includes(p)) ? p : (order[order.length - 1] ?? 'Annual');
+  }
+
+  /** Class-wise rows for the open school (Pass % / Average Mark / Improvement). */
+  readonly acaClassRows = computed(() => {
+    const rec: any = this.acaDrillRecord();
+    const u = this.acaDrillUdise();
+    const ec: any[] = rec?.examClass ?? [];
+    if (!ec.length) {
+      if (rec?.byClass?.length) {
+        return rec.byClass.map((c: any) => ({
+          cls: Number(c.name) || 0, label: `Class ${c.name}`,
+          pass: Math.round((c.pass ?? 0) * 10) / 10, avg: Math.round((c.avg ?? 0) * 10) / 10, improve: 0,
+        })).sort((a: any, b: any) => a.cls - b.cls);
+      }
+      // No per-school academic record → assume deterministically from UDISE.
+      return this.assumedClassRows(u ?? '');
+    }
+    const order = [...new Set(ec.map((x) => x.exam))];
+    const period = this.acaDrillPeriod(order);
+    const idx = order.indexOf(period);
+    const prevPeriod = idx > 0 ? order[idx - 1] : null;
+    const cur = ec.filter((x) => x.exam === period);
+    const prevByCls = new Map((prevPeriod ? ec.filter((x) => x.exam === prevPeriod) : []).map((x) => [x.cls, x] as const));
+    return cur.map((x) => {
+      const prev = prevByCls.get(x.cls);
+      return {
+        cls: x.cls, label: x.label ?? `Class ${x.cls}`,
+        pass: Math.round((x.pass ?? 0) * 10) / 10,
+        avg: Math.round((x.avg ?? 0) * 10) / 10,
+        improve: prev ? Math.round(((x.avg ?? 0) - (prev.avg ?? 0)) * 10) / 10 : 0,
+      };
+    }).sort((a, b) => a.cls - b.cls);
+  });
+
+  /** True when the open school's class/subject figures are assumed (no record). */
+  readonly acaDrillAssumed = computed(() => {
+    const rec: any = this.acaDrillRecord();
+    return !rec?.examClass?.length && !rec?.byClass?.length;
+  });
+
+  /** Deterministic assumed class rows for a school with no academic record. */
+  private assumedClassRows(udise: string): { cls: number; label: string; pass: number; avg: number; improve: number }[] {
+    const classes = [6, 7, 8, 9, 10];
+    return classes.map((cls) => {
+      const avg = Math.round((45 + this.hash01(udise, 'aca-avg-' + cls) * 45) * 10) / 10;
+      const pass = Math.round((55 + this.hash01(udise, 'aca-pass-' + cls) * 42) * 10) / 10;
+      const improve = Math.round((this.hash01(udise, 'aca-imp-' + cls) * 16 - 8) * 10) / 10;
+      return { cls, label: `Class ${cls}`, pass, avg, improve };
+    });
+  }
+
+  /** Subject-wise rows for the open school + selected class. */
+  readonly acaSubjectRows = computed(() => {
+    const rec: any = this.acaDrillRecord();
+    const cls = this.acaDrillClass();
+    const u = this.acaDrillUdise();
+    if (cls == null) return [] as { subject: string; pass: number; avg: number; improve: number }[];
+    const ec: any[] = rec?.examClass ?? [];
+    if (ec.length) {
+      const order = [...new Set(ec.map((x) => x.exam))];
+      const period = this.acaDrillPeriod(order);
+      const idx = order.indexOf(period);
+      const prevPeriod = idx > 0 ? order[idx - 1] : null;
+      const curCell = ec.find((x) => x.exam === period && x.cls === cls);
+      const prevCell = prevPeriod ? ec.find((x) => x.exam === prevPeriod && x.cls === cls) : null;
+      const prevSub = new Map((prevCell?.subjects ?? []).map((s: any) => [s.name, s] as const));
+      if (curCell?.subjects?.length) {
+        return curCell.subjects.map((s: any) => {
+          const prev: any = prevSub.get(s.name);
+          return {
+            subject: s.name,
+            pass: Math.round((s.pass ?? 0) * 10) / 10,
+            avg: Math.round((s.avg ?? 0) * 10) / 10,
+            improve: prev ? Math.round(((s.avg ?? 0) - (prev.avg ?? 0)) * 10) / 10 : 0,
+          };
+        });
+      }
+    }
+    // No real subject data → assume deterministically from UDISE + class.
+    return this.assumedSubjectRows(u ?? '', cls);
+  });
+
+  /** Deterministic assumed subject rows for a school/class with no record. */
+  private assumedSubjectRows(udise: string, cls: number): { subject: string; pass: number; avg: number; improve: number }[] {
+    const subjects = ['Tamil', 'English', 'Mathematics', 'Science', 'Social Science'];
+    return subjects.map((subject) => {
+      const avg = Math.round((40 + this.hash01(udise, `s-avg-${cls}-${subject}`) * 50) * 10) / 10;
+      const pass = Math.round((50 + this.hash01(udise, `s-pass-${cls}-${subject}`) * 48) * 10) / 10;
+      const improve = Math.round((this.hash01(udise, `s-imp-${cls}-${subject}`) * 18 - 9) * 10) / 10;
+      return { subject, pass, avg, improve };
+    });
+  }
+
   /**
    * The prototype's KPI cards, grouped into per-domain rows so each domain's
    * KPIs read as a single line. Thresholds follow the spec's RAG table.
@@ -794,6 +907,8 @@ export class ReviewService {
     // Switching topic tabs exits any open per-KPI school list so the header,
     // columns and rows follow the newly selected topic.
     this.kpiListId.set(null);
+    this.acaDrillUdise.set(null);
+    this.acaDrillClass.set(null);
   }
 
   /**
@@ -1192,6 +1307,7 @@ export class ReviewService {
         academicAvg: examStat ? Math.round(examStat.avg * 10) / 10 : 0,
         academicPrevAvg: examPrev ? Math.round(examPrev.avg * 10) / 10 : 0,
         academicChange: examStat && examPrev ? Math.round((examStat.avg - examPrev.avg) * 10) / 10 : 0,
+        ...this.academicKpiFields(examStat, examPrev),
         sch: sc ? this.pct(sc.thiran.assessed, sc.thiran.eligible) : 0,
         cases: sc ? this.scale(sc.cmCell.pending + sc.helpline14417.critical) : 0,
         // ---- extra real KPI fields for the tile grid ----
@@ -1245,6 +1361,7 @@ export class ReviewService {
         academicAvg: examStat ? Math.round(examStat.avg * 10) / 10 : 0,
         academicPrevAvg: examPrev ? Math.round(examPrev.avg * 10) / 10 : 0,
         academicChange: examStat && examPrev ? Math.round((examStat.avg - examPrev.avg) * 10) / 10 : 0,
+        ...this.academicKpiFields(examStat, examPrev),
         sch: sc ? this.pct(sc.thiran.assessed, sc.thiran.eligible) : 0,
         cases: sc ? this.scale(Math.round((sc.cmCell.pending + sc.helpline14417.critical) * share)) : 0,
         ...this.moduleFields(dist, share, b.schools),
@@ -1293,6 +1410,7 @@ export class ReviewService {
         academicAvg: examStat ? Math.round(examStat.avg * 10) / 10 : 0,
         academicPrevAvg: examPrev ? Math.round(examPrev.avg * 10) / 10 : 0,
         academicChange: examStat && examPrev ? Math.round((examStat.avg - examPrev.avg) * 10) / 10 : 0,
+        ...this.academicKpiFields(examStat, examPrev),
         hasAca: !!acS,
         sch: sc ? this.pct(sc.thiran.assessed, sc.thiran.eligible) : 0,
         cases: sc ? this.scale(Math.round((sc.cmCell.pending + sc.helpline14417.critical) * share)) : 0,
@@ -1320,6 +1438,29 @@ export class ReviewService {
     const idx = order.indexOf(this.examPeriod());
     if (idx <= 0) return byExam.find((x) => x.name === order[0]) ?? byExam[0];
     return byExam.find((x) => x.name === order[idx - 1]) ?? null;
+  }
+
+  /**
+   * Academic Performance KPI fields (per the Academic Performance KPI – Final
+   * spec) derived from the current and previous exam-period stats:
+   *   acaPassPct      Pass Percentage %   (students passed / appeared)
+   *   academicAvg     Average Mark
+   *   academicChange  Year-on-Year Improvement % (vs previous period as proxy)
+   *   acaExamToExam   Exam-to-Exam Improvement (PP) = current − previous avg
+   *   acaCoveragePct  Assessment Coverage % (students assessed / expected)
+   *   acaCompletionPct Mark Entry Completion % (marks entered / expected)
+   */
+  private academicKpiFields(
+    examStat: { name: string; avg: number; pass: number; compliance: number } | null,
+    examPrev: { name: string; avg: number; pass: number; compliance: number } | null,
+  ): Partial<DrillRow> {
+    if (!examStat) return { acaPassPct: 0, acaExamToExam: 0, acaCoveragePct: 0 };
+    const r1 = (v: number) => Math.round(v * 10) / 10;
+    return {
+      acaPassPct: r1(examStat.pass),
+      acaExamToExam: examPrev ? r1(examStat.avg - examPrev.avg) : 0,
+      acaCoveragePct: r1(examStat.compliance),
+    };
   }
 
   /** Teachers on long leave has no source field anywhere in the data; estimated at ~2% of teaching staff. */
@@ -1767,9 +1908,14 @@ export class ReviewService {
   /** Drill one level deeper, or (at school level) open the profile drawer. */
   drillRow(row: DrillRow): void {
     const level = this.ds.level();
+    // A school row (block-level listing): Academic opens the class→subject
+    // drill; every other topic opens the shared school profile drawer.
+    if (row.level === 'school' || level === 'block') {
+      if (this.activeTopic() === 'aca' && row.udise) { this.openAcademicDrill(row.udise, row.name); return; }
+      this.openDrawer(row); return;
+    }
     if (level === 'state') this.ds.drillToDistrict(row.key);
     else if (level === 'district') this.ds.drillToBlock(row.key);
-    else if (level === 'block') this.openDrawer(row);
   }
 
   // ================= SCHOOL PROFILE DRAWER =================
@@ -2155,6 +2301,7 @@ export class ReviewService {
         academicAvg: examStat ? Math.round(examStat.avg * 10) / 10 : 0,
         academicPrevAvg: examPrev ? Math.round(examPrev.avg * 10) / 10 : 0,
         academicChange: examStat && examPrev ? Math.round((examStat.avg - examPrev.avg) * 10) / 10 : 0,
+        ...this.academicKpiFields(examStat, examPrev),
         hasAca: !!acS,
         sch: sc ? this.pct(sc.thiran.assessed, sc.thiran.eligible) : 0,
         cases: sc ? this.scale(Math.round((sc.cmCell.pending + sc.helpline14417.critical) * share)) : 0,
@@ -3081,6 +3228,10 @@ export interface DrillRow {
   acaScienceAvg?: number;
   acaSocialAvg?: number;
   acaCompletionPct?: number;
+  /** Academic Performance (spec) fields. */
+  acaPassPct?: number;
+  acaExamToExam?: number;
+  acaCoveragePct?: number;
   thiranBaselinePct?: number;
   thiranBloPct?: number;
   thiranAttainBLO?: number;
