@@ -17,6 +17,7 @@ import {
   AcademicReal, ThiranReal, PalliReal, DigitalInfraReal,
   InfraRealAsset, InfraReal,
   SmcRealAsset, SmcReal,
+  DpsRealAsset, DpsReal, DpsApplication,
 } from '../models/real-data.model';
 
 /** A leaderboard entry (district or school ranked by a metric). */
@@ -53,6 +54,7 @@ export class ReviewService {
   private readonly _digitalReal = signal<DigitalInfraRealAsset | null>(null);
   private readonly _infraReal = signal<InfraRealAsset | null>(null);
   private readonly _smcReal = signal<SmcRealAsset | null>(null);
+  private readonly _dpsReal = signal<DpsRealAsset | null>(null);
   private readonly _loaded = signal(false);
   readonly loaded = this._loaded.asReadonly();
   readonly schemes = this._schemes.asReadonly();
@@ -93,6 +95,8 @@ export class ReviewService {
       .then((a) => this._infraReal.set(a)).catch(() => {});
     loadAsset<SmcRealAsset>('assets/smc-real.json')
       .then((a) => this._smcReal.set(a)).catch(() => {});
+    loadAsset<DpsRealAsset>('assets/dps-real.json')
+      .then((a) => this._dpsReal.set(a)).catch(() => {});
   }
 
   readonly currentYear = computed(
@@ -895,10 +899,11 @@ export class ReviewService {
     { id: 'aca', label: 'Academic', icon: 'fa-solid fa-graduation-cap' },
     // 'sch' (Schemes & Grievances) temporarily removed — re-add when those
     // modules are re-enabled in the KPI catalog.
-    { id: 'thiran', label: 'THIRAN+', icon: 'fa-solid fa-user-graduate' },
+    { id: 'thiran', label: 'THIRAN', icon: 'fa-solid fa-user-graduate' },
     { id: 'scholarship', label: 'Scholarship', icon: 'fa-solid fa-award' },
     { id: 'smc', label: 'SMC', icon: 'fa-solid fa-people-group' },
     { id: 'palli', label: 'Palli Parvai', icon: 'fa-solid fa-clipboard-check' },
+    { id: 'dps', label: 'Recognition Order', icon: 'fa-solid fa-file-circle-check' },
   ];
   readonly activeTopic = signal<DrillTopic>('att');
   setTopic(t: DrillTopic): void {
@@ -909,6 +914,7 @@ export class ReviewService {
     this.kpiListId.set(null);
     this.acaDrillUdise.set(null);
     this.acaDrillClass.set(null);
+    this.dpsUnit.set(null);
   }
 
   /**
@@ -1100,6 +1106,15 @@ export class ReviewService {
           { key: 'palliLowPerformers', label: 'Low performers (<75%)', fmt: 'num', tone: (v) => (v > 0 ? 'warn' : 'good') },
           { key: 'palliTopPerformers', label: 'Top performers (≥75%)', fmt: 'num', tone: (v) => (v > 0 ? 'good' : undefined) },
         ];
+      case 'dps':
+        return [
+          { key: 'dpsTotal', label: 'Total pending applications', fmt: 'num', tone: (v) => (v > 0 ? 'warn' : 'good') },
+          { key: 'dpsDistrictPending', label: 'District pending', fmt: 'num', tone: (v) => (v > 0 ? 'warn' : 'good') },
+          { key: 'dpsStatePending', label: 'State pending', fmt: 'num', tone: (v) => (v > 0 ? 'warn' : 'good') },
+          { key: 'dpsLt15', label: 'Pending < 15 days', fmt: 'num' },
+          { key: 'dpsD15to30', label: 'Pending 15–30 days', fmt: 'num', tone: (v) => (v > 0 ? 'warn' : 'good') },
+          { key: 'dpsGt30', label: 'Pending > 30 days', fmt: 'num', tone: (v) => (v > 0 ? 'bad' : 'good') },
+        ];
       default:
         return [
           { key: 'sch', label: 'Scheme coverage (est. below district)', fmt: 'pct', bar: true, barMax: 100, tone: (v) => (v < 90 ? 'bad' : v < 94 ? 'warn' : 'good') },
@@ -1188,11 +1203,12 @@ export class ReviewService {
 
   /** Attendance school-list columns (requested layout). */
   private readonly attendanceListColumns: DrillColumn[] = [
-    { key: 'stuPresentPct', label: 'Student present %', fmt: 'pct', tone: (v) => (v < 85 ? 'bad' : v < 90 ? 'warn' : 'good') },
+    { key: 'stuPresentPct', label: 'Student present %', fmt: 'pct', tone: (v) => (v < 60 ? 'bad' : v < 85 ? 'warn' : 'good') },
     { key: 'boysAbsent', label: 'Boys absent', fmt: 'num' },
     { key: 'girlsAbsent', label: 'Girls absent', fmt: 'num' },
     { key: 'studentsAbsent', label: 'Total students absent', fmt: 'num' },
     { key: 'teaching', label: 'Total Teachers', fmt: 'num' },
+    { key: 'tchPresentPct', label: 'Teacher present %', fmt: 'pct', tone: (v) => (v < 60 ? 'bad' : v < 90 ? 'warn' : 'good') },
     { key: 'teacherPresent', label: 'Teacher present', fmt: 'num' },
     { key: 'teacherAbsent', label: 'Teacher absent', fmt: 'num' },
     { key: 'markedStatus', label: 'Marked status', fmt: 'text' },
@@ -1327,6 +1343,7 @@ export class ReviewService {
         ...this.realFields(key, null, undefined, 'district'),
         ...this.enrollmentFields(this.ds.schoolRowsFor(key)),
         ...this.attendanceFields(atNode, d.boys, d.girls, d.teaching),
+        ...this.attBelow60Counts(key),
       };
     });
   }
@@ -1369,6 +1386,7 @@ export class ReviewService {
         ...this.realFields(dist, b.block, undefined, 'block'),
         ...this.enrollmentFields(this.ds.schoolRowsFor(dist, b.block)),
         ...this.attendanceFields(atNode, b.boys, b.girls, b.teaching),
+        ...this.attBelow60Counts(dist, b.block),
       };
     });
   }
@@ -1555,6 +1573,38 @@ export class ReviewService {
   }
 
   /**
+   * Below-60% attendance rule, shared by the KPI predicate, the per-school
+   * flag and the district/block roll-up so the three can never disagree.
+   * Schools that never marked attendance (compliance 0) report 0% for both
+   * students and teachers; that is "not marked", not "low attendance", and is
+   * already its own KPI — so they are excluded here.
+   */
+  private isBelow60(atS: { attendance?: number; teacherAttendance?: number; compliance?: number } | undefined, who: 'student' | 'teacher'): boolean {
+    if (!atS || (atS.compliance ?? 0) <= 0) return false;
+    const v = who === 'student' ? atS.attendance : atS.teacherAttendance;
+    return (v ?? 100) < 60;
+  }
+
+  /**
+   * Count of schools under 60% student / teacher attendance for a district
+   * (all its blocks) or a single block, from the REAL per-school attendance
+   * roll. Schools with no attendance record are not counted.
+   */
+  private attBelow60Counts(district: string, block?: string): Pick<DrillRow, 'attStudentBelow60' | 'attTeacherBelow60'> {
+    const roll = this.at.schoolsByBlock();
+    if (!roll) return { attStudentBelow60: 0, attTeacherBelow60: 0 };
+    const keys = block ? [`${district}||${block}`] : Object.keys(roll).filter((k) => k.startsWith(`${district}||`));
+    let stu = 0, tch = 0;
+    for (const k of keys) {
+      for (const s of roll[k] ?? []) {
+        if (this.isBelow60(s, 'student')) stu++;
+        if (this.isBelow60(s, 'teacher')) tch++;
+      }
+    }
+    return { attStudentBelow60: stu, attTeacherBelow60: tch };
+  }
+
+  /**
    * Attendance absence fields for a scope. Boys/girls absent are apportioned
    * from the student absentee pool by the scope's gender split (no gender-split
    * absentee field exists in the source). Teacher absent uses teacherAbsentees;
@@ -1585,7 +1635,7 @@ export class ReviewService {
   }
 
   /**
-   * Initiative module fields (THIRAN+, Scholarship, SMC, Palli Parvai) for a
+   * Initiative module fields (THIRAN, Scholarship, SMC, Palli Parvai) for a
    * district row. `share` is 1 for a district; for blocks and schools it is that
    * unit's share of district enrolment, since the modules are published only at
    * district level. Rates are carried through unscaled.
@@ -1694,7 +1744,7 @@ export class ReviewService {
   }
 
   /**
-   * Real EMIS data fields (Academic, THIRAN+, Palli, Digital Infra) for a row.
+   * Real EMIS data fields (Academic, THIRAN, Palli, Digital Infra) for a row.
    * Looks up the matching scope: district rows by UPPERCASE name, block rows by
    * `DISTRICT||UPPERCASE_BLOCK`, school rows by UDISE. Returns only the fields
    * the real data supports; falls back to {} (keeping synthetic/other values)
@@ -1785,6 +1835,18 @@ export class ReviewService {
       // Emergency KPI = emergency resolutions NOT closed (per requirement)
       out.smcEmergency = smc.emergencyOpen;
       out.smcEmergencyOpen = smc.emergencyOpen;
+    }
+
+    const dps = pick<DpsReal>(this._dpsReal());
+    if (dps) {
+      out.dpsTotal = dps.total;
+      out.dpsDistrictPending = dps.districtPending;
+      out.dpsStatePending = dps.statePending;
+      out.dpsLt15 = dps.lt15;
+      out.dpsD15to30 = dps.d15to30;
+      out.dpsGt30 = dps.gt30;
+      out.dpsAvgDays = dps.avgDays ?? undefined;
+      out.dpsMaxDays = dps.maxDays;
     }
 
     return out;
@@ -1994,6 +2056,9 @@ export class ReviewService {
     a_t: ({ atS }) => !!atS && (atS.teacherAttendance ?? 100) < 75,
     // Schools marked attendance %: schools that marked less than 25% (low compliance)
     a_nm: ({ atS }) => !!atS && (atS.compliance ?? 100) < 25,
+    // Below 60% student / teacher attendance (real per-school record; unmarked schools excluded)
+    a_s60: ({ atS }) => this.isBelow60(atS, 'student'),
+    a_t60: ({ atS }) => this.isBelow60(atS, 'teacher'),
 
     // ---- Infrastructure (real per-school infra return where a field exists;
     //      otherwise assumed deterministically) ----
@@ -2042,16 +2107,13 @@ export class ReviewService {
     g_ip: ({ dig }) => (dig?.internet ?? 0) > 0,
 
     // ---- Assumed-only flag KPIs (no per-school source; deterministic subset) ----
-    // Attendance: schools that marked only one of student/teacher attendance
-    a_os: ({ row }) => this.assume(row.udise, 'a_os'),
-    a_ot: ({ row }) => this.assume(row.udise, 'a_ot'),
     // Schemes & grievance
     bx: ({ row }) => this.assume(row.udise, 'bx'),
     cm_o: ({ row }) => this.assume(row.udise, 'cm_o'),
     cm_c: ({ row }) => this.assume(row.udise, 'cm_c'),
     h_o: ({ row }) => this.assume(row.udise, 'h_o'),
     h_c: ({ row }) => this.assume(row.udise, 'h_c'),
-    // THIRAN+ / Scholarship
+    // THIRAN / Scholarship
     t_sc: ({ row }) => this.assume(row.udise, 't_sc'),
     sh_f: ({ row }) => this.assume(row.udise, 'sh_f'),
     sh_w: ({ row }) => this.assume(row.udise, 'sh_w'),
@@ -2075,11 +2137,9 @@ export class ReviewService {
     g_i: 0.62, g_y: 0.48, g_n: 0.22, g_nf: 0.14, g_fp: 0.55, g_ip: 0.48,
     // Infrastructure (no per-school field — assumed)
     i_e: 0.08, i_cw: 0.12, i_k: 0.15, i_d: 0.05,
-    // Attendance (no per-school field — assumed)
-    a_os: 0.07, a_ot: 0.05,
     // Schemes & grievance
     bx: 0.06, cm_o: 0.09, cm_c: 0.03, h_o: 0.07, h_c: 0.02,
-    // THIRAN+ / Scholarship
+    // THIRAN / Scholarship
     t_sc: 0.70, sh_f: 0.05, sh_w: 0.08, sh_n: 0.04, sh_a: 0.06,
     // SMC / Palli
     m_e: 0.04, p_low: 0.35,
@@ -2104,7 +2164,7 @@ export class ReviewService {
     r: SchoolRow,
     infS: { entered?: number; types?: Record<string, { available?: number; good?: number; demolish?: number }> } | undefined,
     dig: { ictSchools?: number; internet?: number; noInternet?: number; functional?: number; notFunctional?: number } | undefined,
-    atS?: { attendance?: number; teacherAttendance?: number; absentees?: number; dropoutRisk?: number } | undefined,
+    atS?: { attendance?: number; teacherAttendance?: number; compliance?: number; absentees?: number; dropoutRisk?: number } | undefined,
   ): Partial<DrillRow> {
     const students = r.students ?? 0;
     const teaching = r.teaching ?? 0;
@@ -2146,6 +2206,9 @@ export class ReviewService {
       tchAbsentPct: atS ? Math.round((100 - tchAtt) * 10) / 10 : 0,
       teacherPresent: Math.max(0, teaching - teacherAbsent),
       teacherAbsent,
+      // below-60% flags (1 = this school is below the line); roll up as counts
+      attStudentBelow60: this.isBelow60(atS, 'student') ? 1 : 0,
+      attTeacherBelow60: this.isBelow60(atS, 'teacher') ? 1 : 0,
       // ---- Enrollment flag KPI values (real) ----
       zeroEnrol: students,
       zeroTeacher: teaching,
@@ -2197,7 +2260,7 @@ export class ReviewService {
   }
 
   /** KPI ids whose school list is backed by a real per-school source. */
-  private readonly REAL_SOURCE_KPIS = new Set(['zenr', 'ztea', 'stea', 'u10', 'ptr60', 'einc', 'edec', 'a_s', 'a_t', 'a_nm', 'i_t', 'i_w', 'i_cl', 'i_d', 'gap', 'i_need', 'g_i', 'g_y', 'g_n', 'g_nf', 'g_fp', 'g_ip']);
+  private readonly REAL_SOURCE_KPIS = new Set(['zenr', 'ztea', 'stea', 'u10', 'ptr60', 'einc', 'edec', 'a_s', 'a_t', 'a_nm', 'a_s60', 'a_t60', 'i_t', 'i_w', 'i_cl', 'i_d', 'gap', 'i_need', 'g_i', 'g_y', 'g_n', 'g_nf', 'g_fp', 'g_ip']);
 
   /**
    * True when the open KPI's school list is at least partly ASSUMED (no real
@@ -2461,15 +2524,15 @@ export class ReviewService {
     if (!m) return [];
     const out: ReviewInsight[] = [];
 
-    // ---- THIRAN+ : total students identified ----
+    // ---- THIRAN : total students identified ----
     const t = m.thiran;
     if (t.students > 0) {
       const share = this.pct(t.students, this.enrolNode()?.students ?? 0);
       out.push({
         id: 'thiranTotal', severity: 'warn', icon: 'fa-solid fa-graduation-cap',
-        text: `${this.fmt(this.scale(t.students))} students identified under THIRAN+ `
+        text: `${this.fmt(this.scale(t.students))} students identified under THIRAN `
           + `(${share}% of enrolment) across ${this.fmt(this.scale(t.schools))} schools`,
-        action: 'View THIRAN+', topic: 'aca', rowKey: null, anchor: 'rv-thiran',
+        action: 'View THIRAN', topic: 'aca', rowKey: null, anchor: 'rv-thiran',
       });
     }
 
@@ -2554,12 +2617,12 @@ export class ReviewService {
   readonly modulesReady = computed(() => this._modules() !== null);
   readonly moduleNote = computed(() => this._modules()?.note ?? '');
 
-  // ---- 1. THIRAN+ ----
+  // ---- 1. THIRAN ----
   readonly thiranKpis = computed(() => {
     const t = this.moduleNode()?.thiran;
     if (!t) return [];
     return [
-      { label: 'THIRAN+ Students Identified', value: this.fmt(this.scale(t.students)), icon: 'fa-solid fa-user-graduate' },
+      { label: 'THIRAN Students Identified', value: this.fmt(this.scale(t.students)), icon: 'fa-solid fa-user-graduate' },
       { label: 'Schools Covered', value: this.fmt(this.scale(t.schools)), icon: 'fa-solid fa-school' },
       { label: 'Boys', value: this.fmt(this.scale(t.boys)), icon: 'fa-solid fa-person' },
       { label: 'Girls', value: this.fmt(this.scale(t.girls)), icon: 'fa-solid fa-person-dress' },
@@ -2958,41 +3021,59 @@ export class ReviewService {
 
   /** KPI 4 — schools observed 3+ times, with per-designation observation counts. */
   readonly palliSchools3Plus = computed(() => {
-    const rows = this.scopeSchoolRows().filter((e) => this.hash01(e.row.udise, 'p_s3') < 0.6);
-    return rows.map((e, i) => {
+    // KPI 4 (spec clarified): a school qualifies when ANY SINGLE designation
+    // visited it 3+ times in the month (e.g. BRTE visited the same school 3+
+    // times) — a per-designation threshold, not the sum across designations.
+    const rows = this.scopeSchoolRows();
+    return rows.map((e) => {
       const cells: Record<string, number> = {};
       let total = 0;
+      const qualified: string[] = [];
       for (const des of this.PALLI_DESIGNATIONS) {
-        const c = Math.round(this.hash01(e.row.udise, des) * 4); // 0–4 observations
+        // 0–5 visits by this designation this month (deterministic, stable)
+        const c = Math.round(this.hash01(e.row.udise, 'p_s3-' + des) * 5);
         cells[des] = c; total += c;
+        if (c >= 3) qualified.push(des);
       }
       return {
-        sno: i + 1, district: this.ds.titleCase(e.district), block: this.ds.titleCase(e.block),
-        udise: e.row.udise, school: e.row.name, category: e.row.ctype ?? '—', cells, total,
+        district: this.ds.titleCase(e.district), block: this.ds.titleCase(e.block),
+        udise: e.row.udise, school: e.row.name, category: e.row.ctype ?? '—',
+        cells, total, qualified, qualifiedLabel: qualified.join(', '), maxByDesignation: Math.max(0, ...this.PALLI_DESIGNATIONS.map((d) => cells[d])),
       };
-    }).filter((r) => r.total >= 3);
+    })
+    .filter((r) => r.qualified.length > 0)   // at least one designation with ≥3 visits
+    .map((r, i) => ({ sno: i + 1, ...r }));
   });
 
   // ---- KPI 4 observation-detail popup (user details for a school + designation) ----
   readonly palliObsPopup = signal<{
     school: string; udise: string; district: string; designation: string;
-    officials: { sno: number; userName: string; date: string; classObserved: string }[];
+    officials: { sno: number; emisId: string; staffName: string; office: string; target: number; observed: number }[];
   } | null>(null);
   readonly palliObsPopupOpen = computed(() => this.palliObsPopup() !== null);
   closePalliObsPopup(): void { this.palliObsPopup.set(null); }
 
-  /** Open the user-detail popup for a KPI-4 cell (school × designation count). */
+  /**
+   * Open the official-detail popup for a KPI-4 cell (school × designation).
+   * `count` = how many times this designation visited the school this month,
+   * modelled as that many officials each with EMIS id, office, target and the
+   * observations they made this month. Deterministic (seeded by UDISE).
+   */
   openPalliObsPopup(row: { udise: string; school: string; district: string }, designation: string, count: number): void {
     if (!count) return;
-    const classes = ['Class 1-A', 'Class 2-B', 'Class 3-A', 'Class 4-B', 'Class 5-A', 'Class 6-B', 'Class 7-A', 'Class 8-B'];
+    const code = designation.replace(/[^A-Z]/g, '').slice(0, 3) || 'OFF';
     const officials = Array.from({ length: count }, (_, i) => {
       const seed = this.hash01(`${row.udise}|${designation}|${i}`, 'p_s3_u');
-      const day = 1 + Math.floor(seed * 27);
+      // monthly observation target per official (assumed 15–40), observed ≤ target
+      const target = 15 + Math.round(this.hash01(`${row.udise}|${designation}|${i}`, 'tgt') * 25);
+      const observed = Math.max(1, Math.round(target * (0.4 + this.hash01(`${row.udise}|${designation}|${i}`, 'obs') * 0.6)));
       return {
         sno: i + 1,
-        userName: this.palliOfficialName(row.district, designation, i),
-        date: `${String(day).padStart(2, '0')}-09-2026`,
-        classObserved: classes[Math.floor(this.hash01(`${row.udise}|${designation}|${i}`, 'cls') * classes.length)],
+        emisId: `EMIS${(100000 + Math.floor(seed * 899999))}`,
+        staffName: this.palliOfficialName(row.district, designation, i),
+        office: `${designation} Office, ${this.ds.titleCase(row.district)}`,
+        target,
+        observed,
       };
     });
     this.palliObsPopup.set({
@@ -3046,11 +3127,187 @@ export class ReviewService {
     for (const des of this.PALLI_DESIGNATIONS) cells[des] = this.sumBy(rows, (r) => r.cells[des]);
     return { cells, total: this.sumBy(rows, (r) => r.total), count: rows.length };
   });
+
+  // ================= RECOGNITION ORDER — DPS =================
+  /**
+   * Pending Recognition Certificate (RC) applications for private schools.
+   * Unlike the other components the unit of analysis is an APPLICATION, not a
+   * school, so this gets its own drill: a district/block summary that opens the
+   * underlying application list. All figures are REAL (dps-real.json) — no
+   * assumed data.
+   */
+  readonly dpsKpiTabs: { id: string; label: string }[] = [
+    { id: 'dp_tot', label: 'Total pending' },
+    { id: 'dp_dist', label: 'District pending' },
+    { id: 'dp_state', label: 'State pending' },
+    { id: 'dp_l15', label: 'Pending < 15 days' },
+    { id: 'dp_l30', label: 'Pending 15–30 days' },
+    { id: 'dp_g30', label: 'Pending > 30 days' },
+  ];
+  private readonly DPS_KPI_IDS = new Set(this.dpsKpiTabs.map((t) => t.id));
+
+  /** Active DPS KPI; null when the DPS drill is closed. */
+  readonly dpsKpiId = signal<string | null>(null);
+  /** Unit (district or block name) drilled into for the application list. */
+  readonly dpsUnit = signal<string | null>(null);
+
+  hasDpsDrill(kpiId: string): boolean { return this.DPS_KPI_IDS.has(kpiId); }
+  openDpsDrill(kpiId: string): void {
+    this.dpsKpiId.set(this.DPS_KPI_IDS.has(kpiId) ? kpiId : 'dp_tot');
+    this.dpsUnit.set(null);
+  }
+  closeDpsDrill(): void { this.dpsKpiId.set(null); this.dpsUnit.set(null); }
+  setDpsKpi(id: string): void { this.dpsKpiId.set(id); this.dpsUnit.set(null); }
+  dpsSelectUnit(u: string | null): void { this.dpsUnit.set(u); }
+  dpsResetUnit(): void { this.dpsUnit.set(null); }
+
+  readonly dpsKpiLabel = computed(() => {
+    const id = this.dpsKpiId();
+    if (!id) return '';
+    for (const m of KPI_MODULES) { const def = m.kpis.find((k) => k.id === id); if (def) return def.label; }
+    return '';
+  });
+
+  /** Which summary metric the active KPI highlights / filters by. */
+  private dpsKpiFilter(id: string | null): (a: DpsApplication) => boolean {
+    switch (id) {
+      case 'dp_dist': return (a) => a.level === 'District';
+      case 'dp_state': return (a) => a.level === 'State';
+      case 'dp_l15': return (a) => a.bucket === '<15';
+      case 'dp_l30': return (a) => a.bucket === '15-30';
+      case 'dp_g30': return (a) => a.bucket === '>30';
+      default: return () => true;   // dp_tot — everything pending
+    }
+  }
+
+  /**
+   * All pending applications inside the current dashboard scope
+   * (state = all, district = that district, block = that block).
+   */
+  private readonly dpsScopeApps = computed<DpsApplication[]>(() => {
+    const all = this._dpsReal()?.applications ?? [];
+    const dist = this.ds.selectedDistrict();
+    const blk = this.ds.selectedBlock();
+    if (!dist) return all;
+    const dU = dist.toUpperCase();
+    const out = all.filter((a) => a.district.toUpperCase() === dU);
+    if (!blk) return out;
+    const bU = blk.toUpperCase();
+    return out.filter((a) => a.block.toUpperCase() === bU);
+  });
+
+  /** Applications matching the active KPI, inside scope. */
+  private readonly dpsKpiApps = computed<DpsApplication[]>(() => {
+    const pred = this.dpsKpiFilter(this.dpsKpiId());
+    return this.dpsScopeApps().filter(pred);
+  });
+
+  /** Grouping unit for the DPS summary: districts at state level, else blocks. */
+  readonly dpsUnitLabel = computed(() => (this.ds.selectedDistrict() ? 'Block' : 'District'));
+
+  /**
+   * Summary rows for the DPS drill — one row per district (state scope) or per
+   * block (inside a district), with every KPI metric so the grid matches the
+   * component's KPI set. Sorted by the active KPI's metric, descending.
+   */
+  readonly dpsSummaryRows = computed(() => {
+    const byBlock = !!this.ds.selectedDistrict();
+    const init = () => ({ total: 0, districtPending: 0, statePending: 0, lt15: 0, d15to30: 0, gt30: 0, daysSum: 0 });
+    const map = new Map<string, ReturnType<typeof init>>();
+    for (const a of this.dpsScopeApps()) {
+      const key = (byBlock ? a.block : a.district) || '—';
+      if (!map.has(key)) map.set(key, init());
+      const o = map.get(key)!;
+      o.total++;
+      if (a.level === 'State') o.statePending++;
+      else if (a.level === 'District') o.districtPending++;
+      if (a.bucket === '>30') o.gt30++;
+      else if (a.bucket === '15-30') o.d15to30++;
+      else o.lt15++;
+      o.daysSum += a.days;
+    }
+    const metric = this.dpsSortKey(this.dpsKpiId());
+    return [...map.entries()]
+      .map(([key, o]) => ({
+        key,
+        unit: this.ds.titleCase(key),
+        total: o.total,
+        districtPending: o.districtPending,
+        statePending: o.statePending,
+        lt15: o.lt15,
+        d15to30: o.d15to30,
+        gt30: o.gt30,
+        avgDays: o.total ? Math.round((o.daysSum / o.total) * 10) / 10 : 0,
+      }))
+      .sort((a, b) => (b[metric] as number) - (a[metric] as number) || a.unit.localeCompare(b.unit))
+      .map((r, i) => ({ sno: i + 1, ...r }));
+  });
+
+  /** Summary-row field the active KPI ranks by. */
+  private dpsSortKey(id: string | null): 'total' | 'districtPending' | 'statePending' | 'lt15' | 'd15to30' | 'gt30' {
+    switch (id) {
+      case 'dp_dist': return 'districtPending';
+      case 'dp_state': return 'statePending';
+      case 'dp_l15': return 'lt15';
+      case 'dp_l30': return 'd15to30';
+      case 'dp_g30': return 'gt30';
+      default: return 'total';
+    }
+  }
+
+  /** Grand-total row for the DPS summary grid. */
+  readonly dpsSummaryTotals = computed(() => {
+    const rows = this.dpsSummaryRows();
+    const s = (f: (r: typeof rows[number]) => number) => rows.reduce((t, r) => t + f(r), 0);
+    const total = s((r) => r.total);
+    return {
+      count: rows.length,
+      total,
+      districtPending: s((r) => r.districtPending),
+      statePending: s((r) => r.statePending),
+      lt15: s((r) => r.lt15),
+      d15to30: s((r) => r.d15to30),
+      gt30: s((r) => r.gt30),
+      // student-less dataset: weight the average by application count
+      avgDays: total ? Math.round((rows.reduce((t, r) => t + r.avgDays * r.total, 0) / total) * 10) / 10 : 0,
+    };
+  });
+
+  /**
+   * The application list: KPI-filtered, scope-filtered and narrowed to the
+   * drilled district/block when one is selected. Oldest pending first, so the
+   * most overdue files surface at the top.
+   */
+  readonly dpsApplicationRows = computed(() => {
+    const unit = this.dpsUnit();
+    const byBlock = !!this.ds.selectedDistrict();
+    let apps = this.dpsKpiApps();
+    if (unit) {
+      const u = unit.toUpperCase();
+      apps = apps.filter((a) => ((byBlock ? a.block : a.district) || '—').toUpperCase() === u);
+    }
+    return apps
+      .slice()
+      .sort((a, b) => b.days - a.days || a.district.localeCompare(b.district))
+      .map((a, i) => ({ sno: i + 1, ...a }));
+  });
+
+  /** Footer figures for the application list. */
+  readonly dpsApplicationTotals = computed(() => {
+    const rows = this.dpsApplicationRows();
+    const total = rows.length;
+    return {
+      count: total,
+      districtPending: rows.filter((r) => r.level === 'District').length,
+      statePending: rows.filter((r) => r.level === 'State').length,
+      avgDays: total ? Math.round((rows.reduce((t, r) => t + r.days, 0) / total) * 10) / 10 : 0,
+    };
+  });
 }
 
 /** Topic tabs for the drill-down table, matching the prototype's lenses. */
 export type DrillTopic = 'enr' | 'att' | 'inf' | 'dinf' | 'aca' | 'sch'
-  | 'thiran' | 'scholarship' | 'smc' | 'palli';
+  | 'thiran' | 'scholarship' | 'smc' | 'palli' | 'dps';
 
 /** A row of KPI cards for one domain, rendered on a single line. */
 export interface KpiSection {
@@ -3278,6 +3535,18 @@ export interface DrillRow {
   teacherAbsent?: number;         // teachers absent (today / latest)
   teacherLong30?: number;         // teachers absent 30+ days (est.)
   markedStatus?: string;          // 'Marked' | 'Partial' | 'Not marked'
+  attStudentBelow60?: number;     // schools with student attendance < 60% (real)
+  attTeacherBelow60?: number;     // schools with teacher attendance < 60% (real)
+
+  // ---- Recognition Order — DPS (pending RC applications) ----
+  dpsTotal?: number;
+  dpsDistrictPending?: number;
+  dpsStatePending?: number;
+  dpsLt15?: number;
+  dpsD15to30?: number;
+  dpsGt30?: number;
+  dpsAvgDays?: number;
+  dpsMaxDays?: number;
 }
 
 /** One row of the per-KPI school list (flag-KPI drill-down). */
@@ -3344,7 +3613,7 @@ export interface ReviewInsight {
   topic: DrillTopic;
   rowKey: string | null;
   /**
-   * Set for module insights (THIRAN+, Scholarship, SMC, Palli Parvai) that have
+   * Set for module insights (THIRAN, Scholarship, SMC, Palli Parvai) that have
    * no drill-down topic of their own: clicking scrolls to this section id.
    */
   anchor?: string;

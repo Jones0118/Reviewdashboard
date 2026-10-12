@@ -24,6 +24,8 @@ export class AttendanceService {
 
   readonly data = this._data.asReadonly();
   readonly loaded = this._loaded.asReadonly();
+  /** Read-only per-school attendance roll keyed `district||block` (used by the Review dashboard). */
+  readonly schoolsByBlock = this._schools.asReadonly();
 
   /** Rolling window in working days: 3, 5, 7, 15 or 30. */
   readonly window = signal(30);

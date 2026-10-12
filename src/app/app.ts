@@ -481,9 +481,13 @@ export class App implements OnInit {
       'enrolIncreaseSchools', 'enrolDeclinedSchools', 'notMoved',
       'boys', 'girls', 'ptr', 'schoolsNotMarkedPct', 'transitionPendingPct',
       'boysAbsent', 'girlsAbsent', 'teacherAbsent', 'teacherLong30',
+      'attStudentBelow60', 'attTeacherBelow60',
       // ---- Palli Parvai KPIs ----
       'palliClassObsPct', 'palliSchoolsNotObsPct', 'palliOfficialsNotObsPct',
-      'palliSchools3PlusPct', 'palliLowPerformers', 'palliTopPerformers'];
+      'palliSchools3PlusPct', 'palliLowPerformers', 'palliTopPerformers',
+      // ---- Recognition Order (DPS) pending RC applications ----
+      'dpsTotal', 'dpsDistrictPending', 'dpsStatePending',
+      'dpsLt15', 'dpsD15to30', 'dpsGt30'];
     for (const k of keys) {
       const kk = k as string;
       if (PCT.has(kk)) {
@@ -620,6 +624,8 @@ export class App implements OnInit {
     this.rv.setTopic(t as any);
     // Palli Parvai "View details" lands on the first KPI's designation drill.
     if (t === 'palli') this.rv.openPalliDrill('p_co'); else this.rv.closePalliDrill();
+    // Recognition Order (DPS) has its own application-level drill.
+    if (t === 'dps') this.rv.openDpsDrill('dp_tot'); else this.rv.closeDpsDrill();
     setTimeout(() => {
       document.getElementById('rv-drilldown')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 60);
@@ -642,14 +648,22 @@ export class App implements OnInit {
     // Palli Parvai KPIs use a dedicated designation (stakeholder) drill-down.
     if (this.rv.hasPalliDrill(kpiId)) {
       this.rv.closeKpiSchoolList();
+      this.rv.closeDpsDrill();
       this.rv.openPalliDrill(kpiId);
+    } else if (this.rv.hasDpsDrill(kpiId)) {
+      // Recognition Order KPIs drill to the pending-application list.
+      this.rv.closeKpiSchoolList();
+      this.rv.closePalliDrill();
+      this.rv.openDpsDrill(kpiId);
     } else if (this.rv.hasKpiSchoolList(kpiId)) {
       // Flag KPIs that resolve to a per-school condition (e.g. zero enrolment,
       // single teacher, PTR>60) open a focused list of only the matching schools.
       this.rv.closePalliDrill();
+      this.rv.closeDpsDrill();
       this.rv.openKpiSchoolList(kpiId);
     } else {
       this.rv.closePalliDrill();
+      this.rv.closeDpsDrill();
       this.rv.closeKpiSchoolList();
       // otherwise, if the KPI maps to a real field, sort the drill table by it
       if (def?.field && def.field !== 'DERIVED') this.rv.setSort(def.field);
@@ -667,10 +681,29 @@ export class App implements OnInit {
   onTopicTab(topic: string): void {
     this.selectedKpi.set(null);
     this.selectedDomain.set(topic);
-    this.rv.setSelectedModule(null);
+    // Keep the grid's columns = the component's KPIs (same as its tile), not the
+    // legacy per-topic prototype columns.
+    this.rv.setSelectedModule(this.moduleTitleForTopic(topic));
     this.rv.closeKpiSchoolList();
     if (topic === 'palli') this.rv.openPalliDrill('p_co'); else this.rv.closePalliDrill();
+    if (topic === 'dps') this.rv.openDpsDrill('dp_tot'); else this.rv.closeDpsDrill();
     this.rv.setTopic(topic as any);
+  }
+
+  /**
+   * The KPI module that owns a drill topic tab. Digital Infrastructure shares
+   * the 'inf' catalog topic but has its own 'dinf' tab; otherwise it is the
+   * module whose KPIs all belong to the topic (State Summary mixes topics and
+   * is therefore never picked).
+   */
+  private moduleTitleForTopic(topic: string): string | null {
+    if (topic === 'dinf') {
+      return KPI_MODULES.find((m) => m.title.startsWith('Digital Infrastructure'))?.title ?? null;
+    }
+    return KPI_MODULES.find((m) =>
+      !m.title.startsWith('Digital Infrastructure') &&
+      m.kpis.length > 0 && m.kpis.every((k) => k.topic === topic),
+    )?.title ?? null;
   }
 
   /** Close the inline drill-down and return to the tile grid. */
@@ -680,6 +713,7 @@ export class App implements OnInit {
     this.rv.setSelectedModule(null);
     this.rv.closeKpiSchoolList();
     this.rv.closePalliDrill();
+    this.rv.closeDpsDrill();
     this.rv.closeAcademicDrill();
     this.ds.goToState();
   }
@@ -787,12 +821,12 @@ export class App implements OnInit {
   // ---- additional KPI module charts (KPI.md) ----
   readonly thiranClassOpt = computed(() =>
     this.cs.reviewColumnBar(this.rv.thiranByClass(), 'Students', {
-      id: 'thiranClass', title: `THIRAN+ Students by Class — ${this.reviewScope()}`,
+      id: 'thiranClass', title: `THIRAN Students by Class — ${this.reviewScope()}`,
     }),
   );
   readonly thiranCategoryOpt = computed(() =>
     this.cs.reviewDonut('School Category', this.rv.thiranByCategory(), {
-      id: 'thiranCategory', title: `THIRAN+ by School Category — ${this.reviewScope()}`,
+      id: 'thiranCategory', title: `THIRAN by School Category — ${this.reviewScope()}`,
     }),
   );
   readonly scholarshipCatOpt = computed(() =>

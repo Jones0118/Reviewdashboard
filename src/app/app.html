@@ -292,6 +292,7 @@
                  [rows]="10" [rowsPerPageOptions]="[10,20,50]" [paginator]="kpiFlatRows().length > 0" [rowHover]="true">
           <ng-template pTemplate="header">
             <tr>
+              <th class="num">S. No</th>
               <th>Component</th>
               <th>KPI</th>
               <th class="num">Value</th>
@@ -299,8 +300,9 @@
               <th></th>
             </tr>
           </ng-template>
-          <ng-template pTemplate="body" let-k>
+          <ng-template pTemplate="body" let-k let-i="rowIndex">
             <tr class="rv-row" (click)="openKpi(k.id, k.topic, k.module)">
+              <td class="num">{{ i + 1 }}</td>
               <td><span class="kpi-tag-dot" [style.background]="k.color"></span> {{ k.module }}</td>
               <td class="strong">{{ k.label }}</td>
               <td class="num">
@@ -449,6 +451,8 @@
             <i class="fa-solid fa-layer-group"></i>
             @if (rv.palliKpiId()) {
               {{ rv.palliKpiLabel() }} — Districts in {{ ds.scopeLabel() }}
+            } @else if (rv.dpsKpiId()) {
+              {{ rv.dpsKpiLabel() }} — {{ rv.dpsUnitLabel() }}s in {{ ds.scopeLabel() }}
             } @else {
               {{ selectedDomainName() }} — {{ rv.drillUnitLabel() }}s in {{ ds.scopeLabel() }}
             }
@@ -676,6 +680,7 @@
                     <th pSortableColumn="udise">UDISE Code <p-sortIcon field="udise" /></th>
                     <th pSortableColumn="school">School Name <p-sortIcon field="school" /></th>
                     <th pSortableColumn="category">Category <p-sortIcon field="category" /></th>
+                    <th pSortableColumn="qualifiedLabel">Visited 3+ by <p-sortIcon field="qualifiedLabel" /></th>
                     @for (d of rv.PALLI_DESIGNATIONS; track d) { <th class="num">{{ d }}</th> }
                     <th class="num" pSortableColumn="total">Total <p-sortIcon field="total" /></th>
                   </tr>
@@ -683,10 +688,13 @@
                 <ng-template pTemplate="body" let-r>
                   <tr>
                     <td class="num">{{ r.sno }}</td><td>{{ r.district }}</td><td>{{ r.block }}</td><td>{{ r.udise }}</td><td class="strong">{{ r.school }}</td><td>{{ r.category }}</td>
+                    <td class="strong">{{ r.qualifiedLabel }}</td>
                     @for (d of rv.PALLI_DESIGNATIONS; track d) {
                       <td class="num">
                         @if (r.cells[d] > 0) {
-                          <button class="palli-cell good" (click)="rv.openPalliObsPopup(r, d, r.cells[d])" title="View official details">{{ r.cells[d] }}</button>
+                          <button class="palli-cell" [class.bad]="r.cells[d] >= 3" [class.good]="r.cells[d] > 0 && r.cells[d] < 3"
+                                  (click)="rv.openPalliObsPopup(r, d, r.cells[d])"
+                                  [title]="r.cells[d] >= 3 ? d + ' visited 3+ times — view details' : 'View official details'">{{ r.cells[d] }}</button>
                         } @else { {{ r.cells[d] }} }
                       </td>
                     }
@@ -695,7 +703,7 @@
                 </ng-template>
                 <ng-template pTemplate="footer">
                   <tr class="rv-total">
-                    <td class="strong" colspan="6">Grand Total ({{ fmt(rv.palliS3Totals().count) }} schools)</td>
+                    <td class="strong" colspan="7">Grand Total ({{ fmt(rv.palliS3Totals().count) }} schools)</td>
                     @for (d of rv.PALLI_DESIGNATIONS; track d) { <td class="num strong">{{ fmt(rv.palliS3Totals().cells[d]) }}</td> }
                     <td class="num strong">{{ fmt(rv.palliS3Totals().total) }}</td>
                   </tr>
@@ -771,7 +779,7 @@
                 <th>School Category</th>
                 <th class="num">Total Students</th>
                 @for (c of rv.kpiListColumns(); track c.key) {
-                  <th class="num">
+                  <th [class.num]="c.fmt !== 'text'">
                     <button class="th-sort" (click)="rv.setSort(c.key)">
                       {{ c.label }}
                       <i class="fa-solid" [class.fa-sort]="rv.sortCol() !== c.key"
@@ -817,6 +825,129 @@
           </p-table>
           }
         </div>
+        } @else if (selectedDomain() === 'dps') {
+        <!-- ===== Recognition Order (DPS) dedicated drill — pending RC applications ===== -->
+        <div class="rv-topics">
+          @for (t of rv.topics; track t.id) {
+            <button [class.on]="rv.activeTopic() === t.id" (click)="onTopicTab(t.id)">
+              <i [class]="t.icon"></i> {{ t.label }}
+            </button>
+          }
+        </div>
+        <div class="card table-card">
+          <div class="card-title">
+            <i class="fa-solid fa-file-circle-check"></i> {{ rv.dpsKpiLabel() }} — {{ ds.scopeLabel() }}
+            <button class="kpi-filter-clear" (click)="closeDomain()" style="margin-left:auto">
+              <i class="fa-solid fa-arrow-left"></i> Back to all KPIs
+            </button>
+          </div>
+
+          <!-- DPS KPI switcher tabs -->
+          <div class="rv-topics palli-tabs">
+            @for (t of rv.dpsKpiTabs; track t.id) {
+              <button [class.on]="(rv.dpsKpiId() || 'dp_tot') === t.id" (click)="rv.setDpsKpi(t.id)">{{ t.label }}</button>
+            }
+          </div>
+
+          @if (!rv.dpsUnit()) {
+            <!-- Level 1: district (or block) summary — click a row for the applications -->
+            <p-table [value]="rv.dpsSummaryRows()" styleClass="p-datatable-sm" [scrollable]="true"
+                     [rows]="10" [rowsPerPageOptions]="[10,20,50]"
+                     [paginator]="rv.dpsSummaryRows().length > 0" [rowHover]="true" sortMode="single">
+              <ng-template pTemplate="header">
+                <tr>
+                  <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
+                  <th pSortableColumn="unit">{{ rv.dpsUnitLabel() }} <p-sortIcon field="unit" /></th>
+                  <th class="num" pSortableColumn="total">Total Pending <p-sortIcon field="total" /></th>
+                  <th class="num" pSortableColumn="districtPending">District Pending <p-sortIcon field="districtPending" /></th>
+                  <th class="num" pSortableColumn="statePending">State Pending <p-sortIcon field="statePending" /></th>
+                  <th class="num" pSortableColumn="lt15">Pending &lt; 15 days <p-sortIcon field="lt15" /></th>
+                  <th class="num" pSortableColumn="d15to30">Pending 15–30 days <p-sortIcon field="d15to30" /></th>
+                  <th class="num" pSortableColumn="gt30">Pending &gt; 30 days <p-sortIcon field="gt30" /></th>
+                  <th class="num" pSortableColumn="avgDays">Avg Pending Days <p-sortIcon field="avgDays" /></th>
+                </tr>
+              </ng-template>
+              <ng-template pTemplate="body" let-r>
+                <tr class="rv-row" (click)="rv.dpsSelectUnit(r.key)">
+                  <td class="num">{{ r.sno }}</td>
+                  <td class="strong">{{ r.unit }} <i class="fa-solid fa-chevron-right text-muted"></i></td>
+                  <td class="num strong">{{ fmt(r.total) }}</td>
+                  <td class="num">{{ fmt(r.districtPending) }}</td>
+                  <td class="num">{{ fmt(r.statePending) }}</td>
+                  <td class="num">{{ fmt(r.lt15) }}</td>
+                  <td class="num" [class.warn]="r.d15to30 > 0">{{ fmt(r.d15to30) }}</td>
+                  <td class="num" [class.bad]="r.gt30 > 0">{{ fmt(r.gt30) }}</td>
+                  <td class="num">{{ r.avgDays }}</td>
+                </tr>
+              </ng-template>
+              <ng-template pTemplate="footer">
+                <tr class="rv-total">
+                  <td class="strong" colspan="2">Grand Total ({{ fmt(rv.dpsSummaryTotals().count) }} {{ rv.dpsUnitLabel().toLowerCase() }}s)</td>
+                  <td class="num strong">{{ fmt(rv.dpsSummaryTotals().total) }}</td>
+                  <td class="num strong">{{ fmt(rv.dpsSummaryTotals().districtPending) }}</td>
+                  <td class="num strong">{{ fmt(rv.dpsSummaryTotals().statePending) }}</td>
+                  <td class="num strong">{{ fmt(rv.dpsSummaryTotals().lt15) }}</td>
+                  <td class="num strong">{{ fmt(rv.dpsSummaryTotals().d15to30) }}</td>
+                  <td class="num strong">{{ fmt(rv.dpsSummaryTotals().gt30) }}</td>
+                  <td class="num strong">{{ rv.dpsSummaryTotals().avgDays }}</td>
+                </tr>
+              </ng-template>
+            </p-table>
+          } @else {
+            <!-- Level 2: the pending applications themselves -->
+            <div class="palli-subbar">
+              <button class="dr-back ghost" (click)="rv.dpsResetUnit()">
+                <i class="fa-solid fa-arrow-left"></i> All {{ rv.dpsUnitLabel().toLowerCase() }}s
+              </button>
+              <b>{{ ds.titleCase(rv.dpsUnit()!) }} · {{ rv.dpsKpiLabel() }}</b>
+            </div>
+            <p-table [value]="rv.dpsApplicationRows()" styleClass="p-datatable-sm" [scrollable]="true"
+                     [rows]="10" [rowsPerPageOptions]="[10,20,50]"
+                     [paginator]="rv.dpsApplicationRows().length > 0" [rowHover]="true" sortMode="single">
+              <ng-template pTemplate="header">
+                <tr>
+                  <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
+                  <th pSortableColumn="appId">Application ID <p-sortIcon field="appId" /></th>
+                  <th pSortableColumn="district">District <p-sortIcon field="district" /></th>
+                  <th pSortableColumn="block">Block <p-sortIcon field="block" /></th>
+                  <th pSortableColumn="udise">UDISE Code <p-sortIcon field="udise" /></th>
+                  <th pSortableColumn="schoolType">School Type <p-sortIcon field="schoolType" /></th>
+                  <th pSortableColumn="pendingWith">Pending With <p-sortIcon field="pendingWith" /></th>
+                  <th pSortableColumn="level">Level <p-sortIcon field="level" /></th>
+                  <th pSortableColumn="status">Status <p-sortIcon field="status" /></th>
+                  <th class="num" pSortableColumn="days">Pending Days <p-sortIcon field="days" /></th>
+                </tr>
+              </ng-template>
+              <ng-template pTemplate="body" let-a>
+                <tr>
+                  <td class="num">{{ a.sno }}</td>
+                  <td class="strong">{{ a.appId }}</td>
+                  <td>{{ ds.titleCase(a.district) }}</td>
+                  <td>{{ a.block || '—' }}</td>
+                  <td>{{ a.udise || '—' }}</td>
+                  <td>{{ a.schoolType }}</td>
+                  <td>{{ a.pendingWith }}</td>
+                  <td>
+                    <p-tag [value]="a.level" [severity]="a.level === 'State' ? 'warn' : 'info'" />
+                  </td>
+                  <td>{{ a.status }}</td>
+                  <td class="num" [class.bad]="a.days > 30" [class.warn]="a.days >= 15 && a.days <= 30">{{ a.days }}</td>
+                </tr>
+              </ng-template>
+              <ng-template pTemplate="footer">
+                <tr class="rv-total">
+                  <td class="strong" colspan="6">
+                    Grand Total ({{ fmt(rv.dpsApplicationTotals().count) }} applications ·
+                    {{ fmt(rv.dpsApplicationTotals().districtPending) }} district /
+                    {{ fmt(rv.dpsApplicationTotals().statePending) }} state)
+                  </td>
+                  <td colspan="3"></td>
+                  <td class="num strong">{{ rv.dpsApplicationTotals().avgDays }} avg</td>
+                </tr>
+              </ng-template>
+            </p-table>
+          }
+        </div>
         } @else {
         <div class="rv-topics">
           @for (t of rv.topics; track t.id) {
@@ -858,10 +989,11 @@
                   <th>School Category</th>
                   <th class="num">Total Students</th>
                 } @else {
+                  <th class="num">S. No</th>
                   <th>{{ rv.drillUnitLabel() }}</th>
                 }
                 @for (c of (ds.selectedBlock() ? rv.kpiListColumns() : rv.topicColumns()); track c.key) {
-                  <th class="num">
+                  <th [class.num]="c.fmt !== 'text'">
                     <button class="th-sort" (click)="rv.setSort(c.key)">
                       {{ c.label }}
                       <i class="fa-solid" [class.fa-sort]="rv.sortCol() !== c.key"
@@ -883,6 +1015,7 @@
                   <td>{{ r.ctype || '—' }}</td>
                   <td class="num">{{ fmt(r.n) }}</td>
                 } @else {
+                  <td class="num">{{ i + 1 }}</td>
                   <td class="strong">
                     {{ r.name }}
                     @if (r.ns > 1 && ds.level() !== 'state') { <span class="text-muted">({{ fmt(r.ns) }} schools)</span> }
@@ -908,7 +1041,7 @@
                   <td class="strong" colspan="6">Grand Total ({{ fmt(rv.sortedDrillRows().length) }} schools)</td>
                   <td class="num strong">{{ fmt(rv.totalN()) }}</td>
                 } @else {
-                  <td class="strong">Grand Total ({{ fmt(rv.sortedDrillRows().length) }})</td>
+                  <td class="strong" colspan="2">Grand Total ({{ fmt(rv.sortedDrillRows().length) }})</td>
                 }
                 @for (c of (ds.selectedBlock() ? rv.kpiListColumns() : rv.topicColumns()); track c.key) {
                   <td class="num strong">{{ rv.aggregateColumn(rv.sortedDrillRows(), c) }}</td>
@@ -1084,9 +1217,9 @@
     <!-- ================= ADDITIONAL KPI MODULES (KPI.md) ================= -->
     @if (rv.modulesReady()) {
 
-    <!-- ===== 1. THIRAN+ ===== -->
+    <!-- ===== 1. THIRAN ===== -->
     <div class="rv-sec" id="rv-thiran">
-      <div class="rv-sec-title"><i class="fa-solid fa-graduation-cap"></i> THIRAN+</div>
+      <div class="rv-sec-title"><i class="fa-solid fa-graduation-cap"></i> THIRAN</div>
       <div class="rv-line" [style.--rv-n]="rv.thiranKpis().length">
         @for (k of rv.thiranKpis(); track k.label) {
           <div class="ac-box rv-box">
@@ -1102,14 +1235,14 @@
     <div class="grid-row row-two">
       <div class="card">
         <div class="card-title">
-          <i class="fa-solid fa-chart-column"></i> THIRAN+ Students by Class
+          <i class="fa-solid fa-chart-column"></i> THIRAN Students by Class
           <span class="hint">classes 2 to 9</span>
         </div>
         <div echarts [options]="thiranClassOpt()" (chartInit)="registerChart('thiranClass', $event)"
              class="chart tall-chart"></div>
       </div>
       <div class="card">
-        <div class="card-title"><i class="fa-solid fa-layer-group"></i> THIRAN+ by School Category</div>
+        <div class="card-title"><i class="fa-solid fa-layer-group"></i> THIRAN by School Category</div>
         <div echarts [options]="thiranCategoryOpt()" (chartInit)="registerChart('thiranCategory', $event)"
              class="chart donut-chart"></div>
       </div>
@@ -1392,7 +1525,7 @@
           <tr>
             <th>{{ rv.drillUnitLabel() }}</th>
             @for (c of rv.topicColumns(); track c.key) {
-              <th class="num">
+              <th [class.num]="c.fmt !== 'text'">
                 <button class="th-sort" (click)="rv.setSort(c.key)">
                   {{ c.label }}
                   <i class="fa-solid" [class.fa-sort]="rv.sortCol() !== c.key"
@@ -1500,10 +1633,10 @@
           </p>
           <p-table [value]="rv.palliObsPopup()?.officials || []" styleClass="p-datatable-sm" [rowHover]="true">
             <ng-template pTemplate="header">
-              <tr><th class="num">S. No</th><th>User Name</th><th>Date Observed</th><th>Class Observed</th></tr>
+              <tr><th class="num">S. No</th><th>EMIS ID</th><th>Staff Name</th><th>Office</th><th class="num">Target</th><th class="num">Observed</th></tr>
             </ng-template>
             <ng-template pTemplate="body" let-o>
-              <tr><td class="num">{{ o.sno }}</td><td class="strong">{{ o.userName }}</td><td>{{ o.date }}</td><td>{{ o.classObserved }}</td></tr>
+              <tr><td class="num">{{ o.sno }}</td><td>{{ o.emisId }}</td><td class="strong">{{ o.staffName }}</td><td>{{ o.office }}</td><td class="num">{{ o.target }}</td><td class="num">{{ o.observed }}</td></tr>
             </ng-template>
           </p-table>
         </div>
@@ -1529,14 +1662,16 @@
             <p-table [value]="rv.acaClassRows()" styleClass="p-datatable-sm" [rowHover]="true" sortMode="single">
               <ng-template pTemplate="header">
                 <tr>
+                  <th class="num">S. No</th>
                   <th pSortableColumn="label">Class <p-sortIcon field="label" /></th>
                   <th class="num" pSortableColumn="pass">Pass % <p-sortIcon field="pass" /></th>
                   <th class="num" pSortableColumn="avg">Average Mark <p-sortIcon field="avg" /></th>
                   <th class="num" pSortableColumn="improve">Improvement <p-sortIcon field="improve" /></th>
                 </tr>
               </ng-template>
-              <ng-template pTemplate="body" let-c>
+              <ng-template pTemplate="body" let-c let-i="rowIndex">
                 <tr class="rv-row" (click)="rv.selectAcaClass(c.cls)">
+                  <td class="num">{{ i + 1 }}</td>
                   <td class="strong">{{ c.label }} <i class="fa-solid fa-chevron-right text-muted"></i></td>
                   <td class="num" [class.bad]="c.pass < 50" [class.good]="c.pass >= 75">{{ c.pass }}%</td>
                   <td class="num">{{ c.avg }}</td>
@@ -1553,14 +1688,16 @@
             <p-table [value]="rv.acaSubjectRows()" styleClass="p-datatable-sm" [rowHover]="true" sortMode="single">
               <ng-template pTemplate="header">
                 <tr>
+                  <th class="num">S. No</th>
                   <th pSortableColumn="subject">Subject <p-sortIcon field="subject" /></th>
                   <th class="num" pSortableColumn="pass">Pass % <p-sortIcon field="pass" /></th>
                   <th class="num" pSortableColumn="avg">Average Mark <p-sortIcon field="avg" /></th>
                   <th class="num" pSortableColumn="improve">Improvement <p-sortIcon field="improve" /></th>
                 </tr>
               </ng-template>
-              <ng-template pTemplate="body" let-s>
+              <ng-template pTemplate="body" let-s let-i="rowIndex">
                 <tr>
+                  <td class="num">{{ i + 1 }}</td>
                   <td class="strong">{{ s.subject }}</td>
                   <td class="num" [class.bad]="s.pass < 50" [class.good]="s.pass >= 75">{{ s.pass }}%</td>
                   <td class="num">{{ s.avg }}</td>

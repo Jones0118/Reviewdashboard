@@ -105,11 +105,13 @@ node -e "const z=require('zlib'),fs=require('fs');const d=JSON.parse(z.gunzipSyn
 
 **Current module set & notable state:**
 - State Summary, **Enrollment**, **Attendance**, **Infrastructure**,
-  **Academic Performance**, THIRAN+, Scholarship, **Digital Infrastructure (Middle/High/Hr.Sec)**,
-  SMC, **Palli Paarvai**.
+  **Academic Performance**, THIRAN, Scholarship, **Digital Infrastructure (Middle/High/Hr.Sec)**,
+  SMC, **Palli Paarvai**, **Recognition Order - DPS**.
 - **Schemes Coverage** and **Grievance & Support** are **commented out** (temporarily
   disabled) in this file — wrapped in `/* ===== TEMPORARILY DISABLED ... ===== */`.
   Re-enable by removing the comment wrapper.
+- Full metric definitions (formula, unit, direction, RAG band, real/assumed source,
+  drill) for every KPI: `D:\general\Dashboard\Review Dashboard – KPI Metrics.md`.
 
 ### Enrollment KPIs (flag → per-school list)
 zenr Zero enrolment, ztea Zero teacher, stea Single teacher, u10 Under 10,
@@ -118,10 +120,16 @@ trn Transition pending %.
 
 ### Attendance KPIs
 a_s Student attendance %, a_t Teacher attendance %, a_nm Schools not marked %,
-a_os Schools marked only student (assumed), a_ot Schools marked only teacher (assumed),
-d15 Potential dropout, tl30 Teacher long absent 30+.
+a_s60 Schools below 60% student attendance, a_t60 Schools below 60% teacher attendance,
+d15 Potential dropout, tl30 Teacher long absent 30+ (assumed ~2%).
 - a_s/a_t/a_nm are **percentage KPIs that drill to a filtered school list**:
   a_s → schools with student attendance <75%, a_t → teacher <75%, a_nm → compliance <25%.
+- a_s60/a_t60 are REAL (in `REAL_SOURCE_KPIS`): `isBelow60()` is the single rule used by
+  the predicate, the per-school 0/1 flag (`schoolKpiValues`) and the district/block
+  roll-up (`attBelow60Counts`, reads `AttendanceService.schoolsByBlock` — a read-only
+  accessor added for this). **Unmarked schools (compliance 0) are excluded** — they report
+  0% for both and are already KPI a_nm. With the current roll both tiles are 0.
+- Removed 08-Oct-2026: a_os / a_ot "marked only student/teacher" (were assumed).
 
 ### Infrastructure KPIs (per Infra spec md)
 gap School with critical gap, i_cl Zero classroom, i_t Zero toilet, i_w No drinking water,
@@ -146,6 +154,26 @@ g_fp ICT functional %, g_ip ICT internet %, g_nf ICT not functional.
 p_co % Class Observation, p_sno % Schools Not Observed (term),
 p_ono % Officials Not Observed (month), p_s3 % Schools Observed 3+ Times,
 p_low Low performers (<75%), p_top Top performers (≥75%).
+- p_s3 rule (clarified 05-Oct-2026): a school qualifies when **any single designation**
+  visited it ≥3 times in the month (per-designation threshold, not the sum). The grid has
+  a "Visited 3+ by" column; cells ≥3 are red. Clicking a count opens the officials popup:
+  S.No · EMIS ID · Staff Name · Office · Target · Observed.
+
+### Recognition Order – DPS KPIs (REAL — assets/dps-real.json)
+dp_tot Total pending applications, dp_dist District pending, dp_state State pending,
+dp_l15 Pending <15 days, dp_l30 Pending 15–30 days, dp_g30 Pending >30 days.
+- Source: `Resources\DPS\RC Pending ApplicationsReport.csv` → `ingestDps()` in
+  `scripts/ingest-real.mjs` (`node scripts/ingest-real.mjs dps`). Unit = APPLICATION.
+- District vs State from `Pending_with`: district = Pending_in_App_by_deo / Pending_by_deo /
+  doc_verifi_pending; state = State_Section_office / State_Superintendent / Pending_by_JD_* /
+  Pending_by_director. Buckets are mutually exclusive (sum to total). State totals:
+  745 / 453 / 292 / 725 / 9 / 11.
+- Dedicated drill (topic `dps`, `selectedDomain()==='dps'` block in app.html): KPI tab bar →
+  summary grid by district (or block inside a district) → application list. Service members:
+  `dpsKpiTabs`, `dpsKpiId`, `dpsUnit`, `openDpsDrill/closeDpsDrill/setDpsKpi/dpsSelectUnit`,
+  `dpsSummaryRows/Totals`, `dpsApplicationRows/Totals`, `hasDpsDrill(id)`.
+- DrillRow fields: dpsTotal, dpsDistrictPending, dpsStatePending, dpsLt15, dpsD15to30,
+  dpsGt30, dpsAvgDays, dpsMaxDays (populated in `realFields()`; summed in scopeValues).
 
 ---
 
@@ -256,7 +284,7 @@ p_low Low performers (<75%), p_top Top performers (≥75%).
 
 ### Drill topic tabs (`rv.topics`)
 enr Enrollment, att Attendance, inf Infrastructure, **dinf Digital Infra**, aca Academic,
-thiran THIRAN+, scholarship Scholarship, smc SMC, palli Palli Parvai.
+thiran THIRAN, scholarship Scholarship, smc SMC, palli Palli Parvai.
 (Schemes & Grievances `sch` tab is **removed** while those modules are disabled.)
 The tab bar is rendered on the generic drill, the per-KPI school list, and the Palli drill
 so you can switch components from any view-details page.
@@ -271,8 +299,19 @@ so you can switch components from any view-details page.
   school profile (no further drill).
 - Click **View details** → the module's drill (District→Block→School) with the module's
   KPIs as columns and a matching KPI filter.
+- **Component tab in the drill grid** → same thing: `onTopicTab()` resolves the module via
+  `moduleTitleForTopic()` (module whose KPIs all share the topic; Digital Infra → `dinf`)
+  so the grid shows the module's KPIs, NOT the legacy per-topic prototype columns.
+  (Fixed 08-Oct-2026 — previously Infrastructure tab showed Schools with gaps/Main gap/Students.)
 - At **school level**, the main drill table shows the same rich layout as the KPI list.
 - Switching the topic tab updates header + columns + rows together.
+- **Grid conventions (every review grid):** S. No is always the first column; strings are
+  left-aligned, numbers/decimals centred. Implemented via `.dr-wrap .num, .rv-modal .num
+  { text-align:center }` + `td/th:not(.num) { text-align:left }` scoped to review containers
+  (global `.num` stays right-aligned for other dashboards). Data-driven headers must use
+  `[class.num]="c.fmt !== 'text'"` (never a hard-coded `class="num"`) so text columns stay left.
+- Heatmap style: bordered grid (outer border, row dividers, tinted cell borders), full-opacity
+  labels, 150px min cell width.
 - Infrastructure drill columns (facility layout): Classroom Available, Boys/Girls Toilet,
   CWSN Toilet, Lab, Drinking Water, Compound Wall, Building to be Demolished, Kitchen Shed.
 - Attendance drill columns: Student present %, Boys/Girls absent, Total absent, Teachers,

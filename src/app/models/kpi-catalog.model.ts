@@ -79,8 +79,8 @@ export const KPI_MODULES: KpiModule[] = [
       P('a_s', 'Student attendance %', 1, 82, 97, 'att', 'att'),
       P('a_t', 'Teacher attendance %', 1, 91, 99, 'teacherAtt', 'att'),
       P('a_nm', 'Schools not marked attendance %', -1, 0, 25, 'schoolsNotMarkedPct', 'att'),
-      F('a_os', 'Schools marked only student attendance', -1, 'markedOnlyStudent', 'att'),
-      F('a_ot', 'Schools marked only teacher attendance', -1, 'markedOnlyTeacher', 'att'),
+      F('a_s60', 'Schools below 60% student attendance', -1, 'attStudentBelow60', 'att'),
+      F('a_t60', 'Schools below 60% teacher attendance', -1, 'attTeacherBelow60', 'att'),
       N('d15', 'Potential dropout (15 days absent)', -1, 'drop', 'att'),
       N('tl30', 'Teacher long absent (30+ days)', -1, 'teacherLong30', 'att'),
     ],
@@ -128,8 +128,8 @@ export const KPI_MODULES: KpiModule[] = [
   },
   ===== END DISABLED ===== */
   {
-    title: 'THIRAN+', color: '#4d7c0f', kpis: [
-      N('t_s', 'THIRAN+ students identified', 0, 'thiranStudents', 'thiran'),
+    title: 'THIRAN', color: '#4d7c0f', kpis: [
+      N('t_s', 'THIRAN students identified', 0, 'thiranStudents', 'thiran'),
       F('t_sc', 'Schools covered', 0, 'thiranSchools', 'thiran'),
       P('t_sh', '% of enrolment', 1, 20, 60, 'thiranSharePct', 'thiran'),
       P('t_bl', 'BLO attainment %', 1, 50, 100, 'thiranBloPct', 'thiran'),
@@ -167,13 +167,26 @@ export const KPI_MODULES: KpiModule[] = [
     ],
   },
   {
-    title: 'Palli Paarvai', color: '#1d4ed8', kpis: [
-      P('p_co', '% of Class Observation', 1, 50, 100, 'palliClassObsPct', 'palli'),
+    title: 'Palli Paarvai', color: '#1d4ed8', kpis: [      P('p_co', '% of Class Observation', 1, 50, 100, 'palliClassObsPct', 'palli'),
       P('p_sno', '% of Schools Not Observed (term)', -1, 0, 40, 'palliSchoolsNotObsPct', 'palli'),
       P('p_ono', '% of Officials Not Observed (month)', -1, 0, 30, 'palliOfficialsNotObsPct', 'palli'),
       P('p_s3', '% of Schools Observed 3+ Times', 1, 30, 100, 'palliSchools3PlusPct', 'palli'),
       F('p_low', 'Low performers (observation < 75%)', -1, 'palliLowPerformers', 'palli'),
       F('p_top', 'Top performers (observation ≥ 75%)', 1, 'palliTopPerformers', 'palli'),
+    ],
+  },
+  {
+    // Recognition Order — Directorate of Private Schools (DPS).
+    // Pending Recognition Certificate (RC) applications: who holds the file
+    // (district vs state) and how long it has been pending. The three ageing
+    // buckets are mutually exclusive so they sum back to the total.
+    title: 'Recognition Order - DPS', color: '#7e22ce', kpis: [
+      N('dp_tot', 'Total pending applications', -1, 'dpsTotal', 'dps'),
+      N('dp_dist', 'District pending', -1, 'dpsDistrictPending', 'dps'),
+      N('dp_state', 'State pending', -1, 'dpsStatePending', 'dps'),
+      N('dp_l15', 'Pending < 15 days', 0, 'dpsLt15', 'dps'),
+      N('dp_l30', 'Pending 15–30 days', -1, 'dpsD15to30', 'dps'),
+      N('dp_g30', 'Pending > 30 days', -1, 'dpsGt30', 'dps'),
     ],
   },
 ];

@@ -6,7 +6,7 @@
  *   blocks    : `DISTRICT||UPPERCASE_BLOCK`
  *   schools   : UDISE code
  *
- * All four cover real figures for Academic Score, THIRAN+, Palli Paarvai and
+ * All four cover real figures for Academic Score, THIRAN, Palli Paarvai and
  * Digital Infrastructure. Infrastructure (SIDS) is deferred.
  */
 
@@ -33,7 +33,7 @@ export interface AcademicReal {
   completionPct: number | null;
 }
 
-/** THIRAN+ — compliance + endline (real). */
+/** THIRAN — compliance + endline (real). */
 export interface ThiranReal {
   students: number;
   schools: number;
@@ -122,3 +122,47 @@ export interface SmcReal {
 }
 
 export type SmcRealAsset = RealAsset<SmcReal>;
+
+/**
+ * Recognition Order — DPS (Directorate of Private Schools).
+ * Pending Recognition Certificate (RC) applications, split by the office
+ * currently holding the file (district vs state) and by how long they have
+ * been pending (<15 / 15-30 / >30 days, mutually exclusive buckets).
+ */
+export interface DpsReal {
+  /** Total pending RC applications in scope. */
+  total: number;
+  /** Pending with a district office (DEO / document verification). */
+  districtPending: number;
+  /** Pending with a state office (Section Office, JD, Director…). */
+  statePending: number;
+  /** Pending under 15 days. */
+  lt15: number;
+  /** Pending 15–30 days (inclusive). */
+  d15to30: number;
+  /** Pending over 30 days. */
+  gt30: number;
+  avgDays: number | null;
+  maxDays: number;
+}
+
+/** One pending RC application (drill-down detail row). */
+export interface DpsApplication {
+  appId: string;
+  district: string;
+  block: string;
+  udise: string;
+  schoolType: string;
+  applicationName: string;
+  /** Human-readable office currently holding the file. */
+  pendingWith: string;
+  level: 'District' | 'State' | 'Unspecified';
+  status: string;
+  days: number;
+  bucket: '<15' | '15-30' | '>30';
+  updatedOn: string;
+}
+
+export interface DpsRealAsset extends RealAsset<DpsReal> {
+  applications: DpsApplication[];
+}

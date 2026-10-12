@@ -548,6 +548,119 @@ async function ingestSmc() {
   return finalize(agg, fin, 'SMC resolutions incl. emergency-not-closed (real EMIS export)');
 }
 
+// =====================================================================
+// 7) RECOGNITION ORDER — DPS (RC Pending Applications)
+// =====================================================================
+/**
+ * Recognition Certificate (RC) pending applications for private/self-finance
+ * schools, handled by the Directorate of Private Schools (DPS).
+ *
+ * `Pending_with` identifies who currently holds the file, which is what
+ * separates a DISTRICT-level pendency from a STATE-level one:
+ *   district : Pending_in_App_by_deo, Pending_by_deo, doc_verifi_pending
+ *   state    : State_Section_office, State_Superintendent, Pending_by_JD_*,
+ *              Pending_by_director
+ * `pending_days` is bucketed into <15 / 15-30 / >30 (mutually exclusive, so
+ * the three buckets sum back to the total).
+ */
+const DPS_STATE_STAGES = new Set([
+  'state_section_office', 'state_superintendent',
+  'pending_by_jd_matric', 'pending_by_jd_private', 'pending_by_director',
+]);
+const DPS_DISTRICT_STAGES = new Set([
+  'pending_in_app_by_deo', 'pending_by_deo', 'doc_verifi_pending',
+]);
+
+/** Human label for a raw Pending_with stage code. */
+function dpsStageLabel(raw) {
+  const s = (raw ?? '').toString().trim();
+  if (!s) return 'Unspecified';
+  const map = {
+    pending_in_app_by_deo: 'Pending in application by DEO',
+    pending_by_deo: 'Pending by DEO',
+    doc_verifi_pending: 'Document verification pending',
+    state_section_office: 'State Section Office',
+    state_superintendent: 'State Superintendent',
+    pending_by_jd_matric: 'Joint Director (Matric)',
+    pending_by_jd_private: 'Joint Director (Private)',
+    pending_by_director: 'Director',
+  };
+  return map[s.toLowerCase()] ?? s.replace(/_/g, ' ');
+}
+
+function dpsLevel(raw) {
+  const s = (raw ?? '').toString().trim().toLowerCase();
+  if (DPS_STATE_STAGES.has(s)) return 'State';
+  if (DPS_DISTRICT_STAGES.has(s)) return 'District';
+  return 'Unspecified';
+}
+
+function dpsBucket(days) {
+  if (days > 30) return '>30';
+  if (days >= 15) return '15-30';
+  return '<15';
+}
+
+async function ingestDps() {
+  const path = join(RES, 'DPS', 'RC Pending ApplicationsReport.csv');
+  const init = () => ({
+    total: 0, districtPending: 0, statePending: 0,
+    lt15: 0, d15to30: 0, gt30: 0, daysSum: 0, maxDays: 0,
+  });
+  const agg = makeAgg(init);
+  const applications = [];
+
+  await streamCsv(path, (row) => {
+    const dist = row['district_name'];
+    if (!dist || !dist.trim()) return;
+    const block = row['block_name'];
+    const ud = (row['udise_code'] ?? '').toString().trim();
+    const days = num(row['pending_days']);
+    const level = dpsLevel(row['Pending_with']);
+    const bucket = dpsBucket(days);
+
+    bump(agg, dist, block, ud, (o) => {
+      o.total++;
+      if (level === 'State') o.statePending++;
+      else if (level === 'District') o.districtPending++;
+      if (bucket === '>30') o.gt30++;
+      else if (bucket === '15-30') o.d15to30++;
+      else o.lt15++;
+      o.daysSum += days;
+      if (days > o.maxDays) o.maxDays = days;
+    });
+
+    applications.push({
+      appId: (row['application_id'] ?? '').toString().trim(),
+      district: dist.trim(),
+      block: (block ?? '').toString().trim(),
+      udise: ud,
+      schoolType: (row['school_type'] ?? '').toString().trim() || '—',
+      applicationName: (row['application_name'] ?? '').toString().trim(),
+      pendingWith: dpsStageLabel(row['Pending_with']),
+      level,
+      status: (row['status'] ?? '').toString().trim() || '—',
+      days,
+      bucket,
+      updatedOn: (row['updation_ts'] ?? '').toString().trim(),
+    });
+  });
+
+  const fin = (o) => ({
+    total: o.total,
+    districtPending: o.districtPending,
+    statePending: o.statePending,
+    lt15: o.lt15,
+    d15to30: o.d15to30,
+    gt30: o.gt30,
+    avgDays: o.total ? round1(o.daysSum / o.total) : null,
+    maxDays: o.maxDays,
+  });
+  const out = finalize(agg, fin, 'Recognition Order (RC) pending applications — DPS (real EMIS export)');
+  out.applications = applications;
+  return out;
+}
+
 // ---------- shared finalize/write ----------
 function round1(n) { return Math.round(n * 10) / 10; }
 function finalize(agg, fin, note) {
@@ -577,5 +690,6 @@ const only = process.argv[2]; // optional: academic|thiran|palli|digital
   if (!only || only === 'palli') write('palli-real.json', await ingestPalli());
   if (!only || only === 'infra') write('infra-real.json', await ingestInfra());
   if (!only || only === 'smc') write('smc-real.json', await ingestSmc());
+  if (!only || only === 'dps') write('dps-real.json', await ingestDps());
   console.log('done');
 })();
