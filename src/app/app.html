@@ -216,7 +216,7 @@
   }
 
   <!-- ===== Sub-menu ===== -->
-  @if (!isClass1()) {
+  @if (!isClass1() && !isAcisTab()) {
   <div class="submenu">
     @for (s of subMenus(); track s.id) {
       <button class="sub-item" [class.active]="activeSub() === s.id" (click)="setSub(s.id)">
@@ -453,6 +453,10 @@
               {{ rv.palliKpiLabel() }} — Districts in {{ ds.scopeLabel() }}
             } @else if (rv.dpsKpiId()) {
               {{ rv.dpsKpiLabel() }} — {{ rv.dpsUnitLabel() }}s in {{ ds.scopeLabel() }}
+            } @else if (rv.acisKpiId()) {
+              {{ rv.acisKpiLabel() }} — {{ ds.scopeLabel() }}
+            } @else if (rv.smcKpiId()) {
+              {{ rv.smcKpiLabel() }} — {{ ds.scopeLabel() }}
             } @else {
               {{ selectedDomainName() }} — {{ rv.drillUnitLabel() }}s in {{ ds.scopeLabel() }}
             }
@@ -476,7 +480,11 @@
         <div class="card table-card">
           <div class="card-title">
             <i class="fa-solid fa-clipboard-check"></i> {{ rv.palliKpiLabel() }} — {{ ds.scopeLabel() }}
-            <p-tag value="Assumed data" severity="warn" styleClass="ml-2" />
+            @if (rv.palliShowingReal()) {
+              <p-tag value="Real data" severity="success" styleClass="ml-2" />
+            } @else {
+              <p-tag value="Assumed data" severity="warn" styleClass="ml-2" />
+            }
             <button class="kpi-filter-clear" (click)="closeDomain()" style="margin-left:auto">
               <i class="fa-solid fa-arrow-left"></i> Back to all KPIs
             </button>
@@ -523,28 +531,459 @@
                   </ng-template>
                 </p-table>
               } @else {
-                <!-- KPI 1 designation drill -->
-                <div class="palli-subbar">
-                  <button class="dr-back ghost" (click)="rv.selectPalliDesignation(null)"><i class="fa-solid fa-arrow-left"></i> All designations</button>
-                  <b>Designation: {{ rv.palliDesignation() }}</b>
+                <!-- ===== Real drill below the matrix (User Stories 4–8) — PP_Oct_2026 export ===== -->
+                <!-- US 8: breadcrumb, each step goes back to that level; filters are kept -->
+                <nav class="palli-crumbs" aria-label="Breadcrumb">
+                  @for (c of rv.palliCrumbs(); track c.level; let last = $last) {
+                    @if (!last) {
+                      <button type="button" class="crumb" (click)="rv.palliGoCrumb(c.level)">{{ c.label }}</button>
+                      <i class="fa-solid fa-chevron-right crumb-sep" aria-hidden="true"></i>
+                    } @else {
+                      <span class="crumb on" aria-current="page">{{ c.label }}</span>
+                    }
+                  }
+                  <p-tag value="Real data · October 2026" severity="success" styleClass="ml-2" />
+                </nav>
+
+                <!-- filters + export (date range applies to every level; search / duration where they apply) -->
+                <div class="acis-filters">
+                  <label class="palli-date">From
+                    <input type="date" [min]="rv.palliObsWindow().from" [max]="rv.palliObsWindow().to"
+                           [ngModel]="rv.palliDateFrom()" (ngModelChange)="rv.palliDateFrom.set($event || '')" />
+                  </label>
+                  <label class="palli-date">To
+                    <input type="date" [min]="rv.palliObsWindow().from" [max]="rv.palliObsWindow().to"
+                           [ngModel]="rv.palliDateTo()" (ngModelChange)="rv.palliDateTo.set($event || '')" />
+                  </label>
+                  @if (rv.palliLlDistrict() && !rv.palliReport()) {
+                    <input class="palli-search" type="search"
+                           [attr.aria-label]="rv.palliUser() === null ? 'Search user name or ID' : 'Search school name or UDISE'"
+                           [placeholder]="rv.palliUser() === null ? 'Search user name / ID' : 'Search school / UDISE'"
+                           [ngModel]="rv.palliSearch()" (ngModelChange)="rv.palliSearch.set($event)" />
+                  }
+                  @if (rv.palliFiltered()) {
+                    <button class="kpi-filter-clear" (click)="rv.palliClearFilters()">
+                      <i class="fa-solid fa-filter-circle-xmark"></i> Clear filters
+                    </button>
+                  }
+                  @if (!rv.palliReport()) {
+                    <span class="tbl-export" style="margin-left:auto">
+                      <button class="exp-btn xls" (click)="exportPalli(rv.palliUser() !== null ? 'userObs' : rv.palliLlDistrict() ? 'users' : 'district', 'excel')"><i class="fa-solid fa-file-excel"></i> Excel</button>
+                      <button class="exp-btn csv" (click)="exportPalli(rv.palliUser() !== null ? 'userObs' : rv.palliLlDistrict() ? 'users' : 'district', 'csv')"><i class="fa-solid fa-file-csv"></i> CSV</button>
+                      <button class="exp-btn pdf" (click)="exportPalli(rv.palliUser() !== null ? 'userObs' : rv.palliLlDistrict() ? 'users' : 'district', 'pdf')"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+                    </span>
+                  }
                 </div>
-                <p-table [value]="rv.palliDesignationDrill()" styleClass="p-datatable-sm" [scrollable]="true" [rowHover]="true" sortMode="single">
+
+                @if (rv.palliObsError()) {
+                  <div class="palli-report-na" role="alert"><i class="fa-solid fa-triangle-exclamation"></i> {{ rv.palliObsError() }}</div>
+                } @else if (rv.palliLlLoading()) {
+                  <div class="ac-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading October observations…</div>
+                } @else if (rv.palliReport()) {
+                  <!-- US 6: the selected observation -->
+                  @if (rv.palliReportView(); as v) {
+                    <div class="palli-report">
+                      <div class="palli-report-grid">
+                        <div><span>Observer</span><b>{{ v.observer }}</b><small>{{ v.observerId }} · {{ v.designation }}</small></div>
+                        <div><span>School</span><b>{{ v.school }}</b><small>UDISE {{ v.udise }} · {{ v.district }}</small></div>
+                        <div><span>Observation date</span><b>{{ v.date }}</b><small>{{ v.start }} – {{ v.end }}</small></div>
+                        <div><span>Class / Section</span><b>Class {{ v.cls || '—' }} – {{ v.section }}</b><small>Section is sample</small></div>
+                        <div><span>Duration</span><b>{{ v.durMin === null ? 'Invalid' : v.durMin + ' min' }}</b><small>{{ v.durLabel }}</small></div>
+                      </div>
+                      <div class="palli-report-na" role="status">
+                        <i class="fa-solid fa-flask"></i>
+                        <span><b>Sample report.</b> The Palli Paarvai export has no report content, so the findings below are sample values generated from this observation. Observer, school, date, class, time and duration above are real.</span>
+                      </div>
+                      <div class="palli-sample-report">
+                        <div class="psr-head">
+                          <span>Observation score <b>{{ v.report.score }} / {{ v.report.maxScore }}</b> ({{ v.report.scorePct }}%)</span>
+                          <span>Students present <b>{{ v.report.attending }} / {{ v.report.enrolled }}</b></span>
+                          <p-tag value="Sample" severity="warn" />
+                        </div>
+                        <table class="psr-table">
+                          <thead><tr><th>Observation area</th><th>Rating</th><th class="num">Score</th></tr></thead>
+                          <tbody>
+                            @for (ar of v.report.areas; track ar.area) {
+                              <tr><td>{{ ar.area }}</td>
+                                <td><span class="acis-pill" [class.p-bad]="ar.score === 1" [class.p-warn]="ar.score === 2" [class.p-good]="ar.score >= 3">{{ ar.grade }}</span></td>
+                                <td class="num">{{ ar.score }} / 4</td></tr>
+                            }
+                          </tbody>
+                        </table>
+                        <div class="psr-notes">
+                          <div><span>Strength</span>{{ v.report.strength }}</div>
+                          <div><span>Area for improvement</span>{{ v.report.improvement }}</div>
+                          <div><span>Follow-up</span>{{ v.report.followUp }}</div>
+                        </div>
+                      </div>
+                      <button class="dr-back ghost" (click)="rv.palliGoCrumb(4)"><i class="fa-solid fa-arrow-left"></i> Back to school observations</button>
+                    </div>
+                  }
+                } @else if (rv.palliUser() !== null) {
+                  <!-- US 5: the user's school observations, newest first -->
+                  <p-table [value]="rv.palliUserObsRows()" styleClass="p-datatable-sm acis-grid" [scrollable]="true"
+                           [rows]="20" [rowsPerPageOptions]="[10,20,50,100]" [paginator]="rv.palliUserObsRows().length > 0" sortMode="single">
+                    <ng-template pTemplate="header">
+                      <tr>
+                        <th class="num" pSortableColumn="sno">Sl. No. <p-sortIcon field="sno" /></th>
+                        <th pSortableColumn="date">Observation Date <p-sortIcon field="date" /></th>
+                        <th pSortableColumn="udise">UDISE Code <p-sortIcon field="udise" /></th>
+                        <th pSortableColumn="school">School Name <p-sortIcon field="school" /></th>
+                        <th class="num" pSortableColumn="cls">Class <p-sortIcon field="cls" /></th>
+                        <th>Section <span class="sample-dot" title="Sample — section is not in the export">*</span></th>
+                        <th>Time</th>
+                        <th>Action</th>
+                      </tr>
+                    </ng-template>
+                    <ng-template pTemplate="body" let-r>
+                      <tr>
+                        <td class="num acis-sno">{{ r.sno }}</td>
+                        <td>{{ r.date }}</td>
+                        <td class="acis-udise">{{ r.udise }}</td>
+                        <td class="acis-unit">{{ r.school }}</td>
+                        <td class="num">{{ r.cls || '—' }}</td>
+                        <td>{{ r.section }} <span class="sample-dot" title="Sample — section is not in the export">*</span></td>
+                        <td>{{ r.start }} – {{ r.end }}</td>
+                        <td><button class="dr-back ghost" (click)="rv.palliOpenReport(r.obs)"><i class="fa-solid fa-file-lines"></i> View Report</button></td>
+                      </tr>
+                    </ng-template>
+                    <ng-template pTemplate="emptymessage">
+                      <tr><td colspan="8" class="no-data">This user has no observations for the selected filters.</td></tr>
+                    </ng-template>
+                    <ng-template pTemplate="footer">
+                      <tr class="rv-total"><td class="strong" colspan="8">Grand Total ({{ fmt(rv.palliUserObsRows().length) }} observations)</td></tr>
+                    </ng-template>
+                  </p-table>
+                } @else if (rv.palliLlDistrict()) {
+                  <!-- US 4: users of this designation in this district (lowest achievement first) -->
+                  <p-table [value]="rv.palliUserRows()" styleClass="p-datatable-sm acis-grid" [scrollable]="true"
+                           [rows]="20" [rowsPerPageOptions]="[10,20,50,100]" [paginator]="rv.palliUserRows().length > 0" [rowHover]="true" sortMode="single">
+                    <ng-template pTemplate="header">
+                      <tr>
+                        <th class="num" pSortableColumn="sno">Sl. No. <p-sortIcon field="sno" /></th>
+                        <th pSortableColumn="name">User Name <p-sortIcon field="name" /></th>
+                        <th pSortableColumn="designation">Designation <p-sortIcon field="designation" /></th>
+                        <th class="num" pSortableColumn="target">Target <p-sortIcon field="target" /></th>
+                        <th class="num" pSortableColumn="visited">Visited <p-sortIcon field="visited" /></th>
+                        <th class="num" pSortableColumn="pct">Visit % <p-sortIcon field="pct" /></th>
+                        <th>Action</th>
+                      </tr>
+                    </ng-template>
+                    <ng-template pTemplate="body" let-r>
+                      <tr class="rv-row" (click)="rv.palliOpenUser(r.user)">
+                        <td class="num acis-sno">{{ r.sno }}</td>
+                        <td class="acis-unit">{{ r.name }} <small class="text-muted">{{ r.userId }}</small></td>
+                        <td>{{ r.designation }}</td>
+                        <td class="num">{{ fmt(r.target) }}</td>
+                        <td class="num acis-key">{{ fmt(r.visited) }}</td>
+                        <td class="num">{{ r.pct === null ? 'N/A' : r.pct + '%' }}</td>
+                        <td><button class="dr-back ghost" (click)="$event.stopPropagation(); rv.palliOpenUser(r.user)"><i class="fa-solid fa-list"></i> View Observations</button></td>
+                      </tr>
+                    </ng-template>
+                    <ng-template pTemplate="emptymessage">
+                      <tr><td colspan="7" class="no-data">No {{ rv.palliDesignation() }} observations in this district for the selected filters.</td></tr>
+                    </ng-template>
+                    <ng-template pTemplate="footer">
+                      <tr class="rv-total">
+                        <td class="strong" colspan="3">Grand Total ({{ fmt(rv.palliUserTotals().count) }} users)</td>
+                        <td class="num strong">{{ fmt(rv.palliUserTotals().target) }}</td>
+                        <td class="num strong">{{ fmt(rv.palliUserTotals().visited) }}</td>
+                        <td class="num strong">{{ rv.palliUserTotals().pct === null ? 'N/A' : rv.palliUserTotals().pct + '%' }}</td>
+                        <td></td>
+                      </tr>
+                    </ng-template>
+                  </p-table>
+                } @else {
+                  <!-- districts for the selected designation (real) — click a district for its users -->
+                  <p-table [value]="rv.palliDesignationDrill()" styleClass="p-datatable-sm acis-grid" [scrollable]="true"
+                           [rows]="20" [rowsPerPageOptions]="[10,20,50]" [paginator]="rv.palliDesignationDrill().length > 0" [rowHover]="true" sortMode="single">
+                    <ng-template pTemplate="header">
+                      <tr>
+                        <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
+                        <th pSortableColumn="district">District <p-sortIcon field="district" /></th>
+                        <th class="num" pSortableColumn="officers">Officers <p-sortIcon field="officers" /></th>
+                        <th class="num" pSortableColumn="target">Target <p-sortIcon field="target" /></th>
+                        <th class="num" pSortableColumn="visited">Visited <p-sortIcon field="visited" /></th>
+                        <th class="num" pSortableColumn="pct">Visit % <p-sortIcon field="pct" /></th>
+                      </tr>
+                    </ng-template>
+                    <ng-template pTemplate="body" let-r>
+                      <tr class="rv-row" (click)="rv.palliLlOpen(r.key)" [title]="'Show ' + r.designation + ' users in ' + r.district">
+                        <td class="num acis-sno">{{ r.sno }}</td>
+                        <td class="acis-unit">{{ r.district }} <i class="fa-solid fa-chevron-right"></i></td>
+                        <td class="num">{{ fmt(r.officers) }}</td>
+                        <td class="num">{{ fmt(r.target) }}</td>
+                        <td class="num acis-key">{{ fmt(r.visited) }}</td>
+                        <td class="num">{{ r.pct === null ? 'N/A' : r.pct + '%' }}</td>
+                      </tr>
+                    </ng-template>
+                    <ng-template pTemplate="footer">
+                      <tr class="rv-total">
+                        <td class="strong" colspan="2">Grand Total ({{ fmt(rv.palliDesignationTotals().count) }} districts)</td>
+                        <td class="num strong">{{ fmt(rv.palliDesignationTotals().officers) }}</td>
+                        <td class="num strong">{{ fmt(rv.palliDesignationTotals().target) }}</td>
+                        <td class="num strong">{{ fmt(rv.palliDesignationTotals().visited) }}</td>
+                        <td class="num strong">{{ rv.palliDesignationTotals().pct === null ? 'N/A' : rv.palliDesignationTotals().pct + '%' }}</td>
+                      </tr>
+                    </ng-template>
+                  </p-table>
+                }
+              }
+            }
+            <!-- ===== US 7: Observation duration KPI (REAL — PP_Oct_2026 export) ===== -->
+            @case ('p_dur') {
+              <div class="acis-filters">
+                <p-select [options]="rv.palliDurDistrictOptions()" [ngModel]="rv.palliDurDistrict()"
+                          (ngModelChange)="rv.palliDurDistrict.set($event); rv.palliCloseDurList()" optionLabel="label" optionValue="value"
+                          styleClass="acis-sel" [appendTo]="'body'" [filter]="true" filterBy="label" />
+                <p-select [options]="rv.palliDurDesigOptions()" [ngModel]="rv.palliDurDesig()"
+                          (ngModelChange)="rv.palliDurDesig.set($event); rv.palliCloseDurList()" optionLabel="label" optionValue="value"
+                          styleClass="acis-sel" [appendTo]="'body'" />
+                <label class="palli-date">From
+                  <input type="date" [min]="rv.palliObsWindow().from" [max]="rv.palliObsWindow().to"
+                         [ngModel]="rv.palliDateFrom()" (ngModelChange)="rv.palliDateFrom.set($event || '')" />
+                </label>
+                <label class="palli-date">To
+                  <input type="date" [min]="rv.palliObsWindow().from" [max]="rv.palliObsWindow().to"
+                         [ngModel]="rv.palliDateTo()" (ngModelChange)="rv.palliDateTo.set($event || '')" />
+                </label>
+                @if ((rv.palliDurPick() || rv.palliDurUserPick()) && !rv.palliReport()) {
+                  <input class="palli-search" type="search" aria-label="Search observer, school or UDISE" placeholder="Search observer / school / UDISE"
+                         [ngModel]="rv.palliSearch()" (ngModelChange)="rv.palliSearch.set($event)" />
+                }
+                @if (rv.palliFiltered() || rv.palliDurDistrict() || rv.palliDurDesig()) {
+                  <button class="kpi-filter-clear" (click)="rv.palliClearFilters(); rv.palliDurDistrict.set(''); rv.palliDurDesig.set('')">
+                    <i class="fa-solid fa-filter-circle-xmark"></i> Clear filters
+                  </button>
+                }
+                @if (!rv.palliReport()) {
+                  <span class="tbl-export" style="margin-left:auto">
+                    <button class="exp-btn xls" (click)="exportPalli(rv.palliDurPick() ? 'durList' : rv.palliDurUserPick() ? 'durUsers' : rv.palliDurDesig() ? 'duration' : 'durAbstract', 'excel')"><i class="fa-solid fa-file-excel"></i> Excel</button>
+                    <button class="exp-btn csv" (click)="exportPalli(rv.palliDurPick() ? 'durList' : rv.palliDurUserPick() ? 'durUsers' : rv.palliDurDesig() ? 'duration' : 'durAbstract', 'csv')"><i class="fa-solid fa-file-csv"></i> CSV</button>
+                    <button class="exp-btn pdf" (click)="exportPalli(rv.palliDurPick() ? 'durList' : rv.palliDurUserPick() ? 'durUsers' : rv.palliDurDesig() ? 'duration' : 'durAbstract', 'pdf')"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+                  </span>
+                }
+              </div>
+              <div class="acis-grid-note">
+                <i class="fa-solid fa-circle-info"></i>
+                Duration = end time − start time. Valid when over 0 and up to {{ rv.palliMaxValidMinutes() }} minutes; longer
+                sessions (left open in the app) and bad timestamps are excluded from every category.
+                Click any count to see the observations.
+              </div>
+
+              @if (rv.palliObsError()) {
+                <div class="palli-report-na" role="alert"><i class="fa-solid fa-triangle-exclamation"></i> {{ rv.palliObsError() }}</div>
+              } @else if (rv.palliLlLoading()) {
+                <div class="ac-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading October observations…</div>
+              } @else if (rv.palliReport()) {
+                @if (rv.palliReportView(); as v) {
+                  <div class="palli-report">
+                    <div class="palli-report-grid">
+                      <div><span>Observer</span><b>{{ v.observer }}</b><small>{{ v.observerId }} · {{ v.designation }}</small></div>
+                      <div><span>School</span><b>{{ v.school }}</b><small>UDISE {{ v.udise }} · {{ v.district }}</small></div>
+                      <div><span>Observation date</span><b>{{ v.date }}</b><small>{{ v.start }} – {{ v.end }}</small></div>
+                      <div><span>Class / Section</span><b>Class {{ v.cls || '—' }} – {{ v.section }}</b><small>Section is sample</small></div>
+                      <div><span>Duration</span><b>{{ v.durMin === null ? 'Invalid' : v.durMin + ' min' }}</b><small>{{ v.durLabel }}</small></div>
+                    </div>
+                    <div class="palli-report-na" role="status">
+                      <i class="fa-solid fa-flask"></i>
+                      <span><b>Sample report.</b> The Palli Paarvai export has no report content, so the findings below are sample values generated from this observation. Observer, school, date, class, time and duration above are real.</span>
+                    </div>
+                    <div class="palli-sample-report">
+                      <div class="psr-head">
+                        <span>Observation score <b>{{ v.report.score }} / {{ v.report.maxScore }}</b> ({{ v.report.scorePct }}%)</span>
+                        <span>Students present <b>{{ v.report.attending }} / {{ v.report.enrolled }}</b></span>
+                        <p-tag value="Sample" severity="warn" />
+                      </div>
+                      <table class="psr-table">
+                        <thead><tr><th>Observation area</th><th>Rating</th><th class="num">Score</th></tr></thead>
+                        <tbody>
+                          @for (ar of v.report.areas; track ar.area) {
+                            <tr><td>{{ ar.area }}</td>
+                              <td><span class="acis-pill" [class.p-bad]="ar.score === 1" [class.p-warn]="ar.score === 2" [class.p-good]="ar.score >= 3">{{ ar.grade }}</span></td>
+                              <td class="num">{{ ar.score }} / 4</td></tr>
+                          }
+                        </tbody>
+                      </table>
+                      <div class="psr-notes">
+                        <div><span>Strength</span>{{ v.report.strength }}</div>
+                        <div><span>Area for improvement</span>{{ v.report.improvement }}</div>
+                        <div><span>Follow-up</span>{{ v.report.followUp }}</div>
+                      </div>
+                    </div>
+                    <button class="dr-back ghost" (click)="rv.palliReport.set(null)"><i class="fa-solid fa-arrow-left"></i> Back to observations</button>
+                  </div>
+                }
+              } @else if (rv.palliDurPick(); as p) {
+                <div class="palli-subbar">
+                  <button class="dr-back ghost" (click)="rv.palliCloseDurList(false)"><i class="fa-solid fa-arrow-left"></i> {{ rv.palliDurUserPick() ? 'Back to user-wise duration' : 'Back to district-wise duration' }}</button>
+                  <b>{{ ds.titleCase(p.district) }} · {{ p.designation }}{{ p.user != null && rv.palliDurListRows().length ? ' · ' + rv.palliDurListRows()[0].observer : '' }} · {{ rv.palliDurCatLabel[p.cat] }}</b>
+                </div>
+                <p-table [value]="rv.palliDurListRows()" styleClass="p-datatable-sm acis-grid" [scrollable]="true"
+                         [rows]="20" [rowsPerPageOptions]="[10,20,50,100]" [paginator]="rv.palliDurListRows().length > 0" sortMode="single">
+                  <ng-template pTemplate="header">
+                    <tr>
+                      <th class="num" pSortableColumn="sno">Sl. No. <p-sortIcon field="sno" /></th>
+                      <th pSortableColumn="observer">Observer Name <p-sortIcon field="observer" /></th>
+                      <th pSortableColumn="school">School Name <p-sortIcon field="school" /></th>
+                      <th pSortableColumn="udise">UDISE Code <p-sortIcon field="udise" /></th>
+                      <th pSortableColumn="date">Observation Date <p-sortIcon field="date" /></th>
+                      <th>Time</th>
+                      <th class="num" pSortableColumn="durMin">Duration (min) <p-sortIcon field="durMin" /></th>
+                      <th>Action</th>
+                    </tr>
+                  </ng-template>
+                  <ng-template pTemplate="body" let-r>
+                    <tr>
+                      <td class="num acis-sno">{{ r.sno }}</td>
+                      <td class="acis-unit">{{ r.observer }}</td>
+                      <td>{{ r.school }}</td>
+                      <td class="acis-udise">{{ r.udise }}</td>
+                      <td>{{ r.date }}</td>
+                      <td>{{ r.start }} – {{ r.end }}</td>
+                      <td class="num">{{ r.durMin ?? 'Invalid' }}</td>
+                      <td><button class="dr-back ghost" (click)="rv.palliOpenReport(r.obs)"><i class="fa-solid fa-file-lines"></i> View Report</button></td>
+                    </tr>
+                  </ng-template>
+                  <ng-template pTemplate="emptymessage">
+                    <tr><td colspan="8" class="no-data">No observations match.</td></tr>
+                  </ng-template>
+                  <ng-template pTemplate="footer">
+                    <tr class="rv-total"><td class="strong" colspan="8">Grand Total ({{ fmt(rv.palliDurListRows().length) }} observations)</td></tr>
+                  </ng-template>
+                </p-table>
+              } @else if (rv.palliDurUserPick(); as up) {
+                <!-- Level 3: user-wise duration for the clicked district + designation -->
+                <div class="palli-subbar">
+                  <button class="dr-back ghost" (click)="rv.palliCloseDurList()"><i class="fa-solid fa-arrow-left"></i> Back to district-wise duration</button>
+                  <b>{{ ds.titleCase(up.district) }} · {{ up.designation }} · user-wise</b>
+                </div>
+                <p-table [value]="rv.palliDurUserRows()" styleClass="p-datatable-sm acis-grid" [scrollable]="true"
+                         [rows]="20" [rowsPerPageOptions]="[10,20,50,100]" [paginator]="rv.palliDurUserRows().length > 0" [rowHover]="true" sortMode="single">
+                  <ng-template pTemplate="header">
+                    <tr>
+                      <th class="num" pSortableColumn="sno">Sl. No. <p-sortIcon field="sno" /></th>
+                      <th pSortableColumn="name">User Name <p-sortIcon field="name" /></th>
+                      <th pSortableColumn="designation">Designation <p-sortIcon field="designation" /></th>
+                      <th class="num" pSortableColumn="total">Total Observations <p-sortIcon field="total" /></th>
+                      <th class="num acis-sep" pSortableColumn="lt15">Under 15 min <p-sortIcon field="lt15" /></th>
+                      <th class="num" pSortableColumn="b15">15 to under 30 min <p-sortIcon field="b15" /></th>
+                      <th class="num" pSortableColumn="ge30">30 min or more <p-sortIcon field="ge30" /></th>
+                      <th class="num" pSortableColumn="avgMin">Average Duration (min) <p-sortIcon field="avgMin" /></th>
+                      <th>Action</th>
+                    </tr>
+                  </ng-template>
+                  <ng-template pTemplate="body" let-r>
+                    <tr class="rv-row" (click)="rv.palliOpenDurList(up.district, up.designation, 'all', r.user)">
+                      <td class="num acis-sno">{{ r.sno }}</td>
+                      <td class="acis-unit">{{ r.name }} <small class="text-muted">{{ r.userId }}</small></td>
+                      <td>{{ r.designation }}</td>
+                      <td class="num acis-key">{{ fmt(r.total) }}</td>
+                      <td class="num acis-sep"><button class="palli-cell" [disabled]="!r.lt15" (click)="$event.stopPropagation(); rv.palliOpenDurList(up.district, up.designation, 'lt15', r.user)">{{ fmt(r.lt15) }}</button></td>
+                      <td class="num"><button class="palli-cell" [disabled]="!r.b15" (click)="$event.stopPropagation(); rv.palliOpenDurList(up.district, up.designation, '15to30', r.user)">{{ fmt(r.b15) }}</button></td>
+                      <td class="num"><button class="palli-cell" [disabled]="!r.ge30" (click)="$event.stopPropagation(); rv.palliOpenDurList(up.district, up.designation, 'ge30', r.user)">{{ fmt(r.ge30) }}</button></td>
+                      <td class="num">{{ r.avgMin ?? '—' }}</td>
+                      <td><button class="dr-back ghost" (click)="$event.stopPropagation(); rv.palliOpenDurList(up.district, up.designation, 'all', r.user)"><i class="fa-solid fa-list"></i> View Observations</button></td>
+                    </tr>
+                  </ng-template>
+                  <ng-template pTemplate="emptymessage">
+                    <tr><td colspan="9" class="no-data">No users match the selected filters.</td></tr>
+                  </ng-template>
+                  <ng-template pTemplate="footer">
+                    <tr class="rv-total">
+                      <td class="strong" colspan="3">Grand Total ({{ fmt(rv.palliDurUserTotals().count) }} users)</td>
+                      <td class="num strong">{{ fmt(rv.palliDurUserTotals().total) }}</td>
+                      <td class="num strong acis-sep">{{ fmt(rv.palliDurUserTotals().lt15) }}</td>
+                      <td class="num strong">{{ fmt(rv.palliDurUserTotals().b15) }}</td>
+                      <td class="num strong">{{ fmt(rv.palliDurUserTotals().ge30) }}</td>
+                      <td class="num strong">{{ rv.palliDurUserTotals().avgMin ?? '—' }}</td>
+                      <td></td>
+                    </tr>
+                  </ng-template>
+                </p-table>
+              } @else if (!rv.palliDurDesig()) {
+                <!-- Level 1: overall designation abstract — click a designation for its district rows -->
+                <p-table [value]="rv.palliDurAbstract()" styleClass="p-datatable-sm acis-grid" [scrollable]="true" [rowHover]="true" sortMode="single">
+                  <ng-template pTemplate="header">
+                    <tr>
+                      <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
+                      <th pSortableColumn="designation">Designation <p-sortIcon field="designation" /></th>
+                      <th class="num" pSortableColumn="districts">Districts <p-sortIcon field="districts" /></th>
+                      <th class="num" pSortableColumn="total">Total Observations <p-sortIcon field="total" /></th>
+                      <th class="num acis-sep" pSortableColumn="lt15">Under 15 min <p-sortIcon field="lt15" /></th>
+                      <th class="num" pSortableColumn="b15">15 to under 30 min <p-sortIcon field="b15" /></th>
+                      <th class="num" pSortableColumn="ge30">30 min or more <p-sortIcon field="ge30" /></th>
+                      <th class="num" pSortableColumn="avgMin">Average Duration (min) <p-sortIcon field="avgMin" /></th>
+                    </tr>
+                  </ng-template>
+                  <ng-template pTemplate="body" let-r>
+                    <tr class="rv-row" (click)="rv.palliDurOpenDesig(r.designation)" [title]="'Show district-wise duration for ' + r.designation">
+                      <td class="num acis-sno">{{ r.sno }}</td>
+                      <td class="acis-unit">{{ r.designation }} <i class="fa-solid fa-chevron-right"></i></td>
+                      <td class="num">{{ fmt(r.districts) }}</td>
+                      <td class="num acis-key">{{ fmt(r.total) }}</td>
+                      <td class="num acis-sep">{{ fmt(r.lt15) }}</td>
+                      <td class="num">{{ fmt(r.b15) }}</td>
+                      <td class="num">{{ fmt(r.ge30) }}</td>
+                      <td class="num">{{ r.avgMin ?? '—' }}</td>
+                    </tr>
+                  </ng-template>
+                  <ng-template pTemplate="emptymessage">
+                    <tr><td colspan="8" class="no-data">No observations for the selected filters.</td></tr>
+                  </ng-template>
+                  <ng-template pTemplate="footer">
+                    <tr class="rv-total">
+                      <td class="strong" colspan="3">Grand Total ({{ fmt(rv.palliDurAbstractTotals().count) }} designations)</td>
+                      <td class="num strong">{{ fmt(rv.palliDurAbstractTotals().total) }}</td>
+                      <td class="num strong acis-sep">{{ fmt(rv.palliDurAbstractTotals().lt15) }}</td>
+                      <td class="num strong">{{ fmt(rv.palliDurAbstractTotals().b15) }}</td>
+                      <td class="num strong">{{ fmt(rv.palliDurAbstractTotals().ge30) }}</td>
+                      <td class="num strong">{{ rv.palliDurAbstractTotals().avgMin ?? '—' }}</td>
+                    </tr>
+                  </ng-template>
+                </p-table>
+              } @else {
+                <div class="palli-subbar">
+                  <button class="dr-back ghost" (click)="rv.palliDurDesig.set('')"><i class="fa-solid fa-arrow-left"></i> All designations</button>
+                  <b>{{ rv.palliDurDesig() }}{{ rv.palliDurDistrict() ? ' · ' + ds.titleCase(rv.palliDurDistrict()) : '' }}</b>
+                </div>
+                <p-table [value]="rv.palliDurRows()" styleClass="p-datatable-sm acis-grid" [scrollable]="true"
+                         [rows]="20" [rowsPerPageOptions]="[10,20,50,100]" [paginator]="rv.palliDurRows().length > 0" sortMode="single">
                   <ng-template pTemplate="header">
                     <tr>
                       <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
                       <th pSortableColumn="district">District <p-sortIcon field="district" /></th>
                       <th pSortableColumn="designation">Designation <p-sortIcon field="designation" /></th>
-                      <th class="num" pSortableColumn="officials">No. of Officials <p-sortIcon field="officials" /></th>
-                      <th class="num" pSortableColumn="target">Target <p-sortIcon field="target" /></th>
-                      <th class="num" pSortableColumn="observed">Observed <p-sortIcon field="observed" /></th>
-                      <th class="num" pSortableColumn="pct">Observation % <p-sortIcon field="pct" /></th>
+                      <th class="num" pSortableColumn="total">Total Observations <p-sortIcon field="total" /></th>
+                      <th class="num acis-sep" pSortableColumn="lt15">Under 15 min <p-sortIcon field="lt15" /></th>
+                      <th class="num" pSortableColumn="b15">15 to under 30 min <p-sortIcon field="b15" /></th>
+                      <th class="num" pSortableColumn="ge30">30 min or more <p-sortIcon field="ge30" /></th>
+                      <th class="num" pSortableColumn="avgMin">Average Duration (min) <p-sortIcon field="avgMin" /></th>
                     </tr>
                   </ng-template>
                   <ng-template pTemplate="body" let-r>
-                    <tr>
-                      <td class="num">{{ r.sno }}</td><td class="strong">{{ r.district }}</td><td>{{ r.designation }}</td>
-                      <td class="num">{{ fmt(r.officials) }}</td><td class="num">{{ fmt(r.target) }}</td><td class="num">{{ fmt(r.observed) }}</td>
-                      <td class="num" [class.bad]="r.pct < 75" [class.good]="r.pct >= 75">{{ r.pct }}%</td>
+                    <tr class="rv-row" (click)="rv.palliDurOpenUsers(r.districtKey, r.designation)" [title]="'Show user-wise duration in ' + r.district">
+                      <td class="num acis-sno">{{ r.sno }}</td>
+                      <td class="acis-unit">{{ r.district }} <i class="fa-solid fa-chevron-right"></i></td>
+                      <td>{{ r.designation }}</td>
+                      <td class="num acis-key">{{ fmt(r.total) }}</td>
+                      <td class="num acis-sep"><button class="palli-cell" [disabled]="!r.lt15" (click)="$event.stopPropagation(); rv.palliOpenDurList(r.districtKey, r.designation, 'lt15')">{{ fmt(r.lt15) }}</button></td>
+                      <td class="num"><button class="palli-cell" [disabled]="!r.b15" (click)="$event.stopPropagation(); rv.palliOpenDurList(r.districtKey, r.designation, '15to30')">{{ fmt(r.b15) }}</button></td>
+                      <td class="num"><button class="palli-cell" [disabled]="!r.ge30" (click)="$event.stopPropagation(); rv.palliOpenDurList(r.districtKey, r.designation, 'ge30')">{{ fmt(r.ge30) }}</button></td>
+                      <td class="num">{{ r.avgMin ?? '—' }}</td>
+                    </tr>
+                  </ng-template>
+                  <ng-template pTemplate="emptymessage">
+                    <tr><td colspan="8" class="no-data">No observations for the selected filters.</td></tr>
+                  </ng-template>
+                  <ng-template pTemplate="footer">
+                    <tr class="rv-total">
+                      <td class="strong" colspan="3">Grand Total ({{ fmt(rv.palliDurTotals().count) }} rows)</td>
+                      <td class="num strong">{{ fmt(rv.palliDurTotals().total) }}</td>
+                      <td class="num strong acis-sep">{{ fmt(rv.palliDurTotals().lt15) }}</td>
+                      <td class="num strong">{{ fmt(rv.palliDurTotals().b15) }}</td>
+                      <td class="num strong">{{ fmt(rv.palliDurTotals().ge30) }}</td>
+                      <td class="num strong">{{ rv.palliDurTotals().avgMin ?? '—' }}</td>
                     </tr>
                   </ng-template>
                 </p-table>
@@ -710,8 +1149,11 @@
                 </ng-template>
               </p-table>
             }
+
+            <!-- ===== TEMPORARILY DISABLED (on request) — KPI 5 / 6 Low / Top performers.
+                 Re-enable together with p_low / p_top in kpi-catalog.model.ts and
+                 palliKpiTabs / palliDrillKpis in review.service.ts.
             @default {
-              <!-- KPI 5 / 6: low / top performers (district + designation) -->
               <p-table [value]="rv.palliKpiId() === 'p_low' ? rv.palliLowPerformerRows() : rv.palliTopPerformerRows()"
                        styleClass="p-datatable-sm" [scrollable]="true" [rows]="10" [rowsPerPageOptions]="[10,20,50]" [paginator]="true" [rowHover]="true" sortMode="single">
                 <ng-template pTemplate="header">
@@ -729,6 +1171,7 @@
                 </ng-template>
               </p-table>
             }
+            ===== -->
           }
         </div>
         } @else if (rv.kpiListId()) {
@@ -946,6 +1389,327 @@
                 </tr>
               </ng-template>
             </p-table>
+          }
+        </div>
+        } @else if (selectedDomain() === 'acis') {
+        <ng-container *ngTemplateOutlet="acisDrill; context: { $implicit: false }" />
+        } @else if (selectedDomain() === 'smc') {
+        <!-- ===== SMC dedicated drill — meetings, resolutions, grants ===== -->
+        <!-- Two units of analysis (the meeting and the resolution) plus the
+             composite grant, all read through a rolling window. -->
+        <div class="rv-topics">
+          @for (t of rv.topics; track t.id) {
+            <button [class.on]="rv.activeTopic() === t.id" (click)="onTopicTab(t.id)">
+              <i [class]="t.icon"></i> {{ t.label }}
+            </button>
+          }
+        </div>
+        <div class="card table-card">
+          <div class="card-title">
+            <i class="fa-solid fa-people-group"></i> {{ rv.smcKpiLabel() }} — {{ ds.scopeLabel() }}
+            @if (rv.smcAssumed()) {
+              <p-tag value="Assumed utilisation" severity="warn" styleClass="ml-2" />
+            }
+            <button class="kpi-filter-clear" (click)="closeDomain()" style="margin-left:auto">
+              <i class="fa-solid fa-arrow-left"></i> Back to all KPIs
+            </button>
+          </div>
+
+          <!-- SMC KPI switcher tabs -->
+          <div class="rv-topics palli-tabs">
+            @for (t of rv.smcKpiTabs; track t.id) {
+              <button [class.on]="rv.smcActiveTab() === t.id" (click)="rv.setSmcKpi(t.id)">{{ t.label }}</button>
+            }
+          </div>
+
+          <!-- Rolling window (metric sheet: last 1 year / 9 / 6 / 3 months).
+               Windows are measured back from the latest date in the export. -->
+          <div class="acis-filters">
+            <p-select [options]="rv.smcPeriodOptions" [ngModel]="rv.smcPeriod()"
+                      (ngModelChange)="rv.setSmcPeriod($event)" optionLabel="label" optionValue="value"
+                      styleClass="acis-sel" [appendTo]="'body'" />
+            <span class="smc-window-note">
+              @if (rv.smcPeriodFrom()) {
+                {{ rv.smcPeriodFrom() }} → {{ rv.smcAnchorDate() }}
+              } @else {
+                full export, up to {{ rv.smcAnchorDate() }}
+              }
+            </span>
+          </div>
+
+          @switch (rv.smcView()) {
+
+            <!-- ===== Meetings held abstract (metric 1a/1b/1c) ===== -->
+            @case ('meetings') {
+              @if (!rv.smcShowSchools()) {
+                <p-table [value]="rv.smcMeetingRows()" styleClass="p-datatable-sm" [scrollable]="true"
+                         [rows]="10" [rowsPerPageOptions]="[10,20,50]"
+                         [paginator]="rv.smcMeetingRows().length > 0" [rowHover]="true" sortMode="single">
+                  <ng-template pTemplate="header">
+                    <tr>
+                      <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
+                      <th pSortableColumn="unit">{{ rv.smcUnitLabel() }} <p-sortIcon field="unit" /></th>
+                      <th class="num" pSortableColumn="eligible">SMC Schools <p-sortIcon field="eligible" /></th>
+                      <th class="num" pSortableColumn="held">Meetings Held (schools) <p-sortIcon field="held" /></th>
+                      <th class="num" pSortableColumn="notHeld">Meetings NOT Held <p-sortIcon field="notHeld" /></th>
+                      <th class="num" pSortableColumn="heldPct">Coverage % <p-sortIcon field="heldPct" /></th>
+                      <th class="num" pSortableColumn="meetings">Total Meetings <p-sortIcon field="meetings" /></th>
+                      <th class="num" pSortableColumn="avgMeetings">Avg per School <p-sortIcon field="avgMeetings" /></th>
+                      <th class="num" pSortableColumn="present">Members Present <p-sortIcon field="present" /></th>
+                      <th class="num" pSortableColumn="absent">Members Absent <p-sortIcon field="absent" /></th>
+                      <th class="num" pSortableColumn="attendancePct">Attendance % <p-sortIcon field="attendancePct" /></th>
+                    </tr>
+                  </ng-template>
+                  <ng-template pTemplate="body" let-r>
+                    <tr class="rv-row" (click)="rv.smcDrillRow(r)">
+                      <td class="num">{{ r.sno }}</td>
+                      <td class="strong">{{ r.unit }} <i class="fa-solid fa-chevron-right text-muted"></i></td>
+                      <td class="num">{{ fmt(r.eligible) }}</td>
+                      <td class="num good">{{ fmt(r.held) }}</td>
+                      <td class="num" [class.bad]="r.notHeld > 0">{{ fmt(r.notHeld) }}</td>
+                      <td class="num" [class.bad]="r.heldPct < 50" [class.warn]="r.heldPct >= 50 && r.heldPct < 80">{{ r.heldPct }}%</td>
+                      <td class="num strong">{{ fmt(r.meetings) }}</td>
+                      <td class="num">{{ r.avgMeetings }}</td>
+                      <td class="num">{{ fmt(r.present) }}</td>
+                      <td class="num">{{ fmt(r.absent) }}</td>
+                      <td class="num" [class.bad]="r.attendancePct < 60" [class.warn]="r.attendancePct >= 60 && r.attendancePct < 75">{{ r.attendancePct }}%</td>
+                    </tr>
+                  </ng-template>
+                  <ng-template pTemplate="footer">
+                    <tr class="rv-total">
+                      <td class="strong" colspan="2">Grand Total ({{ fmt(rv.smcMeetingTotals().count) }} {{ rv.smcUnitLabel().toLowerCase() }}s)</td>
+                      <td class="num strong">{{ fmt(rv.smcMeetingTotals().eligible) }}</td>
+                      <td class="num strong">{{ fmt(rv.smcMeetingTotals().held) }}</td>
+                      <td class="num strong">{{ fmt(rv.smcMeetingTotals().notHeld) }}</td>
+                      <td class="num strong">{{ rv.smcMeetingTotals().heldPct }}%</td>
+                      <td class="num strong">{{ fmt(rv.smcMeetingTotals().meetings) }}</td>
+                      <td class="num strong">{{ rv.smcMeetingTotals().avgMeetings }}</td>
+                      <td class="num strong">{{ fmt(rv.smcMeetingTotals().present) }}</td>
+                      <td class="num strong">{{ fmt(rv.smcMeetingTotals().absent) }}</td>
+                      <td class="num strong">{{ rv.smcMeetingTotals().attendancePct }}%</td>
+                    </tr>
+                  </ng-template>
+                </p-table>
+              } @else {
+                <!-- per-school meeting detail (metric 1c; filtered to the
+                     never-met schools when the "not held" KPI is active) -->
+                <div class="palli-subbar">
+                  @if (rv.smcUnit()) {
+                    <button class="dr-back ghost" (click)="rv.smcSelectUnit(null)">
+                      <i class="fa-solid fa-arrow-left"></i> All {{ rv.smcUnitLabel().toLowerCase() }}s
+                    </button>
+                  } @else if (ds.canGoBack()) {
+                    <button class="dr-back ghost" (click)="ds.goUp()">
+                      <i class="fa-solid fa-arrow-left"></i> {{ ds.backLabel() }}
+                    </button>
+                  }
+                  <b>{{ rv.smcUnit() ? ds.titleCase(rv.smcUnit()!) : ds.scopeLabel() }} · {{ rv.smcKpiLabel() }}</b>
+                </div>
+                @if (rv.smcDetailLoading()) {
+                  <div class="acis-loading">
+                    <i class="fa-solid fa-spinner fa-spin"></i> Loading SMC meeting detail…
+                  </div>
+                } @else {
+                  <p-table [value]="rv.smcSchoolRows()" styleClass="p-datatable-sm" [scrollable]="true"
+                           [rows]="10" [rowsPerPageOptions]="[10,20,50]"
+                           [paginator]="rv.smcSchoolRows().length > 0" [rowHover]="true" sortMode="single">
+                    <ng-template pTemplate="header">
+                      <tr>
+                        <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
+                        <th pSortableColumn="udise">UDISE Code <p-sortIcon field="udise" /></th>
+                        <th pSortableColumn="school">School <p-sortIcon field="school" /></th>
+                        <th pSortableColumn="management">Management <p-sortIcon field="management" /></th>
+                        <th pSortableColumn="category">Category <p-sortIcon field="category" /></th>
+                        <th class="num" pSortableColumn="students">Students <p-sortIcon field="students" /></th>
+                        <th pSortableColumn="held">Meeting Held <p-sortIcon field="held" /></th>
+                        <th class="num" pSortableColumn="meetings">Meetings <p-sortIcon field="meetings" /></th>
+                        <th class="num" pSortableColumn="present">Present <p-sortIcon field="present" /></th>
+                        <th class="num" pSortableColumn="absent">Absent <p-sortIcon field="absent" /></th>
+                        <th class="num" pSortableColumn="vacant">Vacant Seats <p-sortIcon field="vacant" /></th>
+                        <th class="num" pSortableColumn="attendancePct">Attendance % <p-sortIcon field="attendancePct" /></th>
+                        <th pSortableColumn="lastMeeting">Last Meeting <p-sortIcon field="lastMeeting" /></th>
+                      </tr>
+                    </ng-template>
+                    <ng-template pTemplate="body" let-s>
+                      <tr>
+                        <td class="num">{{ s.sno }}</td>
+                        <td class="strong">{{ s.udise }}</td>
+                        <td>{{ s.school }}</td>
+                        <td>{{ s.management }}</td>
+                        <td>{{ s.category }}</td>
+                        <td class="num">{{ fmt(s.students) }}</td>
+                        <td>
+                          <p-tag [value]="s.held" [severity]="s.held === 'Yes' ? 'success' : 'danger'" />
+                        </td>
+                        <td class="num strong">{{ s.meetings }}</td>
+                        <td class="num">{{ fmt(s.present) }}</td>
+                        <td class="num">{{ fmt(s.absent) }}</td>
+                        <td class="num">{{ fmt(s.vacant) }}</td>
+                        <td class="num" [class.bad]="s.meetings > 0 && s.attendancePct < 60"
+                            [class.warn]="s.attendancePct >= 60 && s.attendancePct < 75">
+                          {{ s.meetings > 0 ? s.attendancePct + '%' : '—' }}
+                        </td>
+                        <td>{{ s.lastMeeting }}</td>
+                      </tr>
+                    </ng-template>
+                    <ng-template pTemplate="footer">
+                      <tr class="rv-total">
+                        <td class="strong" colspan="5">
+                          Grand Total ({{ fmt(rv.smcSchoolTotals().count) }} schools ·
+                          {{ fmt(rv.smcSchoolTotals().held) }} held /
+                          {{ fmt(rv.smcSchoolTotals().notHeld) }} not held)
+                        </td>
+                        <td class="num strong">{{ fmt(rv.smcSchoolTotals().students) }}</td>
+                        <td></td>
+                        <td class="num strong">{{ fmt(rv.smcSchoolTotals().meetings) }}</td>
+                        <td class="num strong">{{ fmt(rv.smcSchoolTotals().present) }}</td>
+                        <td class="num strong">{{ fmt(rv.smcSchoolTotals().absent) }}</td>
+                        <td class="num strong">{{ fmt(rv.smcSchoolTotals().vacant) }}</td>
+                        <td class="num strong">{{ rv.smcSchoolTotals().attendancePct }}%</td>
+                        <td></td>
+                      </tr>
+                    </ng-template>
+                  </p-table>
+                }
+              }
+            }
+
+            <!-- ===== Grant allocated vs utilised (metric 4) ===== -->
+            @case ('grant') {
+              <p-table [value]="rv.smcGrantRows()" styleClass="p-datatable-sm" [scrollable]="true"
+                       [rows]="10" [rowsPerPageOptions]="[10,20,50]"
+                       [paginator]="rv.smcGrantRows().length > 0" [rowHover]="true" sortMode="single">
+                <ng-template pTemplate="header">
+                  <tr>
+                    <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
+                    <th pSortableColumn="unit">{{ rv.smcUnitLabel() }} <p-sortIcon field="unit" /></th>
+                    <th class="num" pSortableColumn="schools">SMC Schools <p-sortIcon field="schools" /></th>
+                    <th class="num" pSortableColumn="students">Students <p-sortIcon field="students" /></th>
+                    <th class="num" pSortableColumn="allocated">Allocated (₹ lakh) <p-sortIcon field="allocated" /></th>
+                    <th class="num" pSortableColumn="utilised">Utilised (₹ lakh) <p-sortIcon field="utilised" /></th>
+                    <th class="num" pSortableColumn="balance">Balance (₹ lakh) <p-sortIcon field="balance" /></th>
+                    <th class="num" pSortableColumn="utilPct">Utilisation % <p-sortIcon field="utilPct" /></th>
+                  </tr>
+                </ng-template>
+                <ng-template pTemplate="body" let-r>
+                  <tr [class.rv-row]="!ds.selectedBlock()" (click)="rv.smcDrillRow(r)">
+                    <td class="num">{{ r.sno }}</td>
+                    <td class="strong">{{ r.unit }}
+                      @if (!ds.selectedBlock()) { <i class="fa-solid fa-chevron-right text-muted"></i> }
+                    </td>
+                    <td class="num">{{ fmt(r.schools) }}</td>
+                    <td class="num">{{ fmt(r.students) }}</td>
+                    <td class="num strong">{{ r.allocated }}</td>
+                    <td class="num good">{{ r.utilised }}</td>
+                    <td class="num" [class.bad]="r.balance > 0">{{ r.balance }}</td>
+                    <td class="num" [class.bad]="r.utilPct < 65" [class.warn]="r.utilPct >= 65 && r.utilPct < 80">{{ r.utilPct }}%</td>
+                  </tr>
+                </ng-template>
+                <ng-template pTemplate="footer">
+                  <tr class="rv-total">
+                    <td class="strong" colspan="2">Grand Total ({{ fmt(rv.smcGrantTotals().count) }} {{ rv.smcUnitLabel().toLowerCase() }}s)</td>
+                    <td class="num strong">{{ fmt(rv.smcGrantTotals().schools) }}</td>
+                    <td class="num strong">{{ fmt(rv.smcGrantTotals().students) }}</td>
+                    <td class="num strong">{{ rv.smcGrantTotals().allocated }}</td>
+                    <td class="num strong">{{ rv.smcGrantTotals().utilised }}</td>
+                    <td class="num strong">{{ rv.smcGrantTotals().balance }}</td>
+                    <td class="num strong">{{ rv.smcGrantTotals().utilPct }}%</td>
+                  </tr>
+                </ng-template>
+              </p-table>
+            }
+
+            <!-- ===== Resolution completion status (metrics 2 & 3) ===== -->
+            @default {
+              <p-table [value]="rv.smcResolutionRows()" styleClass="p-datatable-sm" [scrollable]="true"
+                       [rows]="10" [rowsPerPageOptions]="[10,20,50]"
+                       [paginator]="rv.smcResolutionRows().length > 0" [rowHover]="true" sortMode="single">
+                <ng-template pTemplate="header">
+                  <tr>
+                    <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
+                    <th pSortableColumn="unit">{{ rv.smcUnitLabel() }} <p-sortIcon field="unit" /></th>
+                    <th class="num" pSortableColumn="raised">Raised <p-sortIcon field="raised" /></th>
+                    <th class="num" pSortableColumn="resolved">Resolved <p-sortIcon field="resolved" /></th>
+                    <th class="num" pSortableColumn="unresolved">Unresolved <p-sortIcon field="unresolved" /></th>
+                    <th class="num" pSortableColumn="withdrawn">Withdrawn <p-sortIcon field="withdrawn" /></th>
+                    <th class="num" pSortableColumn="completionPct">Completion % <p-sortIcon field="completionPct" /></th>
+                  </tr>
+                </ng-template>
+                <ng-template pTemplate="body" let-r>
+                  <tr [class.rv-row]="!ds.selectedBlock()" (click)="rv.smcDrillRow(r)">
+                    <td class="num">{{ r.sno }}</td>
+                    <td class="strong">{{ r.unit }}
+                      @if (!ds.selectedBlock()) { <i class="fa-solid fa-chevron-right text-muted"></i> }
+                    </td>
+                    <td class="num strong">{{ fmt(r.raised) }}</td>
+                    <td class="num good">{{ fmt(r.resolved) }}</td>
+                    <td class="num" [class.bad]="r.unresolved > 0">{{ fmt(r.unresolved) }}</td>
+                    <td class="num">{{ fmt(r.withdrawn) }}</td>
+                    <td class="num" [class.bad]="r.completionPct < 40" [class.warn]="r.completionPct >= 40 && r.completionPct < 60">{{ r.completionPct }}%</td>
+                  </tr>
+                </ng-template>
+                <ng-template pTemplate="footer">
+                  <tr class="rv-total">
+                    <td class="strong" colspan="2">Grand Total ({{ fmt(rv.smcResolutionTotals().count) }} {{ rv.smcUnitLabel().toLowerCase() }}s)</td>
+                    <td class="num strong">{{ fmt(rv.smcResolutionTotals().raised) }}</td>
+                    <td class="num strong">{{ fmt(rv.smcResolutionTotals().resolved) }}</td>
+                    <td class="num strong">{{ fmt(rv.smcResolutionTotals().unresolved) }}</td>
+                    <td class="num strong">{{ fmt(rv.smcResolutionTotals().withdrawn) }}</td>
+                    <td class="num strong">{{ rv.smcResolutionTotals().completionPct }}%</td>
+                  </tr>
+                </ng-template>
+              </p-table>
+
+              <!-- Department-wise abstract (explicitly asked for by metrics 2 & 3) -->
+              <div class="palli-subbar">
+                <b>Department-wise abstract · {{ rv.smcKpiLabel() }}</b>
+              </div>
+              @if (rv.smcDetailLoading()) {
+                <div class="acis-loading">
+                  <i class="fa-solid fa-spinner fa-spin"></i> Loading resolution detail…
+                </div>
+              } @else {
+                <p-table [value]="rv.smcDeptRows()" styleClass="p-datatable-sm" [scrollable]="true"
+                         [rows]="10" [rowsPerPageOptions]="[10,20,50]"
+                         [paginator]="rv.smcDeptRows().length > 0" [rowHover]="true" sortMode="single">
+                  <ng-template pTemplate="header">
+                    <tr>
+                      <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
+                      <th pSortableColumn="dept">Department <p-sortIcon field="dept" /></th>
+                      <th class="num" pSortableColumn="raised">Raised <p-sortIcon field="raised" /></th>
+                      <th class="num" pSortableColumn="resolved">Resolved <p-sortIcon field="resolved" /></th>
+                      <th class="num" pSortableColumn="unresolved">Unresolved <p-sortIcon field="unresolved" /></th>
+                      <th class="num" pSortableColumn="withdrawn">Withdrawn <p-sortIcon field="withdrawn" /></th>
+                      <th class="num" pSortableColumn="emergency">Of which Emergency <p-sortIcon field="emergency" /></th>
+                      <th class="num" pSortableColumn="completionPct">Completion % <p-sortIcon field="completionPct" /></th>
+                    </tr>
+                  </ng-template>
+                  <ng-template pTemplate="body" let-r>
+                    <tr>
+                      <td class="num">{{ r.sno }}</td>
+                      <td class="strong">{{ r.dept }}</td>
+                      <td class="num strong">{{ fmt(r.raised) }}</td>
+                      <td class="num good">{{ fmt(r.resolved) }}</td>
+                      <td class="num" [class.bad]="r.unresolved > 0">{{ fmt(r.unresolved) }}</td>
+                      <td class="num">{{ fmt(r.withdrawn) }}</td>
+                      <td class="num" [class.warn]="r.emergency > 0">{{ fmt(r.emergency) }}</td>
+                      <td class="num" [class.bad]="r.completionPct < 40" [class.warn]="r.completionPct >= 40 && r.completionPct < 60">{{ r.completionPct }}%</td>
+                    </tr>
+                  </ng-template>
+                  <ng-template pTemplate="footer">
+                    <tr class="rv-total">
+                      <td class="strong" colspan="2">Grand Total ({{ fmt(rv.smcDeptTotals().count) }} departments)</td>
+                      <td class="num strong">{{ fmt(rv.smcDeptTotals().raised) }}</td>
+                      <td class="num strong">{{ fmt(rv.smcDeptTotals().resolved) }}</td>
+                      <td class="num strong">{{ fmt(rv.smcDeptTotals().unresolved) }}</td>
+                      <td class="num strong">{{ fmt(rv.smcDeptTotals().withdrawn) }}</td>
+                      <td class="num strong">{{ fmt(rv.smcDeptTotals().emergency) }}</td>
+                      <td class="num strong">{{ rv.smcDeptTotals().completionPct }}%</td>
+                    </tr>
+                  </ng-template>
+                </p-table>
+              }
+            }
           }
         </div>
         } @else {
@@ -4202,6 +4966,122 @@
     }
   }
 
+    <!-- ---------- ALL CHILDREN IN SCHOOL (standalone dashboard) ---------- -->
+    <!-- Same ACiS drill as the Review Dashboard component (shared template),
+         plus a headline strip and scope navigation. -->
+    @if (isAcisTab()) {
+      <div class="view-title">
+        <i class="fa-solid fa-children"></i> All Children in School — {{ ds.scopeLabel() }}
+        <span class="yr">Common pool &amp; potential dropouts &middot; real EMIS data</span>
+      </div>
+
+      @if (ds.canGoBack()) {
+      <div class="back-bar">
+        <button class="back-btn" (click)="ds.goUp()"><i class="fa-solid fa-arrow-left"></i> {{ ds.backLabel() }}</button>
+        <span class="back-scope">Currently viewing: <b>{{ ds.scopeLabel() }}</b></span>
+        <button class="home-btn" (click)="ds.goToState()"><i class="fa-solid fa-house"></i> Tamil Nadu</button>
+      </div>
+      }
+
+      @if (!rv.loaded()) {
+        <div class="ac-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading All Children in School…</div>
+      } @else {
+        <!-- headline KPIs: click one to open its view in the grid below -->
+        <div class="acis-kpis">
+          @for (k of acisTabKpis(); track k.id) {
+            <button class="acis-kpi" [class.on]="rv.acisKpiId() === k.id" (click)="rv.setAcisKpi(k.id)">
+              <span class="acis-kpi-val" [class]="'band-' + k.band">{{ k.value }}</span>
+              <span class="acis-kpi-lbl">{{ k.label }}</span>
+            </button>
+          }
+        </div>
+
+        <!-- infographics: potential dropouts and dropouts (common pool), by
+             management and by grade — follow the scope and the filters below -->
+        <div class="card">
+          <div class="card-title">
+            <i class="fa-solid fa-school"></i> School category-wise — Primary / Middle / High / Hr. Secondary
+            <span class="hint">common pool students vs potential dropouts · each panel on its own scale</span>
+          </div>
+          @if (rv.acisStudentsLoading()) {
+            <div class="acis-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading the common-pool roster…</div>
+          } @else {
+            <div echarts [options]="acisCategoryOpt()" (chartInit)="registerChart('acisCategory', $event)" class="chart acis-cat-chart"></div>
+          }
+        </div>
+        <div class="grid-row row-two">
+          <div class="card">
+            <div class="card-title">
+              <i class="fa-solid fa-chart-column"></i> Dropout rate — grade-wise
+              <span class="hint">dropouts not re-enrolled ÷ enrolled × 100</span>
+            </div>
+            @if (rv.acisStudentsLoading()) {
+              <div class="acis-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading the common-pool roster…</div>
+            } @else {
+              <div echarts [options]="acisDropRateOpt()" (chartInit)="registerChart('acisDropRate', $event)" class="chart tall-chart"></div>
+            }
+          </div>
+          <div class="card">
+            <div class="card-title">
+              <i class="fa-solid fa-list-check"></i> Reasons for dropout — grade-wise
+              <span class="hint">migration · CWSN · illness · child marriage · other</span>
+            </div>
+            @if (rv.acisStudentsLoading()) {
+              <div class="acis-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading the common-pool roster…</div>
+            } @else {
+              <div echarts [options]="acisDropReasonOpt()" (chartInit)="registerChart('acisDropReason', $event)" class="chart tall-chart"></div>
+            }
+          </div>
+        </div>
+        <div class="grid-row row-two">
+          <div class="card">
+            <div class="card-title">
+              <i class="fa-solid fa-building-columns"></i> Potential dropouts — management-wise
+              <span class="hint">absent 15+ of the last 30 days · {{ rv.acisPdWindow() }}</span>
+            </div>
+            @if (rv.acisPdByGrade().length) {
+              <div echarts [options]="acisPdMgmtOpt()" (chartInit)="registerChart('acisPdMgmt', $event)" class="chart tall-chart"></div>
+            } @else { <div class="no-data">No potential dropouts in this scope.</div> }
+          </div>
+          <div class="card">
+            <div class="card-title">
+              <i class="fa-solid fa-layer-group"></i> Potential dropouts — grade-wise
+              <span class="hint">boys / girls</span>
+            </div>
+            @if (rv.acisPdByGrade().length) {
+              <div echarts [options]="acisPdGradeOpt()" (chartInit)="registerChart('acisPdGrade', $event)" class="chart tall-chart"></div>
+            } @else { <div class="no-data">No potential dropouts in this scope.</div> }
+          </div>
+        </div>
+        <div class="grid-row row-two">
+          <div class="card">
+            <div class="card-title">
+              <i class="fa-solid fa-building-columns"></i> Dropouts (common pool) — management-wise
+              <span class="hint">children who left school (TC issued)</span>
+            </div>
+            @if (rv.acisStudentsLoading()) {
+              <div class="acis-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading the common-pool roster…</div>
+            } @else if (rv.acisDropByGrade().length) {
+              <div echarts [options]="acisDropMgmtOpt()" (chartInit)="registerChart('acisDropMgmt', $event)" class="chart tall-chart"></div>
+            } @else { <div class="no-data">No dropouts in this scope.</div> }
+          </div>
+          <div class="card">
+            <div class="card-title">
+              <i class="fa-solid fa-layer-group"></i> Dropouts (common pool) — grade-wise
+              <span class="hint">boys / girls</span>
+            </div>
+            @if (rv.acisStudentsLoading()) {
+              <div class="acis-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading the common-pool roster…</div>
+            } @else if (rv.acisDropByGrade().length) {
+              <div echarts [options]="acisDropGradeOpt()" (chartInit)="registerChart('acisDropGrade', $event)" class="chart tall-chart"></div>
+            } @else { <div class="no-data">No dropouts in this scope.</div> }
+          </div>
+        </div>
+
+        <ng-container *ngTemplateOutlet="acisDrill; context: { $implicit: true }" />
+      }
+    }
+
     <!-- ---------- CLASS 1 ENROLMENT MONITOR ---------- -->
     @if (isClass1()) {
       <div class="view-title">
@@ -4277,7 +5157,7 @@
     }
 
     <!-- ---------- CAUTION (all dashboards) ---------- -->
-    @if (activeSub() === 'caution' && !isClass1()) {
+    @if (activeSub() === 'caution' && !isClass1() && !isAcisTab()) {
       <div class="view-title">
         <i class="fa-solid fa-circle-exclamation"></i> Caution — {{ ds.titleCase(ds.scopeLabel()) }}
         <span class="yr">{{ fmt(cautionTotal()) }} schools flagged</span>
@@ -4479,3 +5359,556 @@
 <div class="loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading dashboard…</div>
 }
 }
+
+<!-- ===== All Children in School drill — shared by the Review Dashboard
+     (standalone = false) and the "All Children in School" tab (standalone = true) ===== -->
+<ng-template #acisDrill let-standalone>
+        <!-- ===== All Children in School (ACiS) dedicated drill — the common pool ===== -->
+        <!-- The unit of analysis is a CHILD, so this drill has its own filters
+             (school type / gender / class / CWSN / UMIS) and five view shapes
+             selected by the active KPI. -->
+        @if (!standalone) {
+        <div class="rv-topics">
+          @for (t of rv.topics; track t.id) {
+            <button [class.on]="rv.activeTopic() === t.id" (click)="onTopicTab(t.id)">
+              <i [class]="t.icon"></i> {{ t.label }}
+            </button>
+          }
+        </div>
+        }
+        <div class="card table-card">
+          <div class="card-title">
+            <i class="fa-solid fa-children"></i> {{ rv.acisKpiLabel() }} — {{ ds.scopeLabel() }}
+            @if (rv.acisIsPdView()) {
+              <span class="smc-window-note">PD report window {{ rv.acisPdWindow() }}</span>
+            }
+            @if (!standalone) {
+              <button class="kpi-filter-clear" (click)="closeDomain()" style="margin-left:auto">
+                <i class="fa-solid fa-arrow-left"></i> Back to all KPIs
+              </button>
+            }
+          </div>
+
+          <!-- ACiS KPI switcher tabs -->
+          <div class="rv-topics palli-tabs">
+            @for (t of rv.acisKpiTabs; track t.id) {
+              <button [class.on]="rv.acisActiveTab() === t.id" (click)="rv.setAcisKpi(t.id)">{{ t.label }}</button>
+            }
+          </div>
+
+          <!-- Filters from the metric sheet. PD views use the PD report, which
+               has school type / gender / class but no CWSN or UMIS fields. -->
+          <div class="acis-filters">
+            <p-select [options]="rv.acisIsPdView() ? rv.acisPdSchoolTypeOptions() : rv.acisSchoolTypeOptions()"
+                      [ngModel]="rv.acisFSchoolType()"
+                      (ngModelChange)="rv.acisFSchoolType.set($event)" optionLabel="label" optionValue="value"
+                      styleClass="acis-sel" [appendTo]="'body'" />
+            <p-select [options]="rv.acisGenderOptions" [ngModel]="rv.acisFGender()"
+                      (ngModelChange)="rv.acisFGender.set($event)" optionLabel="label" optionValue="value"
+                      styleClass="acis-sel" [appendTo]="'body'" />
+            <p-select [options]="rv.acisIsPdView() ? rv.acisPdClassOptions() : rv.acisClassOptions()"
+                      [ngModel]="rv.acisFClass()"
+                      (ngModelChange)="rv.acisFClass.set($event)" optionLabel="label" optionValue="value"
+                      styleClass="acis-sel" [appendTo]="'body'" />
+            @if (!rv.acisHideCwsnUmis()) {
+              <p-select [options]="rv.acisCwsnOptions" [ngModel]="rv.acisFCwsn()"
+                        (ngModelChange)="rv.acisFCwsn.set($event)" optionLabel="label" optionValue="value"
+                        styleClass="acis-sel" [appendTo]="'body'" />
+              <p-select [options]="rv.acisUmisOptions" [ngModel]="rv.acisFUmis()"
+                        (ngModelChange)="rv.acisFUmis.set($event)" optionLabel="label" optionValue="value"
+                        styleClass="acis-sel" [appendTo]="'body'" />
+            }
+            @if (rv.acisFiltered()) {
+              <button class="kpi-filter-clear" (click)="rv.acisResetFilters()">
+                <i class="fa-solid fa-filter-circle-xmark"></i> Clear filters
+              </button>
+            }
+          </div>
+
+          @if (rv.acisStudentsLoading() && !rv.acisIsPdView()) {
+            <div class="acis-loading">
+              <i class="fa-solid fa-spinner fa-spin"></i> Loading the common-pool roster…
+            </div>
+          } @else {
+
+          @switch (rv.acisView()) {
+
+            <!-- ===== Reason-wise dropout counts (metric 8) ===== -->
+            @case ('reason') {
+              <p-table [value]="rv.acisReasonRows()" styleClass="p-datatable-sm acis-grid" [scrollable]="true"
+                       [rows]="20" [rowsPerPageOptions]="[10,20,50]"
+                       [paginator]="rv.acisReasonRows().length > 0" [rowHover]="true" sortMode="single">
+                <ng-template pTemplate="header">
+                  <tr>
+                    <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
+                    <th pSortableColumn="reason">Dropout Reason <p-sortIcon field="reason" /></th>
+                    <th class="num" pSortableColumn="total">Students <p-sortIcon field="total" /></th>
+                    <th class="num" pSortableColumn="share">Share % <p-sortIcon field="share" /></th>
+                    <th class="num" pSortableColumn="admitted">Admitted Back <p-sortIcon field="admitted" /></th>
+                    <th class="num" pSortableColumn="pending">Still Out <p-sortIcon field="pending" /></th>
+                    <th class="num" pSortableColumn="cwsn">CWSN <p-sortIcon field="cwsn" /></th>
+                    <th pSortableColumn="topSub">Top Sub-reason <p-sortIcon field="topSub" /></th>
+                  </tr>
+                </ng-template>
+                <ng-template pTemplate="body" let-r>
+                  <tr class="rv-row" (click)="rv.acisSelectReason(r.reason)"
+                      [class.on]="rv.acisReason() === r.reason">
+                    <td class="num">{{ r.sno }}</td>
+                    <td class="strong">{{ r.reason }} <i class="fa-solid fa-chevron-down text-muted"></i></td>
+                    <td class="num strong">{{ fmt(r.total) }}</td>
+                    <td class="num">{{ r.share }}%</td>
+                    <td class="num good">{{ fmt(r.admitted) }}</td>
+                    <td class="num" [class.bad]="r.pending > 0">{{ fmt(r.pending) }}</td>
+                    <td class="num">{{ fmt(r.cwsn) }}</td>
+                    <td>{{ r.topSub }}</td>
+                  </tr>
+                </ng-template>
+                <ng-template pTemplate="footer">
+                  <tr class="rv-total">
+                    <td class="strong" colspan="2">Grand Total ({{ fmt(rv.acisReasonTotals().count) }} reason categories)</td>
+                    <td class="num strong">{{ fmt(rv.acisReasonTotals().total) }}</td>
+                    <td class="num strong">100%</td>
+                    <td class="num strong">{{ fmt(rv.acisReasonTotals().admitted) }}</td>
+                    <td class="num strong">{{ fmt(rv.acisReasonTotals().pending) }}</td>
+                    <td class="num strong">{{ fmt(rv.acisReasonTotals().cwsn) }}</td>
+                    <td></td>
+                  </tr>
+                </ng-template>
+              </p-table>
+
+              @if (rv.acisReason()) {
+                <div class="palli-subbar">
+                  <button class="dr-back ghost" (click)="rv.acisSelectReason(null)">
+                    <i class="fa-solid fa-xmark"></i> Close sub-reasons
+                  </button>
+                  <b>{{ rv.acisReason() }} · sub-reason breakdown</b>
+                </div>
+                <p-table [value]="rv.acisSubReasonRows()" styleClass="p-datatable-sm acis-grid" [scrollable]="true"
+                         [rows]="10" [rowsPerPageOptions]="[10,20,50]"
+                         [paginator]="rv.acisSubReasonRows().length > 0" sortMode="single">
+                  <ng-template pTemplate="header">
+                    <tr>
+                      <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
+                      <th pSortableColumn="sub">Sub-reason <p-sortIcon field="sub" /></th>
+                      <th class="num" pSortableColumn="count">Students <p-sortIcon field="count" /></th>
+                      <th class="num" pSortableColumn="share">Share of Reason % <p-sortIcon field="share" /></th>
+                    </tr>
+                  </ng-template>
+                  <ng-template pTemplate="body" let-s>
+                    <tr>
+                      <td class="num">{{ s.sno }}</td>
+                      <td>{{ s.sub }}</td>
+                      <td class="num strong">{{ fmt(s.count) }}</td>
+                      <td class="num">{{ s.share }}%</td>
+                    </tr>
+                  </ng-template>
+                </p-table>
+              }
+            }
+
+            <!-- ===== Department-wise action taken / to be taken (metric 9) ===== -->
+            @case ('dept') {
+              <p-table [value]="rv.acisDeptRows()" styleClass="p-datatable-sm acis-grid" [scrollable]="true"
+                       [rows]="20" [rowsPerPageOptions]="[10,20,50]"
+                       [paginator]="rv.acisDeptRows().length > 0" [rowHover]="true" sortMode="single">
+                <ng-template pTemplate="header">
+                  <tr>
+                    <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
+                    <th pSortableColumn="dept">Department <p-sortIcon field="dept" /></th>
+                    <th class="num" pSortableColumn="total">Cases Referred <p-sortIcon field="total" /></th>
+                    <th class="num" pSortableColumn="taken">Action Taken <p-sortIcon field="taken" /></th>
+                    <th class="num" pSortableColumn="pending">Action to be Taken <p-sortIcon field="pending" /></th>
+                    <th class="num" pSortableColumn="takenPct">Action Taken % <p-sortIcon field="takenPct" /></th>
+                    <th class="num" pSortableColumn="cwsn">CWSN <p-sortIcon field="cwsn" /></th>
+                  </tr>
+                </ng-template>
+                <ng-template pTemplate="body" let-r>
+                  <tr>
+                    <td class="num">{{ r.sno }}</td>
+                    <td class="strong">{{ r.dept }}</td>
+                    <td class="num strong">{{ fmt(r.total) }}</td>
+                    <td class="num good">{{ fmt(r.taken) }}</td>
+                    <td class="num" [class.bad]="r.pending > 0">{{ fmt(r.pending) }}</td>
+                    <td class="num" [class.bad]="r.takenPct < 25" [class.warn]="r.takenPct >= 25 && r.takenPct < 60">{{ r.takenPct }}%</td>
+                    <td class="num">{{ fmt(r.cwsn) }}</td>
+                  </tr>
+                </ng-template>
+                <ng-template pTemplate="footer">
+                  <tr class="rv-total">
+                    <td class="strong" colspan="2">Grand Total ({{ fmt(rv.acisDeptTotals().count) }} departments)</td>
+                    <td class="num strong">{{ fmt(rv.acisDeptTotals().total) }}</td>
+                    <td class="num strong">{{ fmt(rv.acisDeptTotals().taken) }}</td>
+                    <td class="num strong">{{ fmt(rv.acisDeptTotals().pending) }}</td>
+                    <td class="num strong">{{ rv.acisDeptTotals().takenPct }}%</td>
+                    <td class="num strong">{{ fmt(rv.acisDeptTotals().cwsn) }}</td>
+                  </tr>
+                </ng-template>
+              </p-table>
+            }
+
+            <!-- ===== Dropout rate: level-wise, school type-wise, grade-wise with reasons (REAL) ===== -->
+            @case ('droprate') {
+              <div class="acis-grid-note">
+                <i class="fa-solid fa-circle-info"></i>
+                Dropout rate = dropouts not re-enrolled (common pool, Admit status ≠ Admitted) ÷ students enrolled
+                in that class / level (2026-27 enrolment roll) × 100. School type, gender and class filters apply to both.
+              </div>
+
+              <div class="acis-subhead">Level-wise</div>
+              <p-table [value]="rv.acisDropLevelRows()" styleClass="p-datatable-sm acis-grid" [scrollable]="true" [rowHover]="true">
+                <ng-template pTemplate="header">
+                  <tr>
+                    <th>Level</th>
+                    <th class="num">Enrolled (D)</th>
+                    <th class="num">Dropouts not re-enrolled (N)</th>
+                    <th class="num">Dropout Rate %</th>
+                    @for (g of rv.ACIS_DROP_REASONS; track g) { <th class="num" [class.acis-sep]="$first">{{ g }}</th> }
+                  </tr>
+                </ng-template>
+                <ng-template pTemplate="body" let-r>
+                  <tr>
+                    <td class="acis-unit">{{ r.label }}</td>
+                    <td class="num">{{ fmt(r.enrolled) }}</td>
+                    <td class="num acis-key">{{ fmt(r.dropouts) }}</td>
+                    <td class="num"><span class="acis-pill" [class.p-bad]="r.rate >= 3" [class.p-warn]="r.rate >= 1.5 && r.rate < 3" [class.p-good]="r.rate < 1.5">{{ r.rate }}%</span></td>
+                    @for (g of rv.ACIS_DROP_REASONS; track g) { <td class="num" [class.acis-sep]="$first">{{ fmt(r.reasons[g]) }}</td> }
+                  </tr>
+                </ng-template>
+                <ng-template pTemplate="footer">
+                  <tr class="rv-total">
+                    <td class="strong">Total (I–XII)</td>
+                    <td class="num strong">{{ fmt(rv.acisDropTotals().enrolled) }}</td>
+                    <td class="num strong">{{ fmt(rv.acisDropTotals().dropouts) }}</td>
+                    <td class="num strong">{{ rv.acisDropTotals().rate }}%</td>
+                    @for (g of rv.ACIS_DROP_REASONS; track g) { <td class="num strong" [class.acis-sep]="$first">{{ fmt(rv.acisDropTotals().reasons[g]) }}</td> }
+                  </tr>
+                </ng-template>
+              </p-table>
+
+              <div class="acis-subhead">School type-wise</div>
+              <p-table [value]="rv.acisDropTypeRows()" styleClass="p-datatable-sm acis-grid" [scrollable]="true" [rowHover]="true">
+                <ng-template pTemplate="header">
+                  <tr>
+                    <th>School type</th>
+                    <th class="num">Enrolled (D)</th>
+                    <th class="num">Dropouts not re-enrolled (N)</th>
+                    <th class="num">Dropout Rate %</th>
+                  </tr>
+                </ng-template>
+                <ng-template pTemplate="body" let-r>
+                  <tr>
+                    <td class="acis-unit">{{ r.label }}</td>
+                    <td class="num">{{ fmt(r.enrolled) }}</td>
+                    <td class="num acis-key">{{ fmt(r.dropouts) }}</td>
+                    <td class="num">
+                      @if (r.enrolled > 0) {
+                        <span class="acis-pill" [class.p-bad]="r.rate >= 3" [class.p-warn]="r.rate >= 1.5 && r.rate < 3" [class.p-good]="r.rate < 1.5">{{ r.rate }}%</span>
+                      } @else { <span class="acis-dash">—</span> }
+                    </td>
+                  </tr>
+                </ng-template>
+              </p-table>
+
+              <div class="acis-subhead">Grade-wise, with reasons for dropout</div>
+              <p-table [value]="rv.acisDropGradeRows()" styleClass="p-datatable-sm acis-grid" [scrollable]="true" [rowHover]="true">
+                <ng-template pTemplate="header">
+                  <tr>
+                    <th>Class</th>
+                    <th class="num">Enrolled (D)</th>
+                    <th class="num">Dropouts not re-enrolled (N)</th>
+                    <th class="num">Dropout Rate %</th>
+                    @for (g of rv.ACIS_DROP_REASONS; track g) { <th class="num" [class.acis-sep]="$first">{{ g }}</th> }
+                  </tr>
+                </ng-template>
+                <ng-template pTemplate="body" let-r>
+                  <tr>
+                    <td class="acis-unit">{{ r.label }}</td>
+                    <td class="num">{{ fmt(r.enrolled) }}</td>
+                    <td class="num acis-key">{{ fmt(r.dropouts) }}</td>
+                    <td class="num"><span class="acis-pill" [class.p-bad]="r.rate >= 3" [class.p-warn]="r.rate >= 1.5 && r.rate < 3" [class.p-good]="r.rate < 1.5">{{ r.rate }}%</span></td>
+                    @for (g of rv.ACIS_DROP_REASONS; track g) { <td class="num" [class.acis-sep]="$first">{{ fmt(r.reasons[g]) }}</td> }
+                  </tr>
+                </ng-template>
+              </p-table>
+            }
+
+            <!-- ===== Potential dropout reasons (REAL) ===== -->
+            @case ('pdreason') {
+              <p-table [value]="rv.acisPdReasonRows()" styleClass="p-datatable-sm acis-grid" [scrollable]="true"
+                       [rows]="20" [rowsPerPageOptions]="[10,20,50]"
+                       [paginator]="rv.acisPdReasonRows().length > 0" [rowHover]="true" sortMode="single">
+                <ng-template pTemplate="header">
+                  <tr>
+                    <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
+                    <th pSortableColumn="category">Reason Category <p-sortIcon field="category" /></th>
+                    <th pSortableColumn="reason">Reason <p-sortIcon field="reason" /></th>
+                    <th class="num" pSortableColumn="pd">Potential Dropouts <p-sortIcon field="pd" /></th>
+                    <th class="num" pSortableColumn="share">Share % <p-sortIcon field="share" /></th>
+                    <th class="num" pSortableColumn="repeaters">Repeaters <p-sortIcon field="repeaters" /></th>
+                    <th class="num" pSortableColumn="boys">Boys <p-sortIcon field="boys" /></th>
+                    <th class="num" pSortableColumn="girls">Girls <p-sortIcon field="girls" /></th>
+                  </tr>
+                </ng-template>
+                <ng-template pTemplate="body" let-r>
+                  <tr>
+                    <td class="num">{{ r.sno }}</td>
+                    <td>{{ r.category }}</td>
+                    <td class="strong">{{ r.reason }}</td>
+                    <td class="num strong">{{ fmt(r.pd) }}</td>
+                    <td class="num">{{ r.share }}%</td>
+                    <td class="num" [class.bad]="r.repeaters > 0">{{ fmt(r.repeaters) }}</td>
+                    <td class="num">{{ fmt(r.boys) }}</td>
+                    <td class="num">{{ fmt(r.girls) }}</td>
+                  </tr>
+                </ng-template>
+                <ng-template pTemplate="footer">
+                  <tr class="rv-total">
+                    <td class="strong" colspan="3">Grand Total ({{ fmt(rv.acisPdReasonTotals().count) }} reasons)</td>
+                    <td class="num strong">{{ fmt(rv.acisPdReasonTotals().pd) }}</td>
+                    <td class="num strong">100%</td>
+                    <td class="num strong">{{ fmt(rv.acisPdReasonTotals().repeaters) }}</td>
+                    <td class="num strong">{{ fmt(rv.acisPdReasonTotals().boys) }}</td>
+                    <td class="num strong">{{ fmt(rv.acisPdReasonTotals().girls) }}</td>
+                  </tr>
+                </ng-template>
+              </p-table>
+            }
+
+            <!-- ===== Potential dropouts grade-wise by reason category (REAL) ===== -->
+            @case ('pdgrade') {
+              <p-table [value]="rv.acisPdGradeRows()" styleClass="p-datatable-sm acis-grid" [scrollable]="true"
+                       [paginator]="false" [rowHover]="true" sortMode="single">
+                <ng-template pTemplate="header">
+                  <tr>
+                    <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
+                    <th pSortableColumn="cls">Class <p-sortIcon field="cls" /></th>
+                    <th class="num" pSortableColumn="pd">Potential Dropouts <p-sortIcon field="pd" /></th>
+                    <th class="num" pSortableColumn="boys">Boys <p-sortIcon field="boys" /></th>
+                    <th class="num" pSortableColumn="girls">Girls <p-sortIcon field="girls" /></th>
+                    <th class="num" pSortableColumn="repeaters">Repeaters <p-sortIcon field="repeaters" /></th>
+                    @for (c of rv.acisPdCategories(); track c) { <th class="num">{{ c }}</th> }
+                  </tr>
+                </ng-template>
+                <ng-template pTemplate="body" let-r>
+                  <tr>
+                    <td class="num">{{ r.sno }}</td>
+                    <td class="strong">{{ r.cls }}</td>
+                    <td class="num strong">{{ fmt(r.pd) }}</td>
+                    <td class="num">{{ fmt(r.boys) }}</td>
+                    <td class="num">{{ fmt(r.girls) }}</td>
+                    <td class="num" [class.bad]="r.repeaters > 0">{{ fmt(r.repeaters) }}</td>
+                    @for (c of rv.acisPdCategories(); track c) { <td class="num">{{ fmt(r.cats[c] || 0) }}</td> }
+                  </tr>
+                </ng-template>
+                <ng-template pTemplate="footer">
+                  <tr class="rv-total">
+                    <td class="strong" colspan="2">Grand Total ({{ fmt(rv.acisPdGradeTotals().count) }} classes)</td>
+                    <td class="num strong">{{ fmt(rv.acisPdGradeTotals().pd) }}</td>
+                    <td class="num strong">{{ fmt(rv.acisPdGradeTotals().boys) }}</td>
+                    <td class="num strong">{{ fmt(rv.acisPdGradeTotals().girls) }}</td>
+                    <td class="num strong">{{ fmt(rv.acisPdGradeTotals().repeaters) }}</td>
+                    @for (c of rv.acisPdCategories(); track c) { <td class="num strong">{{ fmt(rv.acisPdGradeTotals().cats[c] || 0) }}</td> }
+                  </tr>
+                </ng-template>
+              </p-table>
+            }
+
+            <!-- ===== District → Block → School summary: ONE grid, both populations ===== -->
+            @default {
+              @if (!rv.acisShowChildren()) {
+                <div class="acis-grid-note">
+                  <i class="fa-solid fa-circle-info"></i>
+                  Dropout columns: common pool (all filters apply).
+                  Potential-dropout columns: EMIS PD report, {{ rv.acisPdWindow() }} — CWSN and UMIS filters apply to dropout columns only.
+                  {{ ds.selectedBlock() ? 'Click a school for its students with dropout reason.' : 'Click a row to drill down.' }}
+                </div>
+                <p-table [value]="rv.acisSummaryRows()" styleClass="p-datatable-sm acis-grid" [scrollable]="true"
+                         [rows]="10" [rowsPerPageOptions]="[10,20,50]"
+                         [paginator]="rv.acisSummaryRows().length > 0" [rowHover]="true" sortMode="single">
+                  <ng-template pTemplate="header">
+                    <tr class="acis-group-head">
+                      <th [attr.colspan]="ds.selectedBlock() ? 3 : 2"></th>
+                      <th colspan="7" class="acis-grp-drop">Dropouts (common pool)</th>
+                      <th colspan="3" class="acis-grp-pd acis-sep">Potential dropouts</th>
+                    </tr>
+                    <tr>
+                      <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
+                      <th pSortableColumn="unit">{{ rv.acisUnitLabel() }} <p-sortIcon field="unit" /></th>
+                      @if (ds.selectedBlock()) { <th pSortableColumn="udise">UDISE Code <p-sortIcon field="udise" /></th> }
+                      <th class="num" [class.acis-sorted]="rv.acisSortColumn() === 'pool'" pSortableColumn="pool">Common Pool <p-sortIcon field="pool" /></th>
+                      <th class="num" [class.acis-sorted]="rv.acisSortColumn() === 'surveyed'" pSortableColumn="surveyed">Surveyed <p-sortIcon field="surveyed" /></th>
+                      <th class="num" [class.acis-sorted]="rv.acisSortColumn() === 'pendingSurvey'" pSortableColumn="pendingSurvey">Pending Survey <p-sortIcon field="pendingSurvey" /></th>
+                      <th class="num" [class.acis-sorted]="rv.acisSortColumn() === 'surveyPct'" pSortableColumn="surveyPct">Survey % <p-sortIcon field="surveyPct" /></th>
+                      <th class="num" [class.acis-sorted]="rv.acisSortColumn() === 'admitted'" pSortableColumn="admitted">Admitted <p-sortIcon field="admitted" /></th>
+                      <th class="num" [class.acis-sorted]="rv.acisSortColumn() === 'toBeAdmitted'" pSortableColumn="toBeAdmitted">To be Admitted <p-sortIcon field="toBeAdmitted" /></th>
+                      <th class="num" [class.acis-sorted]="rv.acisSortColumn() === 'deptPending'" pSortableColumn="deptPending">Dept. Action Pending <p-sortIcon field="deptPending" /></th>
+                      <th class="num acis-sep" [class.acis-sorted]="rv.acisSortColumn() === 'pd'" pSortableColumn="pd">Potential Dropouts <p-sortIcon field="pd" /></th>
+                      <th class="num" [class.acis-sorted]="rv.acisSortColumn() === 'pdPct'" pSortableColumn="pdPct">PD % <p-sortIcon field="pdPct" /></th>
+                      <th class="num" [class.acis-sorted]="rv.acisSortColumn() === 'pdRepeaters'" pSortableColumn="pdRepeaters">PD Repeaters <p-sortIcon field="pdRepeaters" /></th>
+                    </tr>
+                  </ng-template>
+                  <ng-template pTemplate="body" let-r>
+                    <tr class="rv-row" (click)="rv.acisDrillSummaryRow(r)"
+                        [title]="ds.selectedBlock() ? 'Show this school\'s students with dropout reason' : 'Drill down'">
+                      <td class="num acis-sno">{{ r.sno }}</td>
+                      <td class="acis-unit">{{ r.unit }} <i class="fa-solid fa-chevron-right"></i></td>
+                      @if (ds.selectedBlock()) { <td class="acis-udise">{{ r.udise }}</td> }
+                      <td class="num acis-key">{{ fmt(r.pool) }}</td>
+                      <td class="num">{{ fmt(r.surveyed) }}</td>
+                      <td class="num">{{ fmt(r.pendingSurvey) }}</td>
+                      <td class="num">
+                        @if (r.pool > 0) {
+                          <span class="acis-pill" [class.p-bad]="r.surveyPct < 80" [class.p-warn]="r.surveyPct >= 80 && r.surveyPct < 95"
+                                [class.p-good]="r.surveyPct >= 95">{{ r.surveyPct }}%</span>
+                        } @else { <span class="acis-dash">—</span> }
+                      </td>
+                      <td class="num">{{ fmt(r.admitted) }}</td>
+                      <td class="num">{{ fmt(r.toBeAdmitted) }}</td>
+                      <td class="num">{{ fmt(r.deptPending) }}</td>
+                      <td class="num acis-sep acis-key">{{ fmt(r.pd) }}</td>
+                      <td class="num">
+                        @if (r.pdEnrolled > 0) {
+                          <span class="acis-pill" [class.p-bad]="r.pdPct >= 2" [class.p-warn]="r.pdPct >= 1 && r.pdPct < 2"
+                                [class.p-good]="r.pdPct < 1">{{ r.pdPct }}%</span>
+                        } @else { <span class="acis-dash">—</span> }
+                      </td>
+                      <td class="num">{{ fmt(r.pdRepeaters) }}</td>
+                    </tr>
+                  </ng-template>
+                  <ng-template pTemplate="footer">
+                    <tr class="rv-total">
+                      <td class="strong" [attr.colspan]="ds.selectedBlock() ? 3 : 2">Grand Total ({{ fmt(rv.acisSummaryTotals().count) }} {{ rv.acisUnitLabel().toLowerCase() }}s)</td>
+                      <td class="num strong">{{ fmt(rv.acisSummaryTotals().pool) }}</td>
+                      <td class="num strong">{{ fmt(rv.acisSummaryTotals().surveyed) }}</td>
+                      <td class="num strong">{{ fmt(rv.acisSummaryTotals().pendingSurvey) }}</td>
+                      <td class="num strong">{{ rv.acisSummaryTotals().surveyPct }}%</td>
+                      <td class="num strong">{{ fmt(rv.acisSummaryTotals().admitted) }}</td>
+                      <td class="num strong">{{ fmt(rv.acisSummaryTotals().toBeAdmitted) }}</td>
+                      <td class="num strong">{{ fmt(rv.acisSummaryTotals().deptPending) }}</td>
+                      <td class="num strong acis-sep">{{ fmt(rv.acisSummaryTotals().pd) }}</td>
+                      <td class="num strong">{{ rv.acisSummaryTotals().pdPct }}%</td>
+                      <td class="num strong">{{ fmt(rv.acisSummaryTotals().pdRepeaters) }}</td>
+                    </tr>
+                  </ng-template>
+                </p-table>
+              } @else {
+                <!-- the opened school: two separate student lists, with a switch -->
+                <div class="palli-subbar">
+                  <button class="dr-back ghost" (click)="rv.acisSelectUnit(null)">
+                    <i class="fa-solid fa-arrow-left"></i> All schools
+                  </button>
+                  <b>{{ rv.acisUnitName() }}</b>
+                  <div class="acis-list-switch" role="tablist" aria-label="Student list">
+                    <button role="tab" [attr.aria-selected]="rv.acisSchoolList() === 'drop'"
+                            [class.on]="rv.acisSchoolList() === 'drop'" (click)="rv.acisSchoolList.set('drop')">
+                      Dropouts (common pool) · {{ fmt(rv.acisStudentRows().length) }}
+                    </button>
+                    <button role="tab" [attr.aria-selected]="rv.acisSchoolList() === 'pd'"
+                            [class.on]="rv.acisSchoolList() === 'pd'" (click)="rv.acisSchoolList.set('pd')">
+                      Potential dropouts · {{ fmt(rv.acisPdStudentRows().length) }}
+                    </button>
+                  </div>
+                </div>
+
+                @if (rv.acisSchoolList() === 'drop') {
+                  <p-table [value]="rv.acisStudentRows()" styleClass="p-datatable-sm acis-grid" [scrollable]="true"
+                           [rows]="10" [rowsPerPageOptions]="[10,20,50]"
+                           [paginator]="rv.acisStudentRows().length > 0" [rowHover]="true" sortMode="single">
+                    <ng-template pTemplate="header">
+                      <tr>
+                        <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
+                        <th pSortableColumn="emis">EMIS ID <p-sortIcon field="emis" /></th>
+                        <th pSortableColumn="name">Student Name <p-sortIcon field="name" /></th>
+                        <th class="num" pSortableColumn="cls">Class <p-sortIcon field="cls" /></th>
+                        <th pSortableColumn="gender">Gender <p-sortIcon field="gender" /></th>
+                        <th pSortableColumn="cwsn">CWSN <p-sortIcon field="cwsn" /></th>
+                        <th pSortableColumn="surveyStatus">Survey Status <p-sortIcon field="surveyStatus" /></th>
+                        <th pSortableColumn="admitStatus">Admit Status <p-sortIcon field="admitStatus" /></th>
+                        <th pSortableColumn="reason">Dropout Reason <p-sortIcon field="reason" /></th>
+                        <th pSortableColumn="subReason">Sub-reason <p-sortIcon field="subReason" /></th>
+                        <th pSortableColumn="dept">Owning Department <p-sortIcon field="dept" /></th>
+                      </tr>
+                    </ng-template>
+                    <ng-template pTemplate="body" let-s>
+                      <tr>
+                        <td class="num">{{ s.sno }}</td>
+                        <td class="strong">{{ s.emis }}</td>
+                        <td>{{ s.name }}</td>
+                        <td class="num">{{ s.cls }}</td>
+                        <td>{{ s.gender }}</td>
+                        <td>{{ s.cwsn }}</td>
+                        <td>
+                          <p-tag [value]="s.surveyStatus" [severity]="s.surveyStatus === 'Surveyed' ? 'success' : 'warn'" />
+                        </td>
+                        <td>
+                          <p-tag [value]="s.admitStatus" [severity]="s.admitStatus === 'Admitted' ? 'success' : 'danger'" />
+                        </td>
+                        <td>{{ s.reason }}</td>
+                        <td>{{ s.subReason }}</td>
+                        <td>{{ s.dept }}</td>
+                      </tr>
+                    </ng-template>
+                    <ng-template pTemplate="emptymessage">
+                      <tr><td colspan="11" class="no-data">No common-pool children in this school for the current filters.</td></tr>
+                    </ng-template>
+                    <ng-template pTemplate="footer">
+                      <tr class="rv-total">
+                        <td class="strong" colspan="11">
+                          Grand Total ({{ fmt(rv.acisStudentTotals().count) }} children ·
+                          {{ fmt(rv.acisStudentTotals().admitted) }} admitted ·
+                          {{ fmt(rv.acisStudentTotals().cwsn) }} CWSN)
+                        </td>
+                      </tr>
+                    </ng-template>
+                  </p-table>
+                } @else {
+                  <p-table [value]="rv.acisPdStudentRows()" styleClass="p-datatable-sm acis-grid" [scrollable]="true"
+                           [rows]="10" [rowsPerPageOptions]="[10,20,50]"
+                           [paginator]="rv.acisPdStudentRows().length > 0" [rowHover]="true" sortMode="single">
+                    <ng-template pTemplate="header">
+                      <tr>
+                        <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
+                        <th pSortableColumn="emis">EMIS ID <p-sortIcon field="emis" /></th>
+                        <th pSortableColumn="name">Student Name <p-sortIcon field="name" /></th>
+                        <th class="num" pSortableColumn="cls">Class <p-sortIcon field="cls" /></th>
+                        <th pSortableColumn="section">Section <p-sortIcon field="section" /></th>
+                        <th pSortableColumn="gender">Gender <p-sortIcon field="gender" /></th>
+                        <th pSortableColumn="category">Reason Category <p-sortIcon field="category" /></th>
+                        <th pSortableColumn="reason">Dropout Reason <p-sortIcon field="reason" /></th>
+                        <th class="num" pSortableColumn="absentDays">Days Absent (last 30) <p-sortIcon field="absentDays" /></th>
+                        <th pSortableColumn="repeater">Repeater Status <p-sortIcon field="repeater" /></th>
+                      </tr>
+                    </ng-template>
+                    <ng-template pTemplate="body" let-s>
+                      <tr>
+                        <td class="num">{{ s.sno }}</td>
+                        <td class="strong">{{ s.emis }}</td>
+                        <td>{{ s.name }}</td>
+                        <td class="num">{{ s.cls }}</td>
+                        <td>{{ s.section }}</td>
+                        <td>{{ s.gender }}</td>
+                        <td>{{ s.category }}</td>
+                        <td [class.warn]="s.reason === 'Not updated'">{{ s.reason }}</td>
+                        <td class="num" [class.bad]="s.absentDays >= 20">{{ s.absentDays }}</td>
+                        <td>
+                          <p-tag [value]="s.repeater"
+                                 [severity]="s.repeater === 'Repeater' ? 'danger' : s.repeater === 'Not repeater' ? 'success' : 'warn'" />
+                        </td>
+                      </tr>
+                    </ng-template>
+                    <ng-template pTemplate="emptymessage">
+                      <tr><td colspan="10" class="no-data">No potential dropouts in this school for the current filters.</td></tr>
+                    </ng-template>
+                    <ng-template pTemplate="footer">
+                      <tr class="rv-total">
+                        <td class="strong" colspan="10">Grand Total ({{ fmt(rv.acisPdStudentRows().length) }} potential dropouts)</td>
+                      </tr>
+                    </ng-template>
+                  </p-table>
+                }
+              }
+            }
+          }
+          }
+        </div>
+</ng-template>

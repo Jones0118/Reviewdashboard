@@ -28,6 +28,15 @@ export class ChartService {
   }
 
   /**
+   * The standard toolbox for charts built outside this service (e.g. the All
+   * Children in School infographics), so every chart gets the same Refresh /
+   * Table View / Bar–Line / Download (PDF · PNG · JPG) controls.
+   */
+  standardToolbox(id: string, title: string, magic: string[] = ['bar', 'line']): any {
+    return this.toolbox(magic, { id, title });
+  }
+
+  /**
    * Standard toolbox: switch chart type, refresh, data table view, and download.
    * When `meta` is supplied the download opens a format chooser (PDF / PNG / JPG)
    * and names the file after the chart heading.
@@ -63,7 +72,8 @@ export class ChartService {
 
   /** Render the chart's series as an HTML table for the dataView feature. */
   private tableHtml(opt: any): string {
-    const cats: string[] = opt?.xAxis?.[0]?.data ?? [];
+    // categories live on the x-axis for column charts, on the y-axis for horizontal bars
+    const cats: string[] = opt?.xAxis?.[0]?.data ?? opt?.yAxis?.[0]?.data ?? [];
     const series: any[] = opt?.series ?? [];
 
     // radar: categories come from radar.indicator[], each series datum is

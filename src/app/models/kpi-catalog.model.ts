@@ -35,6 +35,13 @@ export interface KpiDef {
   field: string | null;
   /** Drill topic to activate when this KPI is opened (for the shared table). */
   topic: string;
+  /**
+   * Whether the KPI gets a tile on the main component-KPI page. Defaults to
+   * true; set false (via `hide()`) for supporting metrics that should stay out
+   * of the landing grid but remain available in "View details" — they still
+   * contribute drill columns, drill tabs and KPI-column-filter entries.
+   */
+  tile?: boolean;
 }
 
 export interface KpiModule {
@@ -49,6 +56,12 @@ const N = (id: string, label: string, dir: 0 | 1 | -1, field: string | null, top
   ({ id, label, fmt: 'num', dir, field, topic });
 const F = (id: string, label: string, dir: 0 | 1 | -1, field: string | null, topic: string): KpiDef =>
   ({ id, label, fmt: 'flag', dir, field, topic });
+/**
+ * Keep a KPI out of the main component-KPI tile grid while leaving it fully
+ * available inside "View details" (drill columns, drill KPI tabs, the column
+ * filter). Used where the landing page should show only the headline metrics.
+ */
+const hide = (def: KpiDef): KpiDef => ({ ...def, tile: false });
 
 export const KPI_MODULES: KpiModule[] = [
   {
@@ -158,12 +171,37 @@ export const KPI_MODULES: KpiModule[] = [
     ],
   },
   {
+    // Only the metric-sheet headlines get a tile on the main page:
+    //   meetings held / not held / attendance, emergency completion,
+    //   other-resolution completion, grant utilisation.
+    // Everything else is wrapped in hide() — still present in "View details"
+    // (drill columns, drill KPI tabs, column filter), just not on the landing grid.
     title: 'SMC', color: '#9a3412', kpis: [
-      N('m_r', 'SMC resolutions raised', 0, 'smcRaised', 'smc'),
-      N('m_c', 'Resolutions closed', 1, 'smcClosed', 'smc'),
-      N('m_p', 'Pending resolutions', -1, 'smcPending', 'smc'),
-      P('m_k', 'Closure rate %', 1, 0, 100, 'smcClosureRate', 'smc'),
-      N('m_e', 'Emergency resolutions not closed', -1, 'smcEmergency', 'smc'),
+      // ---- Meetings held, abstract (metric 1) ----
+      N('m_mh', 'Schools where meetings were held', 1, 'smcSchoolsHeld', 'smc'),
+      N('m_mn', 'Schools where meetings NOT held', -1, 'smcSchoolsNotHeld', 'smc'),
+      P('m_ma', 'Meeting attendance %', 1, 50, 100, 'smcMeetAttendPct', 'smc'),
+      hide(N('m_mt', 'Meetings held', 1, 'smcMeetings', 'smc')),
+      // ---- Resolutions, overall ----
+      hide(N('m_r', 'SMC resolutions raised', 0, 'smcRaised', 'smc')),
+      hide(N('m_c', 'Resolutions closed', 1, 'smcClosed', 'smc')),
+      hide(N('m_p', 'Pending resolutions', -1, 'smcPending', 'smc')),
+      hide(P('m_k', 'Closure rate %', 1, 0, 100, 'smcClosureRate', 'smc')),
+      // ---- Emergency resolutions completion status (metric 2) ----
+      P('m_ek', 'Emergency resolutions completion %', 1, 0, 100, 'smcEmergencyClosureRate', 'smc'),
+      hide(N('m_e', 'Emergency resolutions not closed', -1, 'smcEmergency', 'smc')),
+      hide(N('m_er', 'Emergency resolved', 1, 'smcEmergencyResolved', 'smc')),
+      // ---- Other resolutions completion status (metric 3) ----
+      P('m_ok', 'Other resolutions completion %', 1, 0, 100, 'smcOtherClosureRate', 'smc'),
+      hide(N('m_or', 'Other resolutions resolved', 1, 'smcOtherResolved', 'smc')),
+      hide(N('m_ou', 'Other resolutions unresolved', -1, 'smcOtherOpen', 'smc')),
+      // ---- Maintenance & School Composite Grant (metric 4) ----
+      // ASSUMED utilisation: the SMC export carries no grant ledger. Allocation
+      // follows the published composite-grant enrolment slabs applied to the
+      // real roll; the utilised share is deterministic per school.
+      P('m_gp', 'Grant utilisation %', 1, 0, 100, 'smcGrantUtilPct', 'smc'),
+      hide(N('m_ga', 'Grant allocated (₹ lakh)', 0, 'smcGrantAllocated', 'smc')),
+      hide(N('m_gu', 'Grant utilised (₹ lakh)', 1, 'smcGrantUtilised', 'smc')),
     ],
   },
   {
@@ -171,8 +209,14 @@ export const KPI_MODULES: KpiModule[] = [
       P('p_sno', '% of Schools Not Observed (term)', -1, 0, 40, 'palliSchoolsNotObsPct', 'palli'),
       P('p_ono', '% of Officials Not Observed (month)', -1, 0, 30, 'palliOfficialsNotObsPct', 'palli'),
       P('p_s3', '% of Schools Observed 3+ Times', 1, 30, 100, 'palliSchools3PlusPct', 'palli'),
+      /* ===== TEMPORARILY DISABLED (on request) — Low / Top performer metrics.
+         Re-enable by removing this comment wrapper, then un-comment the matching
+         tab (palliKpiTabs), drill id (palliDrillKpis) and @default table in
+         app.html. The computeds (palliLowPerformerRows / palliTopPerformerRows)
+         are left in place.
       F('p_low', 'Low performers (observation < 75%)', -1, 'palliLowPerformers', 'palli'),
       F('p_top', 'Top performers (observation ≥ 75%)', 1, 'palliTopPerformers', 'palli'),
+      ===== */
     ],
   },
   {
@@ -187,6 +231,39 @@ export const KPI_MODULES: KpiModule[] = [
       N('dp_l15', 'Pending < 15 days', 0, 'dpsLt15', 'dps'),
       N('dp_l30', 'Pending 15–30 days', -1, 'dpsD15to30', 'dps'),
       N('dp_g30', 'Pending > 30 days', -1, 'dpsGt30', 'dps'),
+    ],
+  },
+  {
+    // All Children in School (ACiS) — the Common Pool.
+    // Children who left universal data (TC issued) are held in a common pool,
+    // surveyed in the field, given a dropout reason, then routed to SMC
+    // validation or to re-admission. Metric sheet order is preserved.
+    //
+    // REAL: acis-real.json (common pool / survey / admission) and acis-pd.json
+    // (potential dropouts — EMIS Potential Dropout report). Nothing assumed.
+    // Removed on request: TC dropouts, bridged & admitted, bridging duration,
+    // to be validated by SMC.
+    title: 'All Children in School', color: '#047857', kpis: [
+      N('ac_pool', 'Students in Common Pool', -1, 'acisPool', 'acis'),
+      N('ac_surv', 'Students surveyed', 1, 'acisSurveyed', 'acis'),
+      N('ac_pend', 'Pending to be surveyed', -1, 'acisPendingSurvey', 'acis'),
+      P('ac_sp', 'Survey completion %', 1, 50, 100, 'acisSurveyPct', 'acis'),
+      N('ac_adm', 'Students admitted to schools', 1, 'acisAdmitted', 'acis'),
+      N('ac_tba', 'Students to be admitted', -1, 'acisToBeAdmitted', 'acis'),
+      N('ac_rsn', 'Dropouts with reason recorded', 0, 'acisWithReason', 'acis'),
+      N('ac_dact', 'Dept. action taken', 1, 'acisDeptTaken', 'acis'),
+      N('ac_dpnd', 'Dept. action to be taken', -1, 'acisDeptPending', 'acis'),
+      // ---- Dropout rate (REAL): not-re-enrolled common-pool children ÷ enrolment I–XII ----
+      P('ac_dr', 'Dropout rate %', -1, 0, 5, 'acisDropRate', 'acis'),
+      N('ac_drc', 'Dropouts not re-enrolled', -1, 'acisDropOut', 'acis'),
+      // ---- Potential dropouts (REAL — EMIS Potential Dropout report) ----
+      // Absent 15+ days in the last 30. Single report window, so PD duration,
+      // monthly PD trend and "regularised" have no source and are not built.
+      N('ac_pd', 'Potential dropouts (15+ days absent)', -1, 'acisPd', 'acis'),
+      P('ac_pdp', 'Potential dropout %', -1, 0, 5, 'acisPdPct', 'acis'),
+      N('ac_pdr', 'Potential dropout repeaters', -1, 'acisPdRepeat', 'acis'),
+      hide(N('ac_pdrs', 'Potential dropout reasons', 0, 'acisPdWithReason', 'acis')),
+      hide(N('ac_pdg', 'Potential dropouts grade-wise', -1, 'acisPd', 'acis')),
     ],
   },
 ];

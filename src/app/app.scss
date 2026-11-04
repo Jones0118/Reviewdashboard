@@ -1243,6 +1243,138 @@ tr.clickable { cursor: pointer; }
 .palli-cell:hover { background: #f3f5f8; }
 .palli-subbar { display: flex; align-items: center; gap: 12px; padding: 8px 2px 12px; }
 
+/* All Children in School: the five metric-sheet filters above the drill grids */
+.acis-filters {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  padding: 10px 2px 12px; border-bottom: 1px solid var(--dr-line, #dfe5ec); margin-bottom: 10px;
+}
+.acis-filters .acis-sel { min-width: 180px; font-size: 12.5px; }
+.acis-loading {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  padding: 36px 12px; color: #66738a; font-size: 13px;
+}
+/* SMC rolling-window caption next to the period selector */
+.smc-window-note { font-size: 11.5px; color: #66738a; }
+
+/* All Children in School dashboard: clickable headline KPI strip */
+.acis-kpis {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 10px; margin: 0 0 14px;
+}
+.acis-kpi {
+  all: unset; box-sizing: border-box; cursor: pointer; display: flex; flex-direction: column; gap: 4px;
+  padding: 12px 14px; background: #fff; border: 1px solid var(--dr-line, #dfe5ec);
+  border-left: 4px solid #047857; border-radius: 8px;
+}
+.acis-kpi:hover { background: #f6faf8; }
+.acis-kpi:focus-visible { outline: 2px solid #047857; outline-offset: 2px; }
+.acis-kpi.on { background: #ecfdf5; border-color: #047857; }
+.acis-kpi-val { font-size: 20px; font-weight: 700; color: #1b2430; }
+.acis-kpi-val.band-bad { color: #b91c1c; }
+.acis-kpi-val.band-warn { color: #b45309; }
+.acis-kpi-val.band-good { color: #15803d; }
+.acis-kpi-lbl { font-size: 12px; color: #66738a; line-height: 1.3; }
+
+/* ACiS summary grid: source note, grouped headers, tile-sorted column */
+.acis-grid-note {
+  display: flex; gap: 8px; align-items: flex-start; font-size: 12px; color: #4b5563;
+  background: #f8fafc; border: 1px solid var(--dr-line, #dfe5ec); border-radius: 6px;
+  padding: 8px 10px; margin: 0 0 10px;
+}
+.acis-grid-note i { color: #047857; margin-top: 2px; }
+.acis-group-head th { font-size: 11px; text-transform: uppercase; letter-spacing: .03em; padding: 4px 8px; }
+.acis-grp-drop { background: #ecfdf5 !important; color: #047857 !important; text-align: center !important; }
+.acis-grp-pd { background: #fef2f2 !important; color: #b91c1c !important; text-align: center !important; }
+th.acis-sorted { background: #e0f2fe !important; }
+/* switch between the school's two student lists */
+.acis-list-switch { display: inline-flex; margin-left: auto; border: 1px solid var(--dr-line, #dfe5ec); border-radius: 6px; overflow: hidden; }
+.acis-list-switch button {
+  all: unset; cursor: pointer; padding: 6px 12px; font-size: 12.5px; color: #465060; background: #fff;
+}
+.acis-list-switch button + button { border-left: 1px solid var(--dr-line, #dfe5ec); }
+.acis-list-switch button.on { background: #047857; color: #fff; }
+.acis-list-switch button:focus-visible { outline: 2px solid #047857; outline-offset: -2px; }
+
+/* School-category infographic: two panels side by side, needs a little more height */
+.acis-cat-chart { height: 280px; }
+
+/* Palli Parvai real drill (US 4–8): breadcrumb, filters, observation report */
+.palli-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 6px 2px 10px; font-size: 13px; }
+.palli-crumbs .crumb { all: unset; cursor: pointer; color: #1d4ed8; padding: 2px 4px; border-radius: 4px; }
+.palli-crumbs .crumb:hover { background: #eff6ff; text-decoration: underline; }
+.palli-crumbs .crumb:focus-visible { outline: 2px solid #1d4ed8; outline-offset: 1px; }
+.palli-crumbs .crumb.on { cursor: default; color: #1b2430; font-weight: 700; text-decoration: none; background: none; }
+.palli-crumbs .crumb-sep { font-size: 9px; color: #94a3b8; }
+.palli-date { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: #465060; }
+.palli-date input, .palli-search {
+  font: inherit; font-size: 12.5px; padding: 6px 8px; border: 1px solid var(--dr-line, #dfe5ec); border-radius: 6px; background: #fff;
+}
+.palli-search { min-width: 220px; }
+.palli-date input:focus-visible, .palli-search:focus-visible { outline: 2px solid #1d4ed8; outline-offset: 0; }
+.palli-cell:disabled { cursor: default; opacity: .45; }
+.palli-report { display: flex; flex-direction: column; gap: 12px; padding: 4px 0 8px; }
+.palli-report-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+.palli-report-grid > div {
+  display: flex; flex-direction: column; gap: 3px; padding: 10px 12px;
+  border: 1px solid var(--dr-line, #dfe5ec); border-radius: 8px; background: #fff;
+}
+.palli-report-grid span { font-size: 11px; text-transform: uppercase; letter-spacing: .03em; color: #66738a; }
+.palli-report-grid b { font-size: 14px; color: #1b2430; }
+.palli-report-grid small { font-size: 12px; color: #66738a; }
+.palli-report-na {
+  display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border-radius: 8px;
+  background: #fffbeb; border: 1px solid #fde68a; color: #92400e; font-size: 13px;
+}
+.palli-report > .dr-back { align-self: flex-start; }
+/* SAMPLE values (Section, report findings) — not in the export */
+.sample-dot { color: #b45309; font-weight: 700; cursor: help; }
+.palli-sample-report { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px dashed #f59e0b; border-radius: 8px; background: #fffdf7; }
+.psr-head { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; font-size: 13px; color: #465060; }
+.psr-head b { color: #1b2430; }
+.psr-head p-tag { margin-left: auto; }
+.psr-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.psr-table th { text-align: left; font-size: 11.5px; font-weight: 600; color: #334155; background: #f4f6f9; padding: 7px 10px; }
+.psr-table th.num, .psr-table td.num { text-align: center; }
+.psr-table td { padding: 7px 10px; border-bottom: 1px solid #eef1f5; }
+.psr-notes { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; font-size: 13px; color: #1f2937; }
+.psr-notes span { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .03em; color: #66738a; margin-bottom: 2px; }
+/* section label above each table in the dropout-rate view */
+.acis-subhead { font-size: 13px; font-weight: 700; color: var(--gov-blue-dark); margin: 16px 2px 6px; }
+
+/* ===== ACiS grids — readable table style (all tables in the shared drill) =====
+   Counts are plain dark text; colour is reserved for the two rate columns
+   (soft pills), so the cells that need attention actually stand out. */
+:host ::ng-deep .acis-grid {
+  .p-datatable-thead > tr > th {
+    background: #f4f6f9; color: #334155; font-size: 11.5px; font-weight: 600;
+    white-space: normal; line-height: 1.25; vertical-align: bottom;
+    padding: 9px 10px; border-bottom: 1px solid #dfe5ec;
+  }
+  /* the group band row scrolls away; the column-header row stays sticky */
+  .p-datatable-thead > tr.acis-group-head > th { position: static; padding: 5px 10px; border-bottom: 0; }
+  .p-datatable-tbody > tr > td {
+    padding: 8px 10px; font-size: 13px; color: #1f2937; border-bottom: 1px solid #eef1f5;
+  }
+  .p-datatable-tbody > tr:nth-child(even) > td { background: #fafbfc; }
+  .p-datatable-tbody > tr.rv-row:hover > td { background: #eef6f2; }
+  td.num, th.num { font-variant-numeric: tabular-nums; }
+  .rv-total td { font-size: 13px; }
+}
+.acis-sno { color: #94a3b8; }
+.acis-unit { font-weight: 600; color: var(--gov-blue-dark); white-space: nowrap; }
+.acis-unit i { font-size: 10px; color: #94a3b8; margin-left: 4px; }
+.acis-udise { color: #64748b; font-variant-numeric: tabular-nums; }
+.acis-key { font-weight: 600; }
+.acis-sep { border-left: 2px solid #e2e8f0 !important; }
+.acis-dash { color: #94a3b8; }
+.acis-pill {
+  display: inline-block; min-width: 54px; padding: 2px 8px; border-radius: 999px;
+  font-size: 12px; font-weight: 600; text-align: center; background: #f1f5f9; color: #334155;
+}
+.acis-pill.p-bad { background: #fee2e2; color: #b91c1c; }
+.acis-pill.p-warn { background: #fef3c7; color: #92400e; }
+.acis-pill.p-good { background: #dcfce7; color: #166534; }
+
 /* Grand-total footer row across drill grids */
 .rv-total td { background: #f3f5f8; border-top: 2px solid var(--dr-line, #dfe5ec); font-weight: 700; color: #1b2430; }
 

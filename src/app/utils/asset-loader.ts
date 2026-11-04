@@ -35,12 +35,18 @@ const decoder = new TextDecoder();
 /**
  * Loads a JSON asset, preferring the gzipped copy.
  *
+ * Uses `cache: 'no-cache'`: the browser may keep a copy but must revalidate it
+ * with the server (a cheap 304 when unchanged). `force-cache` was used before
+ * and served stale copies indefinitely — even across a hard refresh — so a
+ * regenerated asset (e.g. palli-obs.json gaining user / duration columns)
+ * never reached the dashboard.
+ *
  * @param path logical asset path, e.g. 'assets/infra-schools.json'.
  *             '.gz' is appended for the first attempt.
  */
 export async function loadAsset<T>(path: string): Promise<T> {
   try {
-    const res = await fetch(`${path}.gz`, { cache: 'force-cache' });
+    const res = await fetch(`${path}.gz`, { cache: 'no-cache' });
     if (res.ok) {
       const buf = await res.arrayBuffer();
       // guard against a dev server answering 200 with an HTML fallback page
@@ -59,7 +65,7 @@ export async function loadAsset<T>(path: string): Promise<T> {
     // fall through to the uncompressed copy
   }
 
-  const res = await fetch(path, { cache: 'force-cache' });
+  const res = await fetch(path, { cache: 'no-cache' });
   if (!res.ok) throw new Error(`Failed to load ${path}: ${res.status} ${res.statusText}`);
   return (await res.json()) as T;
 }

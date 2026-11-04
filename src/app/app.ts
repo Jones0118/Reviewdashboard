@@ -132,6 +132,7 @@ export class App implements OnInit {
     { label: 'Infrastructure' },
     { label: 'Academic Scores' },
     { label: 'Attendance' },
+    { label: 'All Children in School' },
     { label: 'Class 1 Enrolment Monitor' },
     {
       label: 'SLAS',
@@ -181,6 +182,25 @@ export class App implements OnInit {
   readonly isSchoolTab = computed(() => this.activeTab() === 'School Dashboard');
   readonly isClass1 = computed(() => this.activeTab() === 'Class 1 Enrolment Monitor');
   readonly isReview = computed(() => this.activeTab() === 'Review Dashboard');
+  /**
+   * Standalone "All Children in School" dashboard. It renders the very same
+   * ACiS drill as the Review Dashboard's component (shared <ng-template
+   * #acisDrill>), so both stay identical; this tab just adds a headline strip
+   * and its own District → Block → School navigation.
+   */
+  readonly isAcisTab = computed(() => this.activeTab() === 'All Children in School');
+
+  /** Headline KPIs for the ACiS tab — every tiled ACiS KPI, at the current scope. */
+  readonly acisTabKpis = computed(() => {
+    const vals = this.scopeValues();
+    const mod = KPI_MODULES.find((m) => m.title === 'All Children in School');
+    return (mod?.kpis ?? [])
+      .filter((def) => def.tile !== false)
+      .map((def) => {
+        const raw = def.field ? (vals[def.field] ?? null) : null;
+        return { id: def.id, label: def.label, value: this.kpiFormat(def, raw), band: this.kpiBand(def, raw) };
+      });
+  });
   readonly infraMetrics = INFRA_METRICS;
 
   /** Alert-category filter, so the Alarming tables can be split into tabs. */
@@ -426,10 +446,16 @@ export class App implements OnInit {
   kpiFilter = signal<string[]>([]);
   setKpiFilter(ids: string[]): void { this.kpiFilter.set(ids ?? []); }
 
-  /** Options for the KPI multi-select, label = "Module · KPI". */
+  /**
+   * Options for the KPI multi-select, label = "Module · KPI". Mirrors the tile
+   * grid, so KPIs that only exist in "View details" are not offered here
+   * (selecting one would filter the grid down to nothing).
+   */
   readonly kpiFilterOptions = computed(() =>
     KPI_MODULES.flatMap((m) =>
-      m.kpis.map((k) => ({ label: `${m.title} · ${k.label}`, value: `${k.topic}:${k.id}` })),
+      m.kpis
+        .filter((k) => k.tile !== false)
+        .map((k) => ({ label: `${m.title} · ${k.label}`, value: `${k.topic}:${k.id}` })),
     ),
   );
 
@@ -454,7 +480,11 @@ export class App implements OnInit {
       'thiranBaselinePct', 'thiranBloPct', 'ictFunctionalPct',
       'ictInternetPct', 'infGapPct', 'scholarPaySuccessPct', 'cwsnPct', 'slasPct',
       // new enrollment/attendance percentages
-      'schoolsNotMarkedPct', 'ptr', 'transitionPendingPct']);
+      'schoolsNotMarkedPct', 'ptr', 'transitionPendingPct',
+      // All Children in School
+      'acisSurveyPct',
+      // SMC meetings / emergency / other / grants
+      'smcMeetAttendPct', 'smcEmergencyClosureRate', 'smcOtherClosureRate']);
     const keys: (keyof DrillRow)[] = ['ns', 'n', 'teaching', 'att', 'teacherAtt', 'compliance',
       'drop', 'tl', 'gaps', 'academicAvg', 'academicChange', 'sch', 'cases', 'tnSparkPct',
       'breakfastPct', 'cmOpen', 'h14417Open', 'h14417Critical', 'h14417ResPct', 'girlsPct',
@@ -487,7 +517,18 @@ export class App implements OnInit {
       'palliSchools3PlusPct', 'palliLowPerformers', 'palliTopPerformers',
       // ---- Recognition Order (DPS) pending RC applications ----
       'dpsTotal', 'dpsDistrictPending', 'dpsStatePending',
-      'dpsLt15', 'dpsD15to30', 'dpsGt30'];
+      'dpsLt15', 'dpsD15to30', 'dpsGt30',
+      // ---- All Children in School (ACiS) common pool ----
+      'acisPool', 'acisSurveyed', 'acisPendingSurvey', 'acisSurveyPct',
+      'acisAdmitted', 'acisBridged', 'acisToBeAdmitted', 'acisToBeValidated',
+      'acisWithReason', 'acisDeptTaken', 'acisDeptPending', 'acisCwsn', 'acisUmis',
+      'acisPdRepeat', 'acisPd', 'acisPdWithReason', 'acisPdBase', 'acisDropOut', 'acisEnrolI12',
+      // ---- SMC meetings, emergency/other split, grants ----
+      'smcMeetings', 'smcSchoolsHeld', 'smcSchoolsNotHeld', 'smcEligibleSchools',
+      'smcPresent', 'smcAbsent', 'smcVacant', 'smcMeetAttendPct',
+      'smcEmergencyRaised', 'smcEmergencyResolved', 'smcEmergencyClosureRate',
+      'smcOtherRaised', 'smcOtherResolved', 'smcOtherOpen', 'smcOtherClosureRate',
+      'smcGrantAllocated', 'smcGrantUtilised'];
     for (const k of keys) {
       const kk = k as string;
       if (PCT.has(kk)) {
@@ -496,6 +537,49 @@ export class App implements OnInit {
         out[kk] = rows.reduce((s, r) => s + ((r[k] as number) || 0), 0);
       }
     }
+    // Averages that must be weighted by their own base rather than by enrolment
+    // (summing per-district means, or weighting them by school roll, would both
+    // be wrong). field -> the count each unit's mean is an average over.
+    // Averages that must be weighted by their own base rather than by enrolment
+    // (summing per-district means, or weighting them by school roll, would both
+    // be wrong). field -> the count each unit's mean is an average over.
+    const WAVG: Record<string, keyof DrillRow> = {
+      acisBridgeDays: 'acisBridged',
+    };
+    for (const [field, wField] of Object.entries(WAVG)) {
+      const w = rows.reduce((s, r) => s + ((r[wField] as number) || 0), 0);
+      out[field] = w
+        ? Math.round((rows.reduce(
+          (s, r) => s + ((r[field as keyof DrillRow] as number) || 0) * ((r[wField] as number) || 0), 0,
+        ) / w) * 10) / 10
+        : null;
+    }
+    // Ratios are recomputed from their own summed numerator and denominator —
+    // exact, rather than a student-weighted average of per-unit percentages.
+    // field -> [numerator, denominator parts (summed)].
+    const RATIO: Record<string, [keyof DrillRow, (keyof DrillRow)[]]> = {
+      smcClosureRate: ['smcClosed', ['smcRaised']],
+      smcMeetAttendPct: ['smcPresent', ['smcPresent', 'smcAbsent']],
+      smcEmergencyClosureRate: ['smcEmergencyResolved', ['smcEmergencyResolved', 'smcEmergency']],
+      smcOtherClosureRate: ['smcOtherResolved', ['smcOtherResolved', 'smcOtherOpen']],
+      smcGrantUtilPct: ['smcGrantUtilised', ['smcGrantAllocated']],
+      acisSurveyPct: ['acisSurveyed', ['acisPool']],
+    };
+    for (const [field, [numKey, denKeys]] of Object.entries(RATIO)) {
+      const num = rows.reduce((s, r) => s + ((r[numKey] as number) || 0), 0);
+      const den = denKeys.reduce(
+        (t, k) => t + rows.reduce((s, r) => s + ((r[k] as number) || 0), 0), 0,
+      );
+      out[field] = den ? Math.round((num / den) * 1000) / 10 : null;
+    }
+    // PD % is small (well under 1%), so it keeps two decimals rather than one.
+    const pdBase = rows.reduce((s, r) => s + (r.acisPdBase || 0), 0);
+    const pdNum = rows.reduce((s, r) => s + (r.acisPd || 0), 0);
+    out['acisPdPct'] = pdBase ? Math.round((pdNum / pdBase) * 10000) / 100 : null;
+    // Dropout rate: not-re-enrolled common-pool children ÷ enrolment in classes I–XII
+    const drBase = rows.reduce((s, r) => s + (r.acisEnrolI12 || 0), 0);
+    const drNum = rows.reduce((s, r) => s + (r.acisDropOut || 0), 0);
+    out['acisDropRate'] = drBase ? Math.round((drNum / drBase) * 10000) / 100 : null;
     return out;
   });
 
@@ -515,7 +599,13 @@ export class App implements OnInit {
   /** Format a KPI value for display; null -> "–". */
   private kpiFormat(def: KpiDef, v: number | null): string {
     if (v == null || isNaN(v as number)) return '–';
-    if (def.fmt === 'pct') return `${def.dir < 0 && v > 0 ? '+' : ''}${(v as number).toFixed(1)}%`;
+    if (def.fmt === 'pct') {
+      // sub-1% rates (e.g. potential dropout %) need two decimals to be readable
+      const dp = Math.abs(v as number) < 1 ? 2 : 1;
+      // rates, not changes — no sign prefix
+      const sign = def.dir < 0 && v > 0 && def.id !== 'ac_pdp' && def.id !== 'ac_dr' ? '+' : '';
+      return `${sign}${(v as number).toFixed(dp)}%`;
+    }
     return Math.round(v as number).toLocaleString('en-IN');
   }
 
@@ -534,6 +624,8 @@ export class App implements OnInit {
       // topic of the module = topic of its first KPI (drives "View details")
       topic: mod.kpis[0]?.topic ?? 'enr',
       kpis: mod.kpis
+        // supporting metrics (tile: false) live only in "View details"
+        .filter((def) => def.tile !== false)
         .filter((def) => active.size === 0 || active.has(`${def.topic}:${def.id}`))
         .map((def) => {
           const raw = def.field && def.field !== 'DERIVED' ? (vals[def.field] ?? null) : null;
@@ -626,6 +718,10 @@ export class App implements OnInit {
     if (t === 'palli') this.rv.openPalliDrill('p_co'); else this.rv.closePalliDrill();
     // Recognition Order (DPS) has its own application-level drill.
     if (t === 'dps') this.rv.openDpsDrill('dp_tot'); else this.rv.closeDpsDrill();
+    // All Children in School drills on the child, not the school.
+    if (t === 'acis') this.rv.openAcisDrill('ac_pool'); else this.rv.closeAcisDrill();
+    // SMC drills on meetings / resolutions / grants.
+    if (t === 'smc') this.rv.openSmcDrill('m_mh'); else this.rv.closeSmcDrill();
     setTimeout(() => {
       document.getElementById('rv-drilldown')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 60);
@@ -649,21 +745,43 @@ export class App implements OnInit {
     if (this.rv.hasPalliDrill(kpiId)) {
       this.rv.closeKpiSchoolList();
       this.rv.closeDpsDrill();
+      this.rv.closeAcisDrill();
+      this.rv.closeSmcDrill();
       this.rv.openPalliDrill(kpiId);
     } else if (this.rv.hasDpsDrill(kpiId)) {
       // Recognition Order KPIs drill to the pending-application list.
       this.rv.closeKpiSchoolList();
       this.rv.closePalliDrill();
+      this.rv.closeAcisDrill();
+      this.rv.closeSmcDrill();
       this.rv.openDpsDrill(kpiId);
+    } else if (this.rv.hasAcisDrill(kpiId)) {
+      // ACiS KPIs drill to the common-pool child views.
+      this.rv.closeKpiSchoolList();
+      this.rv.closePalliDrill();
+      this.rv.closeDpsDrill();
+      this.rv.closeSmcDrill();
+      this.rv.openAcisDrill(kpiId);
+    } else if (this.rv.hasSmcDrill(kpiId)) {
+      // SMC KPIs drill to meetings / resolutions / grant views.
+      this.rv.closeKpiSchoolList();
+      this.rv.closePalliDrill();
+      this.rv.closeDpsDrill();
+      this.rv.closeAcisDrill();
+      this.rv.openSmcDrill(kpiId);
     } else if (this.rv.hasKpiSchoolList(kpiId)) {
       // Flag KPIs that resolve to a per-school condition (e.g. zero enrolment,
       // single teacher, PTR>60) open a focused list of only the matching schools.
       this.rv.closePalliDrill();
       this.rv.closeDpsDrill();
+      this.rv.closeAcisDrill();
+      this.rv.closeSmcDrill();
       this.rv.openKpiSchoolList(kpiId);
     } else {
       this.rv.closePalliDrill();
       this.rv.closeDpsDrill();
+      this.rv.closeAcisDrill();
+      this.rv.closeSmcDrill();
       this.rv.closeKpiSchoolList();
       // otherwise, if the KPI maps to a real field, sort the drill table by it
       if (def?.field && def.field !== 'DERIVED') this.rv.setSort(def.field);
@@ -687,6 +805,8 @@ export class App implements OnInit {
     this.rv.closeKpiSchoolList();
     if (topic === 'palli') this.rv.openPalliDrill('p_co'); else this.rv.closePalliDrill();
     if (topic === 'dps') this.rv.openDpsDrill('dp_tot'); else this.rv.closeDpsDrill();
+    if (topic === 'acis') this.rv.openAcisDrill('ac_pool'); else this.rv.closeAcisDrill();
+    if (topic === 'smc') this.rv.openSmcDrill('m_mh'); else this.rv.closeSmcDrill();
     this.rv.setTopic(topic as any);
   }
 
@@ -715,6 +835,8 @@ export class App implements OnInit {
     this.rv.closePalliDrill();
     this.rv.closeDpsDrill();
     this.rv.closeAcademicDrill();
+    this.rv.closeAcisDrill();
+    this.rv.closeSmcDrill();
     this.ds.goToState();
   }
 
@@ -1833,6 +1955,69 @@ export class App implements OnInit {
     }));
   }
 
+  /**
+   * Palli Parvai drill exports (US 4 / 5 / 7) — every row of the current view
+   * (not just the visible page), with the breadcrumb path and date range as
+   * the subtitle. Uses the shared ExportService (Excel / CSV / PDF).
+   */
+  exportPalli(view: 'district' | 'users' | 'userObs' | 'duration' | 'durList' | 'durUsers' | 'durAbstract', format: 'excel' | 'csv' | 'pdf'): void {
+    const n = 'number' as const, p = 'percent' as const;
+    const dur: ExportColumn[] = [
+      { header: 'Under 15 min', field: 'lt15', type: n },
+      { header: '15 to under 30 min', field: 'b15', type: n },
+      { header: '30 min or more', field: 'ge30', type: n },
+    ];
+    const obsCols: ExportColumn[] = [
+      { header: 'Sl. No.', field: 'sno', type: n },
+      { header: 'Observation Date', field: 'date' },
+      { header: 'Observer', field: 'observer' },
+      { header: 'UDISE Code', field: 'udise' },
+      { header: 'School Name', field: 'school' },
+      { header: 'Class', field: 'cls', type: n },
+      { header: 'Section', field: 'section' },
+      { header: 'Start', field: 'start' },
+      { header: 'End', field: 'end' },
+      { header: 'Duration (min)', field: 'durMin', type: n },
+      { header: 'Duration category', field: 'durLabel' },
+    ];
+    const specs = {
+      district: { title: 'Palli Parvai — districts', rows: this.rv.palliDesignationDrill(), columns: [
+        { header: 'Sl. No.', field: 'sno', type: n }, { header: 'District', field: 'district' }, { header: 'Designation', field: 'designation' },
+        { header: 'Officers', field: 'officers', type: n }, { header: 'Target', field: 'target', type: n },
+        { header: 'Visited', field: 'visited', type: n }, { header: 'Visit %', field: 'pct', type: p }] },
+      users: { title: 'Palli Parvai — user-wise observation performance', rows: this.rv.palliUserRows(), columns: [
+        { header: 'Sl. No.', field: 'sno', type: n }, { header: 'User Name', field: 'name' }, { header: 'User ID', field: 'userId' },
+        { header: 'Designation', field: 'designation' }, { header: 'Target', field: 'target', type: n },
+        { header: 'Visited', field: 'visited', type: n }, { header: 'Visit %', field: 'pct', type: p }] },
+      // % Class Observation drill: no duration columns (they live in the Observation duration tab)
+      userObs: { title: 'Palli Parvai — user school observations', rows: this.rv.palliUserObsRows(),
+        columns: obsCols.filter((c) => c.field !== 'durMin' && c.field !== 'durLabel') },
+      duration: { title: 'Palli Parvai — observation duration', rows: this.rv.palliDurRows(), columns: [
+        { header: 'Sl. No.', field: 'sno', type: n }, { header: 'District', field: 'district' }, { header: 'Designation', field: 'designation' },
+        { header: 'Total Observations', field: 'total', type: n }, ...dur,
+        { header: 'Average Duration (min)', field: 'avgMin', type: n }] },
+      durList: { title: 'Palli Parvai — observations by duration', rows: this.rv.palliDurListRows(), columns: obsCols },
+      durUsers: { title: 'Palli Parvai — user-wise observation duration', rows: this.rv.palliDurUserRows(), columns: [
+        { header: 'Sl. No.', field: 'sno', type: n }, { header: 'User Name', field: 'name' }, { header: 'User ID', field: 'userId' },
+        { header: 'Designation', field: 'designation' }, { header: 'Total Observations', field: 'total', type: n }, ...dur,
+        { header: 'Average Duration (min)', field: 'avgMin', type: n }] },
+      durAbstract: { title: 'Palli Parvai — observation duration (designation abstract)', rows: this.rv.palliDurAbstract(), columns: [
+        { header: 'Sl. No.', field: 'sno', type: n }, { header: 'Designation', field: 'designation' },
+        { header: 'Districts', field: 'districts', type: n }, { header: 'Total Observations', field: 'total', type: n }, ...dur,
+        { header: 'Average Duration (min)', field: 'avgMin', type: n }] },
+    } as const;
+    const spec = specs[view];
+    const RAG: Record<string, string> = { good: 'Green', warn: 'Amber', bad: 'Red', none: 'N/A' };
+    const rows = (spec.rows as any[]).map((r) => ({ ...r, section: '—', ragLabel: RAG[r.rag] ?? '', pct: r.pct ?? 'N/A' }));
+    const crumbs = this.rv.palliCrumbs().map((c) => c.label).join(' → ');
+    const w = this.rv.palliObsWindow();
+    const range = `${this.rv.palliDateFrom() || w.from} to ${this.rv.palliDateTo() || w.to}`;
+    const req = { title: `${spec.title} — ${this.ds.scopeLabel()}`, subtitle: `${crumbs} · ${range}`, columns: [...spec.columns], rows };
+    if (format === 'excel') this.ex.toExcel(req);
+    else if (format === 'csv') this.ex.toCsv(req);
+    else void this.ex.toPdf(req);
+  }
+
   /** Export a table's COMPLETE dataset, with hierarchy context attached. */
   exportTable(key: string, format: 'excel' | 'csv' | 'pdf'): void {
     const baseCols = this.EXPORT_COLS[key] ?? this.EXPORT_COLS['drill'];
@@ -2186,6 +2371,173 @@ export class App implements OnInit {
       { id: 'class1Monitor', title: this.c1ChartTitle() });
   });
 
+  // ================= ALL CHILDREN IN SCHOOL — infographics =================
+  /**
+   * All five ACiS charts are vertical column charts carrying the app's standard
+   * toolbox (`cs.standardToolbox`): Refresh · Table View · Bar ⇄ Line ·
+   * Download (PDF / PNG / JPG). Categories sit on the x-axis so Table View lists
+   * them as rows and the Line switch draws a meaningful line. The toolbox `id`
+   * must equal the chart's registerChart() id — that is how Download finds it.
+   */
+  private acisTitle(base: string): string {
+    return `${base} — ${this.ds.scopeLabel()}`;
+  }
+
+  /**
+   * The four management groups (Government / Fully Aided / Partially Aided /
+   * Private), each in its own colour, labelled with count and share. Zero
+   * groups are kept so the four columns are always comparable.
+   */
+  private acisMgmtChart(rows: { label: string; value: number }[], id: string, title: string, name: string): any {
+    const total = rows.reduce((t, r) => t + r.value, 0);
+    if (!total) return {};
+    const COLORS: Record<string, string> = {
+      'Government': '#1d4ed8', 'Fully Aided': '#047857', 'Partially Aided': '#b45309',
+      'Private': '#7c3aed', 'Not recorded': '#94a3b8',
+    };
+    const pct = (v: number) => `${((v / total) * 100).toFixed(1)}%`;
+    return {
+      toolbox: this.cs.standardToolbox(id, this.acisTitle(title)),
+      grid: { left: 8, right: 16, top: 40, bottom: 8, containLabel: true },
+      tooltip: {
+        trigger: 'axis', axisPointer: { type: 'shadow' },
+        valueFormatter: (v: number) => `${v.toLocaleString('en-IN')} (${pct(v)})`,
+      },
+      xAxis: { type: 'category', data: rows.map((r) => r.label), axisLabel: { fontSize: 12, fontWeight: 600, interval: 0 } },
+      yAxis: { type: 'value', axisLabel: { formatter: (v: number) => v.toLocaleString('en-IN') }, splitLine: { lineStyle: { color: '#eef2f7' } } },
+      series: [{
+        name, type: 'bar', barMaxWidth: 54, symbolSize: 8,
+        data: rows.map((r) => ({ value: r.value, itemStyle: { color: COLORS[r.label] ?? '#64748b', borderRadius: [4, 4, 0, 0] } })),
+        label: {
+          show: true, position: 'top', fontSize: 11, color: '#1f2937',
+          formatter: (p: any) => `${p.value.toLocaleString('en-IN')}\n(${pct(p.value)})`,
+        },
+      }],
+    };
+  }
+
+  /** Stacked boys / girls columns per grade; the Stack toggle un-stacks them. */
+  private acisGradeChart(rows: { label: string; boys: number; girls: number }[], id: string, title: string): any {
+    if (!rows.length) return {};
+    return {
+      toolbox: this.cs.standardToolbox(id, this.acisTitle(title), ['bar', 'line', 'stack']),
+      grid: { left: 8, right: 16, top: 40, bottom: 8, containLabel: true },
+      legend: { top: 4, left: 8, data: ['Boys', 'Girls'] },
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+      xAxis: { type: 'category', data: rows.map((r) => r.label.replace('Class ', '')), name: 'Class', nameLocation: 'middle', nameGap: 24 },
+      yAxis: { type: 'value', axisLabel: { formatter: (v: number) => v.toLocaleString('en-IN') }, splitLine: { lineStyle: { color: '#eef2f7' } } },
+      series: [
+        { name: 'Boys', type: 'bar', stack: 'g', data: rows.map((r) => r.boys), itemStyle: { color: '#2563eb' }, barMaxWidth: 36 },
+        {
+          name: 'Girls', type: 'bar', stack: 'g', data: rows.map((r) => r.girls), itemStyle: { color: '#db2777' }, barMaxWidth: 36,
+          label: {
+            show: true, position: 'top', fontSize: 10,
+            formatter: (p: any) => (rows[p.dataIndex].boys + rows[p.dataIndex].girls).toLocaleString('en-IN'),
+          },
+        },
+      ],
+    };
+  }
+
+  readonly acisPdMgmtOpt = computed(() => this.acisMgmtChart(this.rv.acisPdByManagement(),
+    'acisPdMgmt', 'Potential dropouts — management-wise', 'Potential dropouts'));
+  readonly acisPdGradeOpt = computed(() => this.acisGradeChart(this.rv.acisPdByGrade(),
+    'acisPdGrade', 'Potential dropouts — grade-wise'));
+  readonly acisDropMgmtOpt = computed(() => this.acisMgmtChart(this.rv.acisDropByManagement(),
+    'acisDropMgmt', 'Dropouts (common pool) — management-wise', 'Common pool students'));
+  readonly acisDropGradeOpt = computed(() => this.acisGradeChart(this.rv.acisDropByGrade(),
+    'acisDropGrade', 'Dropouts (common pool) — grade-wise'));
+
+  /**
+   * School-category infographic: common-pool students and potential dropouts
+   * per Primary / Middle / High / Hr. Secondary, as two side-by-side column
+   * panels sharing the category labels. Each panel has its own scale — the
+   * common pool is ~10× larger, so one shared axis would flatten the PD bars.
+   * Table View lists both counts per category (the panels share categories).
+   */
+  readonly acisCategoryOpt = computed(() => {
+    const rows = this.rv.acisByCategory();
+    const poolT = rows.reduce((t, r) => t + r.pool, 0);
+    const pdT = rows.reduce((t, r) => t + r.pd, 0);
+    if (!poolT && !pdT) return {};
+    const cats = rows.map((r) => r.label);
+    const share = (v: number, t: number) => (t ? `${((v / t) * 100).toFixed(1)}%` : '0%');
+    const label = (t: number) => ({
+      show: true, position: 'top', fontSize: 11, color: '#1f2937',
+      formatter: (p: any) => `${p.value.toLocaleString('en-IN')}\n(${share(p.value, t)})`,
+    });
+    const axisNum = { type: 'value', axisLabel: { fontSize: 10, formatter: (v: number) => v.toLocaleString('en-IN') }, splitLine: { lineStyle: { color: '#eef2f7' } } };
+    const axisCat = { type: 'category', data: cats, axisLabel: { fontSize: 12, fontWeight: 600, interval: 0 } };
+    return {
+      toolbox: this.cs.standardToolbox('acisCategory', this.acisTitle('School category-wise — common pool vs potential dropouts')),
+      title: [
+        { text: `Common pool students · ${poolT.toLocaleString('en-IN')}`, left: '3%', top: 4, textStyle: { fontSize: 13, color: '#047857' } },
+        { text: `Potential dropouts · ${pdT.toLocaleString('en-IN')}`, left: '53%', top: 4, textStyle: { fontSize: 13, color: '#b91c1c' } },
+      ],
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+      grid: [
+        { left: '3%', width: '42%', top: 52, bottom: 8, containLabel: true },
+        { left: '53%', width: '42%', top: 52, bottom: 8, containLabel: true },
+      ],
+      xAxis: [{ ...axisCat, gridIndex: 0 }, { ...axisCat, gridIndex: 1 }],
+      yAxis: [{ ...axisNum, gridIndex: 0 }, { ...axisNum, gridIndex: 1 }],
+      series: [
+        { name: 'Common pool students', type: 'bar', xAxisIndex: 0, yAxisIndex: 0, data: rows.map((r) => r.pool),
+          barMaxWidth: 46, symbolSize: 8, itemStyle: { color: '#047857', borderRadius: [4, 4, 0, 0] }, label: label(poolT) },
+        { name: 'Potential dropouts', type: 'bar', xAxisIndex: 1, yAxisIndex: 1, data: rows.map((r) => r.pd),
+          barMaxWidth: 46, symbolSize: 8, itemStyle: { color: '#b91c1c', borderRadius: [4, 4, 0, 0] }, label: label(pdT) },
+      ],
+    };
+  });
+
+
+  /** Dropout rate % per class (I–XII); tooltip shows N and D. */
+  readonly acisDropRateOpt = computed(() => {
+    const rows = this.rv.acisDropGradeRows();
+    if (!rows.some((r) => r.enrolled > 0)) return {};
+    return {
+      toolbox: this.cs.standardToolbox('acisDropRate', this.acisTitle('Dropout rate — grade-wise')),
+      grid: { left: 8, right: 16, top: 40, bottom: 8, containLabel: true },
+      tooltip: {
+        trigger: 'axis', axisPointer: { type: 'shadow' },
+        formatter: (ps: any[]) => {
+          const r = rows[ps[0].dataIndex];
+          return `<b>${r.label}</b><br/>Dropout rate: <b>${r.rate}%</b><br/>`
+            + `Dropouts not re-enrolled: ${r.dropouts.toLocaleString('en-IN')}<br/>Enrolled: ${r.enrolled.toLocaleString('en-IN')}`;
+        },
+      },
+      xAxis: { type: 'category', data: rows.map((r) => String(r.cls)), name: 'Class', nameLocation: 'middle', nameGap: 24 },
+      yAxis: { type: 'value', axisLabel: { formatter: '{value}%' }, splitLine: { lineStyle: { color: '#eef2f7' } } },
+      series: [{
+        name: 'Dropout rate %', type: 'bar', barMaxWidth: 36, symbolSize: 8,
+        data: rows.map((r) => r.rate),
+        itemStyle: { color: '#b45309', borderRadius: [4, 4, 0, 0] },
+        label: { show: true, position: 'top', fontSize: 10, formatter: '{c}%' },
+      }],
+    };
+  });
+
+  /** Dropouts not re-enrolled per class, stacked by reason group. */
+  readonly acisDropReasonOpt = computed(() => {
+    const rows = this.rv.acisDropGradeRows();
+    if (!rows.some((r) => r.dropouts > 0)) return {};
+    const COLORS: Record<string, string> = {
+      'Migration': '#2563eb', 'CWSN': '#7c3aed', 'Illness': '#dc2626',
+      'Child marriage': '#db2777', 'Other': '#64748b', 'Not recorded': '#cbd5e1',
+    };
+    return {
+      toolbox: this.cs.standardToolbox('acisDropReason', this.acisTitle('Reasons for dropout — grade-wise'), ['bar', 'line', 'stack']),
+      grid: { left: 8, right: 16, top: 56, bottom: 8, containLabel: true },
+      legend: { top: 4, left: 8, right: 150, type: 'scroll' },
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+      xAxis: { type: 'category', data: rows.map((r) => String(r.cls)), name: 'Class', nameLocation: 'middle', nameGap: 24 },
+      yAxis: { type: 'value', axisLabel: { formatter: (v: number) => v.toLocaleString('en-IN') }, splitLine: { lineStyle: { color: '#eef2f7' } } },
+      series: this.rv.ACIS_DROP_REASONS.map((g) => ({
+        name: g, type: 'bar', stack: 'r', barMaxWidth: 36, symbolSize: 6,
+        data: rows.map((r) => r.reasons[g] ?? 0), itemStyle: { color: COLORS[g] },
+      })),
+    };
+  });
 
   setTab(t: string): void {
     this.activeTab.set(t);
@@ -2201,6 +2553,12 @@ export class App implements OnInit {
       // "District Review" (cards) exists only on the Review Dashboard; other
       // tabs fall back to Numbers.
       this.activeSub.set('numbers');
+    }
+    // The ACiS dashboard has no sub-menu: it is the ACiS drill itself.
+    if (t === 'All Children in School') {
+      this.activeSub.set('numbers');
+      if (!this.rv.acisKpiId()) this.rv.openAcisDrill('ac_pool');
+      else this.rv.loadAcisStudents();
     }
   }
 

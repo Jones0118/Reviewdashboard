@@ -14,10 +14,14 @@ import { KPI_MODULES, KpiDef } from '../models/kpi-catalog.model';
 import { SchoolRow } from '../models/enrollment.model';
 import {
   AcademicRealAsset, ThiranRealAsset, PalliRealAsset, DigitalInfraRealAsset,
+  PalliObsAsset, PalliObsCol,
   AcademicReal, ThiranReal, PalliReal, DigitalInfraReal,
   InfraRealAsset, InfraReal,
   SmcRealAsset, SmcReal,
+  SmcPeriodKey, SmcPeriodCol, SmcDetailAsset, SmcMeetingCol, SmcResolutionCol,
   DpsRealAsset, DpsReal, DpsApplication,
+  AcisRealAsset, AcisReal, AcisStudentsAsset, AcisStudentRow, AcisStudentCol,
+  AcisPdAsset, AcisPdReal, AcisPdCol,
 } from '../models/real-data.model';
 
 /** A leaderboard entry (district or school ranked by a metric). */
@@ -51,10 +55,22 @@ export class ReviewService {
   private readonly _academicReal = signal<AcademicRealAsset | null>(null);
   private readonly _thiranReal = signal<ThiranRealAsset | null>(null);
   private readonly _palliReal = signal<PalliRealAsset | null>(null);
+  /** Palli observation line list — loaded lazily on first use. */
+  private readonly _palliObs = signal<PalliObsAsset | null>(null);
+  private palliObsRequested = false;
   private readonly _digitalReal = signal<DigitalInfraRealAsset | null>(null);
   private readonly _infraReal = signal<InfraRealAsset | null>(null);
   private readonly _smcReal = signal<SmcRealAsset | null>(null);
   private readonly _dpsReal = signal<DpsRealAsset | null>(null);
+  private readonly _acisReal = signal<AcisRealAsset | null>(null);
+  /** Real potential dropouts (EMIS PD report) — small, loaded eagerly. */
+  private readonly _acisPd = signal<AcisPdAsset | null>(null);
+  /** Per-student common-pool roster — ~6 MB gzipped, loaded on first drill. */
+  private readonly _acisStudents = signal<AcisStudentsAsset | null>(null);
+  private acisStudentsRequested = false;
+  /** Per-meeting / per-resolution SMC detail — loaded on first SMC drill. */
+  private readonly _smcDetail = signal<SmcDetailAsset | null>(null);
+  private smcDetailRequested = false;
   private readonly _loaded = signal(false);
   readonly loaded = this._loaded.asReadonly();
   readonly schemes = this._schemes.asReadonly();
@@ -97,7 +113,64 @@ export class ReviewService {
       .then((a) => this._smcReal.set(a)).catch(() => {});
     loadAsset<DpsRealAsset>('assets/dps-real.json')
       .then((a) => this._dpsReal.set(a)).catch(() => {});
+    loadAsset<AcisRealAsset>('assets/acis-real.json')
+      .then((a) => this._acisReal.set(a)).catch(() => {});
+    loadAsset<AcisPdAsset>('assets/acis-pd.json')
+      .then((a) => this._acisPd.set(a)).catch(() => {});
   }
+
+  /**
+   * Fetch the per-student common-pool roster. Called when the ACiS drill opens
+   * rather than at startup: it is by far the largest asset and only the drill
+   * (which filters by school type / gender / class / CWSN / UMIS) needs it.
+   */
+  loadAcisStudents(): void {
+    if (this.acisStudentsRequested) return;
+    this.acisStudentsRequested = true;
+    loadAsset<AcisStudentsAsset>('assets/acis-students.json')
+      .then((a) => this._acisStudents.set(a))
+      .catch(() => { this.acisStudentsRequested = false; });
+  }
+
+  /**
+   * Fetch the per-meeting / per-resolution SMC detail. Only the SMC drill needs
+   * it (school lists, department abstracts, period-exact filtering); the tiles
+   * run off the pre-bucketed windows in `smc-real.json`.
+   */
+  loadSmcDetail(): void {
+    if (this.smcDetailRequested) return;
+    this.smcDetailRequested = true;
+    loadAsset<SmcDetailAsset>('assets/smc-detail.json')
+      .then((a) => this._smcDetail.set(a))
+      .catch(() => { this.smcDetailRequested = false; });
+  }
+
+  /**
+   * Fetch the Palli Parvai observation line list (~3 MB gzipped). Called when
+   * the "Observation line list" tab opens; the other Palli views don't need it.
+   */
+  loadPalliObs(): void {
+    if (this.palliObsRequested) return;
+    this.palliObsRequested = true;
+    this.palliObsError.set('');
+    loadAsset<PalliObsAsset>('assets/palli-obs.json')
+      .then((a) => {
+        // An older palli-obs.json (pre user / duration columns) has no users[];
+        // using it would leave the user-wise views silently empty.
+        if (!Array.isArray(a?.users) || !a.fields?.includes('user') || !a.fields?.includes('durSec')) {
+          this.palliObsError.set('The observation data on the server is an older version without user or duration details. Re-run the Palli ingest (node scripts/ingest-real.mjs palli-obs), rebuild, and reload.');
+          this.palliObsRequested = false;
+          return;
+        }
+        this._palliObs.set(a);
+      })
+      .catch(() => {
+        this.palliObsError.set('Could not load the observation data (assets/palli-obs.json).');
+        this.palliObsRequested = false;
+      });
+  }
+  /** Why the observation data could not be used ('' when fine). */
+  readonly palliObsError = signal('');
 
   readonly currentYear = computed(
     () => this._schemes()?.currentYear ?? this.ds.data()?.currentYear ?? '',
@@ -904,6 +977,7 @@ export class ReviewService {
     { id: 'smc', label: 'SMC', icon: 'fa-solid fa-people-group' },
     { id: 'palli', label: 'Palli Parvai', icon: 'fa-solid fa-clipboard-check' },
     { id: 'dps', label: 'Recognition Order', icon: 'fa-solid fa-file-circle-check' },
+    { id: 'acis', label: 'All Children in School', icon: 'fa-solid fa-children' },
   ];
   readonly activeTopic = signal<DrillTopic>('att');
   setTopic(t: DrillTopic): void {
@@ -915,6 +989,8 @@ export class ReviewService {
     this.acaDrillUdise.set(null);
     this.acaDrillClass.set(null);
     this.dpsUnit.set(null);
+    this.acisUnit.set(null);
+    this.smcUnit.set(null);
   }
 
   /**
@@ -1103,8 +1179,9 @@ export class ReviewService {
           { key: 'palliSchoolsNotObsPct', label: '% Schools Not Observed', fmt: 'pct', tone: (v) => (v > 30 ? 'bad' : v > 15 ? 'warn' : 'good') },
           { key: 'palliOfficialsNotObsPct', label: '% Officials Not Observed', fmt: 'pct', tone: (v) => (v > 20 ? 'bad' : v > 10 ? 'warn' : 'good') },
           { key: 'palliSchools3PlusPct', label: '% Schools Observed 3+ Times', fmt: 'pct', tone: (v) => (v < 40 ? 'bad' : v < 60 ? 'warn' : 'good') },
-          { key: 'palliLowPerformers', label: 'Low performers (<75%)', fmt: 'num', tone: (v) => (v > 0 ? 'warn' : 'good') },
-          { key: 'palliTopPerformers', label: 'Top performers (≥75%)', fmt: 'num', tone: (v) => (v > 0 ? 'good' : undefined) },
+          // TEMPORARILY DISABLED (on request): Low / Top performer columns
+          // { key: 'palliLowPerformers', label: 'Low performers (<75%)', fmt: 'num', tone: (v) => (v > 0 ? 'warn' : 'good') },
+          // { key: 'palliTopPerformers', label: 'Top performers (≥75%)', fmt: 'num', tone: (v) => (v > 0 ? 'good' : undefined) },
         ];
       case 'dps':
         return [
@@ -1114,6 +1191,17 @@ export class ReviewService {
           { key: 'dpsLt15', label: 'Pending < 15 days', fmt: 'num' },
           { key: 'dpsD15to30', label: 'Pending 15–30 days', fmt: 'num', tone: (v) => (v > 0 ? 'warn' : 'good') },
           { key: 'dpsGt30', label: 'Pending > 30 days', fmt: 'num', tone: (v) => (v > 0 ? 'bad' : 'good') },
+        ];
+      case 'acis':
+        return [
+          { key: 'acisPool', label: 'Students in Common Pool', fmt: 'num', tone: (v) => (v > 0 ? 'warn' : 'good') },
+          { key: 'acisSurveyed', label: 'Surveyed', fmt: 'num' },
+          { key: 'acisPendingSurvey', label: 'Pending survey', fmt: 'num', tone: (v) => (v > 0 ? 'bad' : 'good') },
+          { key: 'acisSurveyPct', label: 'Survey completion %', fmt: 'pct', bar: true, barMax: 100, tone: (v) => (v < 80 ? 'bad' : v < 95 ? 'warn' : 'good') },
+          { key: 'acisAdmitted', label: 'Admitted to schools', fmt: 'num', tone: (v) => (v > 0 ? 'good' : undefined) },
+          { key: 'acisToBeAdmitted', label: 'To be admitted', fmt: 'num', tone: (v) => (v > 0 ? 'bad' : 'good') },
+          { key: 'acisPd', label: 'Potential dropouts', fmt: 'num', tone: (v) => (v > 0 ? 'bad' : 'good') },
+          { key: 'acisPdRepeat', label: 'PD repeaters', fmt: 'num', tone: (v) => (v > 0 ? 'bad' : 'good') },
         ];
       default:
         return [
@@ -1341,6 +1429,9 @@ export class ReviewService {
         ...this.moduleFields(key, 1, d.schools),
         ...this.sampleFields(key, 1, d.schools),
         ...this.realFields(key, null, undefined, 'district'),
+        ...this.smcSchoolFields(this.ds.schoolRowsFor(key), key, null, undefined, 'district'),
+        ...this.pdBaseFields(this.ds.schoolRowsFor(key)),
+        ...this.enrolI12Fields(this.ds.schoolRowsFor(key)),
         ...this.enrollmentFields(this.ds.schoolRowsFor(key)),
         ...this.attendanceFields(atNode, d.boys, d.girls, d.teaching),
         ...this.attBelow60Counts(key),
@@ -1384,6 +1475,9 @@ export class ReviewService {
         ...this.moduleFields(dist, share, b.schools),
         ...this.sampleFields(dist, share, b.schools),
         ...this.realFields(dist, b.block, undefined, 'block'),
+        ...this.smcSchoolFields(this.ds.schoolRowsFor(dist, b.block), dist, b.block, undefined, 'block'),
+        ...this.pdBaseFields(this.ds.schoolRowsFor(dist, b.block)),
+        ...this.enrolI12Fields(this.ds.schoolRowsFor(dist, b.block)),
         ...this.enrollmentFields(this.ds.schoolRowsFor(dist, b.block)),
         ...this.attendanceFields(atNode, b.boys, b.girls, b.teaching),
         ...this.attBelow60Counts(dist, b.block),
@@ -1435,6 +1529,9 @@ export class ReviewService {
         ...this.moduleFields(dist, share, 1),
         ...this.sampleFields(dist, share, 1),
         ...this.realFields(dist, blk, s.udise, 'school'),
+        ...this.smcSchoolFields([s], dist, blk, s.udise, 'school'),
+        ...this.pdBaseFields([s]),
+        ...this.enrolI12Fields([s]),
         ...this.enrollmentFieldsSchool(s),
         ...this.schoolKpiValues(s, infS, (this._digitalReal()?.schools as any)?.[s.udise], atS),
         ...this.attendanceFields(
@@ -1754,15 +1851,8 @@ export class ReviewService {
     dist: string | null, block: string | null, udise: string | undefined,
     level: 'district' | 'block' | 'school',
   ): Partial<DrillRow> {
-    const pick = <T>(asset: { districts: Record<string, T>; blocks: Record<string, T>; schools: Record<string, T> } | null): T | null => {
-      if (!asset) return null;
-      if (level === 'school') return (udise && asset.schools[udise]) || null;
-      if (level === 'block') {
-        const key = `${(dist ?? '').toUpperCase()}||${(block ?? '').toUpperCase()}`;
-        return asset.blocks[key] ?? null;
-      }
-      return (dist && asset.districts[dist.toUpperCase()]) || null;
-    };
+    const pick = <T>(asset: { districts: Record<string, T>; blocks: Record<string, T>; schools: Record<string, T> } | null): T | null =>
+      this.pickScope<T>(asset, dist, block, udise, level);
 
     const out: Partial<DrillRow> = {};
 
@@ -1828,13 +1918,43 @@ export class ReviewService {
 
     const smc = pick<SmcReal>(this._smcReal());
     if (smc) {
-      out.smcRaised = smc.raised;
-      out.smcClosed = smc.closed;
-      out.smcPending = smc.pending;
-      out.smcClosureRate = smc.closureRate ?? undefined;
-      // Emergency KPI = emergency resolutions NOT closed (per requirement)
-      out.smcEmergency = smc.emergencyOpen;
-      out.smcEmergencyOpen = smc.emergencyOpen;
+      // Everything SMC is read through the active rolling window. `all` is the
+      // full export and is the default, so the headline figures are unchanged.
+      const K = SmcPeriodCol;
+      const a = smc.p?.[this.smcPeriod()] ?? smc.p?.all ?? null;
+      const rate = (num: number, den: number) => (den ? Math.round((num / den) * 1000) / 10 : undefined);
+      if (a) {
+        const closed = a[K.resolved] + a[K.withdrawn];
+        out.smcRaised = a[K.raised];
+        out.smcClosed = closed;
+        out.smcPending = Math.max(0, a[K.raised] - closed);
+        out.smcClosureRate = rate(closed, a[K.raised]);
+        // Emergency KPI = emergency resolutions NOT closed (per requirement)
+        out.smcEmergency = a[K.emgUnresolved];
+        out.smcEmergencyOpen = a[K.emgUnresolved];
+        out.smcEmergencyRaised = a[K.emgRaised];
+        out.smcEmergencyResolved = a[K.emgResolved];
+        // completion % excludes withdrawn resolutions from the base
+        out.smcEmergencyClosureRate = rate(a[K.emgResolved], a[K.emgResolved] + a[K.emgUnresolved]);
+        out.smcOtherRaised = a[K.othRaised];
+        out.smcOtherResolved = a[K.othResolved];
+        out.smcOtherOpen = a[K.othUnresolved];
+        out.smcOtherClosureRate = rate(a[K.othResolved], a[K.othResolved] + a[K.othUnresolved]);
+        out.smcMeetings = a[K.meetings];
+        out.smcSchoolsHeld = a[K.schoolsHeld];
+        out.smcPresent = a[K.present];
+        out.smcAbsent = a[K.absent];
+        out.smcVacant = a[K.vacant];
+        // vacant seats are not absences, so they stay out of the denominator
+        out.smcMeetAttendPct = rate(a[K.present], a[K.present] + a[K.absent]);
+      } else {
+        out.smcRaised = smc.raised;
+        out.smcClosed = smc.closed;
+        out.smcPending = smc.pending;
+        out.smcClosureRate = smc.closureRate ?? undefined;
+        out.smcEmergency = smc.emergencyOpen;
+        out.smcEmergencyOpen = smc.emergencyOpen;
+      }
     }
 
     const dps = pick<DpsReal>(this._dpsReal());
@@ -1849,7 +1969,113 @@ export class ReviewService {
       out.dpsMaxDays = dps.maxDays;
     }
 
+    const acis = pick<AcisReal>(this._acisReal());
+    if (acis) {
+      out.acisPool = acis.pool;
+      out.acisSurveyed = acis.surveyed;
+      out.acisPendingSurvey = acis.pendingSurvey;
+      out.acisSurveyPct = acis.surveyPct ?? undefined;
+      out.acisAdmitted = acis.admitted;
+      out.acisBridged = acis.bridged;
+      out.acisBridgeDays = acis.bridgeDays ?? undefined;
+      out.acisToBeAdmitted = acis.toBeAdmitted;
+      out.acisToBeValidated = acis.toBeValidated;
+      out.acisWithReason = acis.withReason;
+      out.acisDeptTaken = acis.deptTaken;
+      out.acisDeptPending = acis.deptPending;
+      out.acisCwsn = acis.cwsn;
+      out.acisUmis = acis.umis;
+      // dropouts not re-enrolled = in the common pool and not admitted back
+      out.acisDropOut = Math.max(0, acis.pool - acis.admitted);
+    }
+
+    // Real potential dropouts. Units with no PD node have zero PD students
+    // (the report lists every PD child), so default to 0 rather than blank.
+    if (this._acisPd()) {
+      const pd = pick<AcisPdReal>(this._acisPd());
+      out.acisPd = pd?.pd ?? 0;
+      out.acisPdRepeat = pd?.repeaters ?? 0;
+      out.acisPdWithReason = pd?.withReason ?? 0;
+    }
+
     return out;
+  }
+
+  /**
+   * Look a real asset up at the row's scope: districts by UPPERCASE name,
+   * blocks by `DISTRICT||UPPERCASE_BLOCK`, schools by UDISE.
+   */
+  private pickScope<T>(
+    asset: { districts: Record<string, T>; blocks: Record<string, T>; schools: Record<string, T> } | null,
+    dist: string | null, block: string | null, udise: string | undefined,
+    level: 'district' | 'block' | 'school',
+  ): T | null {
+    if (!asset) return null;
+    if (level === 'school') return (udise && asset.schools[udise]) || null;
+    if (level === 'block') {
+      return asset.blocks[`${(dist ?? '').toUpperCase()}||${(block ?? '').toUpperCase()}`] ?? null;
+    }
+    return (dist && asset.districts[dist.toUpperCase()]) || null;
+  }
+
+  /**
+   * Managements the SMC programme covers. The export only ever contains
+   * government / local-body / welfare schools, and this set is the denominator
+   * for "schools where meetings were NOT held" — using the whole enrolment roll
+   * would count private schools that never had an SMC to begin with.
+   */
+  private readonly smcManagements = computed(
+    () => new Set(this._smcReal()?.managements ?? []),
+  );
+
+  /**
+   * Composite school grant slab for a school, in rupees. These are the
+   * published enrolment slabs; the allocation is therefore a real rule applied
+   * to the real roll. (Only the utilised share is synthesized — see below.)
+   */
+  private compositeGrant(students: number): number {
+    if (students <= 0) return 0;
+    if (students <= 30) return 10_000;
+    if (students <= 100) return 25_000;
+    if (students <= 250) return 50_000;
+    if (students <= 1000) return 75_000;
+    return 100_000;
+  }
+
+  /**
+   * SMC fields that need the enrolment roll for the scope (which `realFields`
+   * does not have): the "meetings not held" denominator, and the maintenance /
+   * composite grant figures.
+   *
+   * **Grant utilisation is ASSUMED.** No grant ledger exists in the SMC export,
+   * so the utilised share is a deterministic 55–95% of the allocation per
+   * school (stable across renders). The allocation itself is the real slab rule
+   * above applied to real enrolment. Rupee figures are reported in ₹ lakh.
+   */
+  private smcSchoolFields(
+    rows: SchoolRow[], dist: string | null, block: string | null,
+    udise: string | undefined, level: 'district' | 'block' | 'school',
+  ): Partial<DrillRow> {
+    const mgmts = this.smcManagements();
+    if (!mgmts.size) return {};
+    let eligible = 0, alloc = 0, used = 0;
+    for (const s of rows) {
+      if (!mgmts.has(s.mgmt ?? '')) continue;
+      eligible++;
+      const a = this.compositeGrant(s.students ?? 0);
+      alloc += a;
+      used += a * (0.55 + this.hash01(s.udise, 'smc-grant') * 0.4);
+    }
+    const node = this.pickScope<SmcReal>(this._smcReal(), dist, block, udise, level);
+    const held = node?.p?.[this.smcPeriod()]?.[SmcPeriodCol.schoolsHeld] ?? 0;
+    const lakh = (n: number) => Math.round((n / 100_000) * 10) / 10;
+    return {
+      smcEligibleSchools: eligible,
+      smcSchoolsNotHeld: Math.max(0, eligible - held),
+      smcGrantAllocated: lakh(alloc),
+      smcGrantUtilised: lakh(used),
+      smcGrantUtilPct: alloc ? Math.round((used / alloc) * 1000) / 10 : undefined,
+    };
   }
 
   /** Palli designation target model (state-level reference), from the real asset. */
@@ -2121,9 +2347,9 @@ export class ReviewService {
     sh_a: ({ row }) => this.assume(row.udise, 'sh_a'),
     // SMC / Palli
     m_e: ({ row }) => this.assume(row.udise, 'm_e'),
-    // Palli Parvai low/top performer flags (assumed per-school deterministic)
-    p_low: ({ row }) => this.assume(row.udise, 'p_low'),
-    p_top: ({ row }) => !this.assume(row.udise, 'p_low'),
+    // Palli Parvai low/top performer flags — TEMPORARILY DISABLED (on request)
+    // p_low: ({ row }) => this.assume(row.udise, 'p_low'),
+    // p_top: ({ row }) => !this.assume(row.udise, 'p_low'),
   };
 
   /**
@@ -2371,6 +2597,9 @@ export class ReviewService {
         ...this.moduleFields(dist, share, 1),
         ...this.sampleFields(dist, share, 1),
         ...this.realFields(dist, blk, s.udise, 'school'),
+        ...this.smcSchoolFields([s], dist, blk, s.udise, 'school'),
+        ...this.pdBaseFields([s]),
+        ...this.enrolI12Fields([s]),
         ...this.enrollmentFieldsSchool(s),
         ...this.schoolKpiValues(s, infS, (digByUdise as any)[s.udise], atS),
         ...this.attendanceFields(
@@ -2839,7 +3068,8 @@ export class ReviewService {
   /** Optional designation selected within KPI 1 (opens the designation drill). */
   readonly palliDesignation = signal<string | null>(null);
 
-  readonly palliDrillKpis = new Set(['p_co', 'p_sno', 'p_ono', 'p_s3', 'p_low', 'p_top']);
+  // 'p_low' / 'p_top' TEMPORARILY DISABLED (on request) — see kpi-catalog.model.ts
+  readonly palliDrillKpis = new Set(['p_co', 'p_sno', 'p_ono', 'p_s3', 'p_dur']);
   hasPalliDrill(id: string): boolean { return this.palliDrillKpis.has(id); }
   /** The Palli KPI tabs (id + short label) for switching tables within the drill. */
   readonly palliKpiTabs: { id: string; label: string }[] = [
@@ -2847,18 +3077,22 @@ export class ReviewService {
     { id: 'p_sno', label: '% Schools Not Observed' },
     { id: 'p_ono', label: '% Officials Not Observed' },
     { id: 'p_s3', label: '% Schools 3+ Times' },
-    { id: 'p_low', label: 'Low performers' },
-    { id: 'p_top', label: 'Top performers' },
+    { id: 'p_dur', label: 'Observation duration' },
+    // TEMPORARILY DISABLED (on request):
+    // { id: 'p_low', label: 'Low performers' },
+    // { id: 'p_top', label: 'Top performers' },
   ];
-  setPalliKpi(id: string): void { this.palliKpiId.set(id); this.palliDesignation.set(null); this.palliSnoReset(); this.palliOnoReset(); }
-  openPalliDrill(id: string): void { if (this.hasPalliDrill(id)) { this.palliKpiId.set(id); this.palliDesignation.set(null); this.palliSnoReset(); this.palliOnoReset(); } }
-  closePalliDrill(): void { this.palliKpiId.set(null); this.palliDesignation.set(null); this.palliSnoReset(); this.palliOnoReset(); this.palliObsPopup.set(null); }
-  selectPalliDesignation(d: string | null): void { this.palliDesignation.set(d); }
+  setPalliKpi(id: string): void { this.palliKpiId.set(id); this.palliDesignation.set(null); this.palliSnoReset(); this.palliOnoReset(); this.palliLlClose(); this.palliCloseDurList(); if (id === 'p_dur') { this.palliDurDesig.set(''); this.loadPalliObs(); } }
+  openPalliDrill(id: string): void { if (this.hasPalliDrill(id)) { this.palliKpiId.set(id); this.palliDesignation.set(null); this.palliSnoReset(); this.palliOnoReset(); this.palliLlClose(); this.palliCloseDurList(); if (id === 'p_dur') { this.palliDurDesig.set(''); this.loadPalliObs(); } } }
+  closePalliDrill(): void { this.palliKpiId.set(null); this.palliDesignation.set(null); this.palliSnoReset(); this.palliOnoReset(); this.palliObsPopup.set(null); this.palliLlClose(); this.palliCloseDurList(); }
+  /** Opening a designation (matrix level) loads the real observation data for the levels below. */
+  selectPalliDesignation(d: string | null): void { this.palliLlClose(); this.palliDesignation.set(d); if (d) this.loadPalliObs(); }
 
   /** Human label for the open Palli KPI (from the catalog). */
   readonly palliKpiLabel = computed(() => {
     const id = this.palliKpiId();
     if (!id) return '';
+    if (id === 'p_dur') return 'Observation duration';   // a view, not a catalog KPI
     for (const m of KPI_MODULES) { const def = m.kpis.find((k) => k.id === id); if (def) return def.label; }
     return '';
   });
@@ -2887,18 +3121,6 @@ export class ReviewService {
   );
 
   /** KPI 1 designation drill — one row per district for the clicked designation. */
-  readonly palliDesignationDrill = computed(() => {
-    const des = this.palliDesignation();
-    if (!des) return [];
-    return this.palliScopeDistricts().map((d, i) => {
-      const officials = 8 + Math.round(this.hash01(`${d}|${des}`, 'off') * 14); // 8–22
-      const target = officials * 40; // 40 target classes per official (assumed)
-      const pct = this.palliObsPct(d, des);
-      const observed = Math.round(target * pct / 100);
-      return { sno: i + 1, district: this.ds.titleCase(d), designation: des, officials, target, observed, pct };
-    });
-  });
-
   /** KPI 2 — schools with zero observations in the term (assumed subset). */
   readonly palliSchoolsNotObserved = computed(() => {
     const rows = this.scopeSchoolRows().filter((e) => this.hash01(e.row.udise, 'p_sno') < 0.28);
@@ -2957,6 +3179,570 @@ export class ReviewService {
         udise: e.row.udise, school: e.row.name, category: e.row.ctype ?? '—', observationCount: 0,
       }));
   });
+
+  // ================= PALLI — USER-WISE DRILL + DURATION KPI (REAL, User Stories 4–8) =================
+  /**
+   * Source: `palli-obs.json`, built from PP_Oct_2026_Start and End 20261103.xlsx —
+   * one row per observation in October 2026 WITH observer and start / end time.
+   *
+   * "% of Class Observation" drill (US 8 breadcrumb):
+   *   All Designations (district × designation matrix — still ASSUMED, unchanged)
+   *   → Designation (district rows — REAL from this file)
+   *   → District   (user list, US 4)
+   *   → User       (the user's school observations, US 5)
+   *   → View Report (observation details, US 6)
+   * plus the "Observation duration" tab (US 7).
+   *
+   * Counting rules (applied identically at every level so totals reconcile):
+   *   Visited   = observation records in the date range (every row counts)
+   *   Duration  = end − start; valid when 0 < duration ≤ maxValidMinutes (8 h).
+   *               Invalid rows are excluded from all duration categories and
+   *               shown separately as "Invalid duration".
+   *   Target    = per-officer monthly target from the designation target sheet
+   *               (classes per month ÷ sanctioned posts) × officers, prorated by
+   *               the number of days in the date range ÷ 31.
+   *   Officers  = distinct users with ≥ 1 observation (officers who never
+   *               observed are not in the export and cannot be counted).
+   *   District  = from the enrolment roll by UDISE (export text as fallback).
+   * Not in the export: Section, report findings, observation id.
+   */
+  readonly palliLlLoading = computed(() => !this._palliObs());
+  /** Sessions longer than this (minutes) count as invalid timestamps. */
+  readonly palliMaxValidMinutes = computed(() => this._palliObs()?.maxValidMinutes ?? 480);
+  /** True when the Palli card is showing real data (the drill below the matrix, or the duration tab). */
+  readonly palliShowingReal = computed(() => this.palliKpiId() === 'p_dur'
+    || (this.palliKpiId() === 'p_co' && !!this.palliDesignation()));
+
+  /** Drill designation label → the export's raw `stackholders` values. */
+  private readonly PALLI_DESIG_EXPORT: Record<string, (raw: string) => boolean> = {
+    'CEO': (r) => r === 'CEO',
+    'DEO – Secondary': (r) => r === 'DEO (Secondary)',
+    'DEO – Primary': (r) => r === 'DEO (Elementary)',
+    'APO': (r) => /^APO\b/i.test(r),
+    'DC': (r) => /^DC(\s*-\s*\d+)?$/i.test(r),
+    'BEO': (r) => r === 'BEO',
+    'BRTE': (r) => r === 'BRTE',
+    'DIET Principal': (r) => /^DIET PRINCIPAL$/i.test(r),
+  };
+  /** Drill designation label → its row in the designation target sheet. */
+  private readonly PALLI_TARGET_OFFICIAL: Record<string, string> = {
+    'CEO': 'CEO', 'DEO – Secondary': 'DEO (Secondary)', 'DEO – Primary': 'DEO (Elementary)',
+    'APO': 'APO Secondary', 'DC': 'DC', 'BEO': 'BEO', 'BRTE': 'BRTE', 'DIET Principal': 'DIET Principal',
+  };
+
+  /** Monthly observation target per officer, by drill designation. */
+  readonly palliMonthlyTarget = computed(() => {
+    const out: Record<string, number> = {};
+    const model = this._palliReal()?.targetModel ?? [];
+    for (const [desig, official] of Object.entries(this.PALLI_TARGET_OFFICIAL)) {
+      const t = model.find((m) => m.official === official);
+      out[desig] = t && t.sanctionedPosts ? Math.round(t.classesPerMonth / t.sanctionedPosts) : 0;
+    }
+    return out;
+  });
+
+  /** Drill designation for each export designation index (null = not one of the 8). */
+  private readonly palliDesigOf = computed(() => {
+    const a = this._palliObs();
+    if (!a) return [] as (string | null)[];
+    return a.desigs.map((raw) => this.PALLI_DESIGNATIONS.find((d) => this.PALLI_DESIG_EXPORT[d](raw)) ?? null);
+  });
+
+  /** District (roll name) of each school in the asset. */
+  private readonly palliSchoolDistrict = computed(() => {
+    const a = this._palliObs();
+    if (!a) return [] as (string | null)[];
+    const byUdise = new Map<string, string>();
+    for (const blk of this.ds.data()?.blocks ?? []) {
+      for (const row of this.ds.schoolRowsFor(blk.district, blk.block)) byUdise.set(row.udise, blk.district);
+    }
+    const byName = new Map(this.ds.districts().map((d) => [d.name.toUpperCase(), d.name] as const));
+    return a.schools.map((s) => byUdise.get(s.u) ?? byName.get(s.d.toUpperCase()) ?? null);
+  });
+
+  // ---- filters (US 4 / 5 / 7 / 8) ----
+  readonly palliDateFrom = signal('');
+  readonly palliDateTo = signal('');
+  /** Search box of the current level (user name / id, or school / UDISE). */
+  readonly palliSearch = signal('');
+  /** Duration category filter for the observation lists. */
+  readonly palliDurFilter = signal<'all' | 'lt15' | '15to30' | 'ge30' | 'invalid'>('all');
+  readonly palliDurOptions = [
+    { label: 'All durations', value: 'all' },
+    { label: 'Under 15 min', value: 'lt15' },
+    { label: '15 to under 30 min', value: '15to30' },
+    { label: '30 min or more', value: 'ge30' },
+  ];
+  palliClearFilters(): void {
+    this.palliDateFrom.set(''); this.palliDateTo.set('');
+    this.palliSearch.set(''); this.palliDurFilter.set('all');
+  }
+  readonly palliFiltered = computed(() => !!(this.palliDateFrom() || this.palliDateTo() || this.palliSearch())
+    || this.palliDurFilter() !== 'all');
+
+  private palliDayIso(day: number): string {
+    const a = this._palliObs();
+    return a ? new Date(Date.parse(`${a.baseDate}T00:00:00Z`) + day * 86400000).toISOString().slice(0, 10) : '';
+  }
+  private palliIsoDay(iso: string): number {
+    const a = this._palliObs();
+    return a ? Math.round((Date.parse(`${iso}T00:00:00Z`) - Date.parse(`${a.baseDate}T00:00:00Z`)) / 86400000) : 0;
+  }
+  /** Data window of the export (for the date pickers' min / max). */
+  readonly palliObsWindow = computed(() => {
+    const a = this._palliObs();
+    if (!a || !a.observations.length) return { from: '', to: '' };
+    let lo = Infinity, hi = -Infinity;
+    for (const o of a.observations) { const d = o[PalliObsCol.day]; if (d < lo) lo = d; if (d > hi) hi = d; }
+    return { from: this.palliDayIso(lo), to: this.palliDayIso(hi) };
+  });
+  /** Day bounds of the active date range. */
+  private readonly palliDayRange = computed(() => {
+    const w = this.palliObsWindow();
+    const from = this.palliDateFrom() || w.from;
+    const to = this.palliDateTo() || w.to;
+    return { lo: from ? this.palliIsoDay(from) : -Infinity, hi: to ? this.palliIsoDay(to) : Infinity, from, to };
+  });
+  /** Target proration: days in range ÷ 31 (the export is one month, October). */
+  readonly palliPeriodFactor = computed(() => {
+    const r = this.palliDayRange();
+    if (!Number.isFinite(r.lo) || !Number.isFinite(r.hi)) return 1;
+    return Math.max(0, Math.min(31, r.hi - r.lo + 1)) / 31;
+  });
+
+  /** Observations in the date range whose observer is one of the 8 drill designations. */
+  private readonly palliRangeObs = computed(() => {
+    const a = this._palliObs();
+    if (!a) return [] as number[][];
+    const C = PalliObsCol;
+    const { lo, hi } = this.palliDayRange();
+    const desigOf = this.palliDesigOf();
+    return a.observations.filter((o) => o[C.day] >= lo && o[C.day] <= hi && desigOf[o[C.desig]] !== null);
+  });
+
+  /** Duration category of a duration in seconds (null = invalid). */
+  palliDurCat(sec: number): 'lt15' | '15to30' | 'ge30' | null {
+    if (!(sec > 0)) return null;
+    return sec < 900 ? 'lt15' : sec < 1800 ? '15to30' : 'ge30';
+  }
+  /** Visit % RAG (US 2): ≥ 90 green · 75–90 amber · < 75 red. */
+  palliVisitRag(pct: number | null): 'good' | 'warn' | 'bad' | 'none' {
+    if (pct === null) return 'none';
+    return pct >= 90 ? 'good' : pct >= 75 ? 'warn' : 'bad';
+  }
+  /** Short-duration RAG (US 2): < 20% green · 20–30% amber · > 30% red. */
+  palliShortRag(pct: number | null): 'good' | 'warn' | 'bad' | 'none' {
+    if (pct === null) return 'none';
+    return pct < 20 ? 'good' : pct <= 30 ? 'warn' : 'bad';
+  }
+
+  /** Counter bag for a set of observations. */
+  private palliBag() {
+    return { visited: 0, lt15: 0, b15: 0, ge30: 0, invalid: 0, durSum: 0, users: new Set<number>() };
+  }
+  private palliAdd(b: ReturnType<ReviewService['palliBag']>, o: number[]): void {
+    const C = PalliObsCol;
+    b.visited++;
+    b.users.add(o[C.user]);
+    const cat = this.palliDurCat(o[C.durSec]);
+    if (cat === 'lt15') b.lt15++; else if (cat === '15to30') b.b15++; else if (cat === 'ge30') b.ge30++; else b.invalid++;
+    if (cat) b.durSum += o[C.durSec];
+  }
+  /** Shared metrics for a bag (target = officers × per-officer target × period). */
+  private palliMetrics(b: ReturnType<ReviewService['palliBag']>, perOfficer: number, officers = b.users.size) {
+    const target = Math.round(officers * perOfficer * this.palliPeriodFactor());
+    const pct = target ? Math.round((b.visited / target) * 1000) / 10 : null;
+    const validN = b.lt15 + b.b15 + b.ge30;
+    const lt15Pct = validN ? Math.round((b.lt15 / validN) * 1000) / 10 : null;
+    return {
+      officers, target, visited: b.visited, pct, rag: this.palliVisitRag(pct),
+      lt15: b.lt15, b15: b.b15, ge30: b.ge30, invalid: b.invalid, lt15Pct,
+      shortRag: this.palliShortRag(lt15Pct),
+      avgMin: validN ? Math.round((b.durSum / validN / 60) * 10) / 10 : null,
+    };
+  }
+
+  /** Level 2 — districts for the selected designation (REAL). */
+  readonly palliDesignationDrill = computed(() => {
+    const des = this.palliDesignation();
+    const a = this._palliObs();
+    if (!des || !a) return [];
+    const C = PalliObsCol;
+    const desigOf = this.palliDesigOf();
+    const distOf = this.palliSchoolDistrict();
+    const scope = new Set(this.palliScopeDistricts());
+    const bags = new Map<string, ReturnType<ReviewService['palliBag']>>();
+    for (const d of scope) bags.set(d, this.palliBag());
+    for (const o of this.palliRangeObs()) {
+      if (desigOf[o[C.desig]] !== des) continue;
+      const bag = bags.get(distOf[o[C.school]] ?? '');
+      if (bag) this.palliAdd(bag, o);
+    }
+    const per = this.palliMonthlyTarget()[des] ?? 0;
+    return [...bags.entries()]
+      .map(([key, b]) => ({ key, district: this.ds.titleCase(key), designation: des, ...this.palliMetrics(b, per) }))
+      .sort((x, y) => y.visited - x.visited || x.district.localeCompare(y.district))
+      .map((r, i) => ({ sno: i + 1, ...r }));
+  });
+  readonly palliDesignationTotals = computed(() => {
+    const rows = this.palliDesignationDrill();
+    const s = (f: (r: typeof rows[number]) => number) => rows.reduce((t, r) => t + f(r), 0);
+    const target = s((r) => r.target), visited = s((r) => r.visited);
+    const lt15 = s((r) => r.lt15), b15 = s((r) => r.b15), ge30 = s((r) => r.ge30);
+    const pct = target ? Math.round((visited / target) * 1000) / 10 : null;
+    const lt15Pct = lt15 + b15 + ge30 ? Math.round((lt15 / (lt15 + b15 + ge30)) * 1000) / 10 : null;
+    return { count: rows.length, officers: s((r) => r.officers), target, visited, pct, rag: this.palliVisitRag(pct),
+      lt15, b15, ge30, invalid: s((r) => r.invalid), lt15Pct };
+  });
+
+  // ---- drill state (US 8) ----
+  /** District opened under the selected designation (roll name). */
+  readonly palliLlDistrict = signal<string | null>(null);
+  /** User (index into palli-obs users[]) opened in the district. */
+  readonly palliUser = signal<number | null>(null);
+  /** Observation (the row array) whose report is open. */
+  readonly palliReport = signal<number[] | null>(null);
+
+  palliLlOpen(district: string): void { this.palliLlDistrict.set(district); this.palliUser.set(null); this.palliReport.set(null); this.palliSearch.set(''); this.loadPalliObs(); }
+  palliLlClose(): void { this.palliLlDistrict.set(null); this.palliUser.set(null); this.palliReport.set(null); this.palliSearch.set(''); }
+  palliOpenUser(u: number): void { this.palliUser.set(u); this.palliReport.set(null); this.palliSearch.set(''); }
+  palliOpenReport(o: number[]): void { this.palliReport.set(o); }
+  selectPalliDesignationAndClose(d: string | null): void { this.palliLlClose(); this.palliDesignation.set(d); if (d) this.loadPalliObs(); }
+
+  /** Breadcrumb: All Designations → Designation → District → User → School Observations → View Report. */
+  readonly palliCrumbs = computed(() => {
+    const a = this._palliObs();
+    const crumbs: { label: string; level: number }[] = [{ label: 'All Designations', level: 0 }];
+    const des = this.palliDesignation();
+    if (!des) return crumbs;
+    crumbs.push({ label: des, level: 1 });
+    const dist = this.palliLlDistrict();
+    if (!dist) return crumbs;
+    crumbs.push({ label: this.ds.titleCase(dist), level: 2 });
+    const u = this.palliUser();
+    if (u === null || !a) return crumbs;
+    crumbs.push({ label: a.users[u]?.n || a.users[u]?.id || 'User', level: 3 });
+    crumbs.push({ label: 'School Observations', level: 4 });
+    if (this.palliReport()) crumbs.push({ label: 'View Report', level: 5 });
+    return crumbs;
+  });
+  /** Jump to a breadcrumb level; filters (date range, duration) are preserved. */
+  palliGoCrumb(level: number): void {
+    if (level <= 0) { this.selectPalliDesignationAndClose(null); return; }
+    if (level === 1) { this.palliLlClose(); return; }
+    if (level === 2) { this.palliUser.set(null); this.palliReport.set(null); this.palliSearch.set(''); return; }
+    if (level <= 4) { this.palliReport.set(null); }
+  }
+
+  /** Level 3 (US 4) — users of the selected designation in the selected district. */
+  readonly palliUserRows = computed(() => {
+    const a = this._palliObs();
+    const des = this.palliDesignation();
+    const dist = this.palliLlDistrict();
+    if (!a || !des || !dist) return [];
+    const C = PalliObsCol;
+    const desigOf = this.palliDesigOf();
+    const distOf = this.palliSchoolDistrict();
+    const bags = new Map<number, ReturnType<ReviewService['palliBag']>>();
+    for (const o of this.palliRangeObs()) {
+      if (desigOf[o[C.desig]] !== des || distOf[o[C.school]] !== dist) continue;
+      let b = bags.get(o[C.user]);
+      if (!b) { b = this.palliBag(); bags.set(o[C.user], b); }
+      this.palliAdd(b, o);
+    }
+    const per = this.palliMonthlyTarget()[des] ?? 0;
+    const q = this.palliSearch().trim().toLowerCase();
+    return [...bags.entries()]
+      .map(([u, b]) => ({ user: u, name: a.users[u]?.n || '—', userId: a.users[u]?.id || '', designation: des, ...this.palliMetrics(b, per, 1) }))
+      .filter((r) => !q || r.name.toLowerCase().includes(q) || r.userId.includes(q))
+      .sort((x, y) => (x.pct ?? -1) - (y.pct ?? -1) || x.name.localeCompare(y.name))   // lowest achievement first
+      .map((r, i) => ({ sno: i + 1, ...r }));
+  });
+  readonly palliUserTotals = computed(() => {
+    const rows = this.palliUserRows();
+    const s = (f: (r: typeof rows[number]) => number) => rows.reduce((t, r) => t + f(r), 0);
+    const target = s((r) => r.target), visited = s((r) => r.visited);
+    const pct = target ? Math.round((visited / target) * 1000) / 10 : null;
+    return { count: rows.length, target, visited, pct, lt15: s((r) => r.lt15), b15: s((r) => r.b15), ge30: s((r) => r.ge30), invalid: s((r) => r.invalid) };
+  });
+
+  /** Observation-row projection shared by the user's list (US 5) and the duration list (US 7). */
+  private palliObsRow(o: number[], i: number) {
+    const a = this._palliObs()!;
+    const C = PalliObsCol;
+    const s = a.schools[o[C.school]];
+    const sec = o[C.durSec];
+    const sod = o[C.startSecOfDay];
+    const hm = (x: number) => `${String(Math.floor(x / 3600)).padStart(2, '0')}:${String(Math.floor((x % 3600) / 60)).padStart(2, '0')}`;
+    const cat = this.palliDurCat(sec);
+    return {
+      sno: i + 1, obs: o, date: this.palliDayIso(o[C.day]), udise: s.u, school: s.s, cls: o[C.cls],
+      observer: a.users[o[C.user]]?.n || '—', district: this.ds.titleCase(this.palliSchoolDistrict()[o[C.school]] ?? s.d),
+      start: sod >= 0 ? hm(sod) : '—', end: sod >= 0 && sec > 0 ? hm((sod + sec) % 86400) : '—',
+      durMin: sec > 0 ? Math.round((sec / 60) * 10) / 10 : null,
+      durLabel: cat === 'lt15' ? 'Under 15 min' : cat === '15to30' ? '15 to under 30 min' : cat === 'ge30' ? '30 min or more' : 'Invalid',
+      // SAMPLE — the export has no section; derived deterministically per observation
+      section: this.palliSampleSection(o),
+    };
+  }
+
+  // ---- SAMPLE fill-ins for fields the export does not carry (Section, report findings) ----
+  /** Stable key for one observation (day · school · class · user · start). */
+  private palliObsKey(o: number[]): string {
+    const C = PalliObsCol;
+    return `${o[C.day]}|${o[C.school]}|${o[C.cls]}|${o[C.user]}|${o[C.startSecOfDay]}`;
+  }
+  /** SAMPLE section A–D (mostly A / B), stable for the same observation. */
+  private palliSampleSection(o: number[]): string {
+    const h = this.hash01(this.palliObsKey(o), 'pp-section');
+    return h < 0.45 ? 'A' : h < 0.8 ? 'B' : h < 0.95 ? 'C' : 'D';
+  }
+
+  /** Rubric used for the SAMPLE observation report (Palli Paarvai classroom observation areas). */
+  private readonly PALLI_SAMPLE_AREAS = [
+    'Lesson planning & preparation',
+    'Teaching–learning materials used',
+    'Student participation',
+    'Use of textbook / workbook',
+    'Learning outcome checks (questioning)',
+    'Classroom management',
+    'Notebook / homework correction',
+    'Use of digital / smart class resources',
+  ];
+  private readonly PALLI_SAMPLE_GRADES = ['Needs improvement', 'Satisfactory', 'Good', 'Excellent'];
+
+  /**
+   * SAMPLE observation report for one observation (US 6). The export has no
+   * report content, so the responses are generated deterministically from the
+   * observation (same observation → same report). Shorter observations lean
+   * lower, matching the intent of the duration KPI. Always badged "Sample".
+   */
+  private palliSampleReport(o: number[]) {
+    const key = this.palliObsKey(o);
+    const sec = o[PalliObsCol.durSec];
+    // short (< 15 min) observations skew lower; ≥ 30 min skew higher
+    const tilt = !(sec > 0) ? 0 : sec < 900 ? -0.18 : sec >= 1800 ? 0.12 : 0;
+    const areas = this.PALLI_SAMPLE_AREAS.map((area, i) => {
+      const h = Math.min(0.999, Math.max(0, this.hash01(key, `pp-area-${i}`) + tilt));
+      const g = Math.floor(h * this.PALLI_SAMPLE_GRADES.length);
+      return { area, score: g + 1, grade: this.PALLI_SAMPLE_GRADES[g] };
+    });
+    const total = areas.reduce((t, a) => t + a.score, 0);
+    const max = areas.length * this.PALLI_SAMPLE_GRADES.length;
+    const present = 20 + Math.round(this.hash01(key, 'pp-enrol') * 25);       // 20–45
+    const attending = Math.round(present * (0.78 + this.hash01(key, 'pp-att') * 0.2));
+    const weakest = [...areas].sort((x, y) => x.score - y.score)[0];
+    const strongest = [...areas].sort((x, y) => y.score - x.score)[0];
+    return {
+      areas,
+      score: total, maxScore: max, scorePct: Math.round((total / max) * 100),
+      enrolled: present, attending,
+      strength: `${strongest.area} was ${strongest.grade.toLowerCase()}.`,
+      improvement: weakest.score <= 2
+        ? `Focus on ${weakest.area.toLowerCase()} — rated ${weakest.grade.toLowerCase()}.`
+        : 'No critical gaps observed.',
+      followUp: weakest.score <= 1 ? 'Revisit within 2 weeks' : weakest.score <= 2 ? 'Revisit next month' : 'Routine monitoring',
+    };
+  }
+  private palliPassDur(sec: number): boolean {
+    const f = this.palliDurFilter();
+    if (f === 'all') return true;
+    const cat = this.palliDurCat(sec);
+    return f === 'invalid' ? cat === null : cat === f;
+  }
+
+  /** Level 4 (US 5) — the selected user's observations, newest first. */
+  readonly palliUserObsRows = computed(() => {
+    const a = this._palliObs();
+    const u = this.palliUser();
+    const dist = this.palliLlDistrict();
+    const des = this.palliDesignation();
+    if (!a || u === null || !dist || !des) return [];
+    const C = PalliObsCol;
+    const desigOf = this.palliDesigOf();
+    const distOf = this.palliSchoolDistrict();
+    const q = this.palliSearch().trim().toLowerCase();
+    return this.palliRangeObs()
+      .filter((o) => o[C.user] === u && distOf[o[C.school]] === dist && desigOf[o[C.desig]] === des && this.palliPassDur(o[C.durSec]))
+      .filter((o) => { if (!q) return true; const s = a.schools[o[C.school]]; return s.s.toLowerCase().includes(q) || s.u.includes(q); })
+      .map((o, i) => this.palliObsRow(o, i));
+  });
+
+  /** Level 5 (US 6) — the selected observation's details. */
+  readonly palliReportView = computed(() => {
+    const o = this.palliReport();
+    const a = this._palliObs();
+    if (!o || !a) return null;
+    const r = this.palliObsRow(o, 0);
+    return {
+      ...r, observerId: a.users[o[PalliObsCol.user]]?.id ?? '', designation: a.desigs[o[PalliObsCol.desig]] ?? '',
+      report: this.palliSampleReport(o),
+    };
+  });
+
+  // ---- US 7: Observation duration KPI (tab p_dur) ----
+  readonly palliDurDistrict = signal('');
+  readonly palliDurDesig = signal('');
+  readonly palliDurDistrictOptions = computed(() => [
+    { label: 'All districts', value: '' },
+    ...this.palliScopeDistricts().map((d) => ({ label: this.ds.titleCase(d), value: d })),
+  ]);
+  readonly palliDurDesigOptions = computed(() => [
+    { label: 'All designations', value: '' },
+    ...this.PALLI_DESIGNATIONS.map((d) => ({ label: d, value: d })),
+  ]);
+
+  /**
+   * Designation abstract (first level of the duration tab): one row per
+   * designation, all districts in scope (or the district filter). Clicking a
+   * designation sets `palliDurDesig` and opens the district × designation table.
+   */
+  readonly palliDurAbstract = computed(() => {
+    const a = this._palliObs();
+    if (!a) return [];
+    const C = PalliObsCol;
+    const desigOf = this.palliDesigOf();
+    const distOf = this.palliSchoolDistrict();
+    const fD = this.palliDurDistrict();
+    const scope = new Set(this.palliScopeDistricts());
+    const bags = new Map<string, { bag: ReturnType<ReviewService['palliBag']>; districts: Set<string> }>();
+    for (const o of this.palliRangeObs()) {
+      const d = distOf[o[C.school]];
+      const g = desigOf[o[C.desig]];
+      if (!d || !g || !scope.has(d) || (fD && d !== fD)) continue;
+      let e = bags.get(g);
+      if (!e) { e = { bag: this.palliBag(), districts: new Set() }; bags.set(g, e); }
+      this.palliAdd(e.bag, o);
+      e.districts.add(d);
+    }
+    return this.PALLI_DESIGNATIONS.filter((g) => bags.has(g)).map((g, i) => {
+      const e = bags.get(g)!;
+      const m = this.palliMetrics(e.bag, 0);
+      return { sno: i + 1, designation: g, districts: e.districts.size,
+        total: m.lt15 + m.b15 + m.ge30, lt15: m.lt15, b15: m.b15, ge30: m.ge30, avgMin: m.avgMin };
+    });
+  });
+  readonly palliDurAbstractTotals = computed(() => {
+    const rows = this.palliDurAbstract();
+    const s = (f: (r: typeof rows[number]) => number) => rows.reduce((t, r) => t + f(r), 0);
+    const total = s((r) => r.total);
+    const durSum = rows.reduce((t, r) => t + (r.avgMin ?? 0) * r.total, 0);
+    return { count: rows.length, total, lt15: s((r) => r.lt15), b15: s((r) => r.b15), ge30: s((r) => r.ge30),
+      avgMin: total ? Math.round((durSum / total) * 10) / 10 : null };
+  });
+  palliDurOpenDesig(g: string): void { this.palliDurDesig.set(g); this.palliCloseDurList(); }
+
+  /** District × designation duration rows. */
+  readonly palliDurRows = computed(() => {
+    const a = this._palliObs();
+    if (!a) return [];
+    const C = PalliObsCol;
+    const desigOf = this.palliDesigOf();
+    const distOf = this.palliSchoolDistrict();
+    const fD = this.palliDurDistrict();
+    const fG = this.palliDurDesig();
+    const scope = new Set(this.palliScopeDistricts());
+    const bags = new Map<string, ReturnType<ReviewService['palliBag']>>();
+    for (const o of this.palliRangeObs()) {
+      const d = distOf[o[C.school]];
+      const g = desigOf[o[C.desig]];
+      if (!d || !g || !scope.has(d) || (fD && d !== fD) || (fG && g !== fG)) continue;
+      const k = `${d}||${g}`;
+      let b = bags.get(k);
+      if (!b) { b = this.palliBag(); bags.set(k, b); }
+      this.palliAdd(b, o);
+    }
+    return [...bags.entries()]
+      .map(([k, b]) => {
+        const [d, g] = k.split('||');
+        const m = this.palliMetrics(b, 0);
+        return { key: k, districtKey: d, district: this.ds.titleCase(d), designation: g,
+          total: m.lt15 + m.b15 + m.ge30, lt15: m.lt15, b15: m.b15, ge30: m.ge30,
+          lt15Pct: m.lt15Pct, shortRag: m.shortRag, avgMin: m.avgMin, invalid: m.invalid };
+      })
+      .sort((x, y) => x.district.localeCompare(y.district)
+        || this.PALLI_DESIGNATIONS.indexOf(x.designation) - this.PALLI_DESIGNATIONS.indexOf(y.designation))
+      .map((r, i) => ({ sno: i + 1, ...r }));
+  });
+  readonly palliDurTotals = computed(() => {
+    const rows = this.palliDurRows();
+    const s = (f: (r: typeof rows[number]) => number) => rows.reduce((t, r) => t + f(r), 0);
+    const total = s((r) => r.total), lt15 = s((r) => r.lt15);
+    const durSum = rows.reduce((t, r) => t + (r.avgMin ?? 0) * r.total, 0);
+    return { count: rows.length, total, lt15, b15: s((r) => r.b15), ge30: s((r) => r.ge30), invalid: s((r) => r.invalid),
+      lt15Pct: total ? Math.round((lt15 / total) * 1000) / 10 : null, avgMin: total ? Math.round((durSum / total) * 10) / 10 : null };
+  });
+
+  /** A clicked duration count (US 7 AC 4) → its underlying observation list (optionally one user's). */
+  readonly palliDurPick = signal<{ district: string; designation: string; cat: 'lt15' | '15to30' | 'ge30' | 'invalid' | 'all'; user?: number | null } | null>(null);
+  palliOpenDurList(district: string, designation: string, cat: 'lt15' | '15to30' | 'ge30' | 'invalid' | 'all', user: number | null = null): void {
+    this.palliDurPick.set({ district, designation, cat, user }); this.palliReport.set(null); this.palliSearch.set('');
+  }
+  /** Close the observation list; `all` also leaves the user-wise level. */
+  palliCloseDurList(all = true): void {
+    this.palliDurPick.set(null); this.palliReport.set(null);
+    if (all) this.palliDurUserPick.set(null);
+  }
+
+  /** Clicked district row (designation selected) → user-wise duration table. */
+  readonly palliDurUserPick = signal<{ district: string; designation: string } | null>(null);
+  palliDurOpenUsers(district: string, designation: string): void {
+    this.palliDurPick.set(null); this.palliReport.set(null); this.palliSearch.set('');
+    this.palliDurUserPick.set({ district, designation });
+  }
+  readonly palliDurUserRows = computed(() => {
+    const p = this.palliDurUserPick();
+    const a = this._palliObs();
+    if (!p || !a) return [];
+    const C = PalliObsCol;
+    const desigOf = this.palliDesigOf();
+    const distOf = this.palliSchoolDistrict();
+    const bags = new Map<number, ReturnType<ReviewService['palliBag']>>();
+    for (const o of this.palliRangeObs()) {
+      if (desigOf[o[C.desig]] !== p.designation || distOf[o[C.school]] !== p.district) continue;
+      let b = bags.get(o[C.user]);
+      if (!b) { b = this.palliBag(); bags.set(o[C.user], b); }
+      this.palliAdd(b, o);
+    }
+    const q = this.palliSearch().trim().toLowerCase();
+    return [...bags.entries()]
+      .map(([u, b]) => {
+        const m = this.palliMetrics(b, 0);
+        return { user: u, name: a.users[u]?.n || '—', userId: a.users[u]?.id || '', designation: p.designation,
+          total: m.lt15 + m.b15 + m.ge30, lt15: m.lt15, b15: m.b15, ge30: m.ge30, avgMin: m.avgMin };
+      })
+      .filter((r) => !q || r.name.toLowerCase().includes(q) || r.userId.includes(q))
+      .sort((x, y) => y.lt15 - x.lt15 || x.name.localeCompare(y.name))   // most short sessions first
+      .map((r, i) => ({ sno: i + 1, ...r }));
+  });
+  readonly palliDurUserTotals = computed(() => {
+    const rows = this.palliDurUserRows();
+    const s = (f: (r: typeof rows[number]) => number) => rows.reduce((t, r) => t + f(r), 0);
+    const total = s((r) => r.total);
+    const durSum = rows.reduce((t, r) => t + (r.avgMin ?? 0) * r.total, 0);
+    return { count: rows.length, total, lt15: s((r) => r.lt15), b15: s((r) => r.b15), ge30: s((r) => r.ge30),
+      avgMin: total ? Math.round((durSum / total) * 10) / 10 : null };
+  });
+  readonly palliDurListRows = computed(() => {
+    const p = this.palliDurPick();
+    const a = this._palliObs();
+    if (!p || !a) return [];
+    const C = PalliObsCol;
+    const desigOf = this.palliDesigOf();
+    const distOf = this.palliSchoolDistrict();
+    const q = this.palliSearch().trim().toLowerCase();
+    return this.palliRangeObs()
+      .filter((o) => distOf[o[C.school]] === p.district && desigOf[o[C.desig]] === p.designation)
+      .filter((o) => p.user == null || o[C.user] === p.user)
+      .filter((o) => { const c = this.palliDurCat(o[C.durSec]);
+        return p.cat === 'invalid' ? c === null : p.cat === 'all' ? c !== null : c === p.cat; })
+      .filter((o) => { if (!q) return true; const s = a.schools[o[C.school]]; const n = (a.users[o[C.user]]?.n ?? '').toLowerCase();
+        return s.s.toLowerCase().includes(q) || s.u.includes(q) || n.includes(q); })
+      .map((o, i) => this.palliObsRow(o, i));
+  });
+  readonly palliDurCatLabel: Record<string, string> = {
+    lt15: 'Under 15 min', '15to30': '15 to under 30 min', ge30: '30 min or more', invalid: 'Invalid duration', all: 'All valid observations',
+  };
 
   /** KPI 3 — officials-not-observed per district (assumed counts). */
   readonly palliOfficialsNotObserved = computed(() =>
@@ -3303,11 +4089,1589 @@ export class ReviewService {
       avgDays: total ? Math.round((rows.reduce((t, r) => t + r.days, 0) / total) * 10) / 10 : 0,
     };
   });
+
+  // ================= ALL CHILDREN IN SCHOOL (ACiS) =================
+  /**
+   * The common pool: every child who left universal data (TC issued) and is not
+   * yet back in a school. The unit of analysis is a CHILD, not a school, so this
+   * gets its own drill with the five filters the metric sheet asks for (school
+   * type, gender, class, CWSN status, UMIS admit status).
+   *
+   * Which KPI is active decides the view:
+   *   summary  District → Block → School counts, then the student list
+   *   reason   reason → sub-reason counts (metric 8)
+   *   dept     department-wise action taken / to be taken (metric 9)
+   *   pd       potential dropouts per unit: count, %, repeaters (REAL)
+   *   pdreason potential-dropout reason-wise counts (REAL)
+   *   pdgrade  potential dropouts grade-wise by reason category (REAL)
+   *
+   * Everything is real: `acis-real.json` + `acis-students.json` for the
+   * common pool, `acis-pd.json` (EMIS Potential Dropout report) for PD.
+   */
+  readonly acisKpiTabs: { id: string; label: string }[] = [
+    { id: 'ac_pool', label: 'District summary' },
+    { id: 'ac_dr', label: 'Dropout rate' },
+    { id: 'ac_rsn', label: 'Dropout reasons' },
+    { id: 'ac_dact', label: 'Department action' },
+    { id: 'ac_pdrs', label: 'PD reasons' },
+    { id: 'ac_pdg', label: 'PD grade-wise' },
+  ];
+  /**
+   * Every ACiS KPI that routes into this drill. The ones that are columns of
+   * the summary grid (pool, surveyed, pending, %, admitted, to be admitted,
+   * dept pending, PD, PD %, PD repeaters) open the summary grid sorted by
+   * that column — there is one grid, not one tab per column.
+   */
+  private readonly ACIS_KPI_IDS = new Set([
+    'ac_pool', 'ac_surv', 'ac_pend', 'ac_sp', 'ac_adm', 'ac_tba', 'ac_rsn',
+    'ac_dact', 'ac_dpnd', 'ac_pd', 'ac_pdp', 'ac_pdr', 'ac_pdrs', 'ac_pdg', 'ac_dr', 'ac_drc',
+  ]);
+
+  /** Which tab is lit: summary-column KPIs all light "District summary". */
+  readonly acisActiveTab = computed(() => {
+    const id = this.acisKpiId() ?? 'ac_pool';
+    return this.acisKpiTabs.some((t) => t.id === id) ? id : 'ac_pool';
+  });
+
+  /** Active ACiS KPI; null when the drill is closed. */
+  readonly acisKpiId = signal<string | null>(null);
+  /** District / block / school name drilled into for the student list. */
+  readonly acisUnit = signal<string | null>(null);
+  /** Expanded reason row in the reason view. */
+  readonly acisReason = signal<string | null>(null);
+
+  // ---- the five metric-sheet filters ----
+  readonly acisFSchoolType = signal<string>('all');
+  readonly acisFGender = signal<string>('all');
+  readonly acisFClass = signal<string>('all');
+  /** 'all' | 'cwsn' | 'non' */
+  readonly acisFCwsn = signal<string>('all');
+  /** 'all' | 'joined' | 'not' — UMIS (higher education) admit status. */
+  readonly acisFUmis = signal<string>('all');
+
+  hasAcisDrill(kpiId: string): boolean { return this.ACIS_KPI_IDS.has(kpiId); }
+  openAcisDrill(kpiId: string): void {
+    this.loadAcisStudents();
+    this.acisKpiId.set(this.ACIS_KPI_IDS.has(kpiId) ? kpiId : 'ac_pool');
+    this.acisUnit.set(null);
+    this.acisReason.set(null);
+  }
+  closeAcisDrill(): void {
+    this.acisKpiId.set(null);
+    this.acisUnit.set(null);
+    this.acisReason.set(null);
+    this.acisPdSchool.set(null);
+  }
+  setAcisKpi(id: string): void {
+    this.acisKpiId.set(id);
+    this.acisUnit.set(null);
+    this.acisReason.set(null);
+    this.acisPdSchool.set(null);
+  }
+  acisSelectUnit(u: string | null): void { this.acisUnit.set(u); }
+
+  /**
+   * Common-pool grid row click — walk District → Block → School → children.
+   * District/block clicks move the dashboard scope (so tiles, charts and the
+   * breadcrumb follow); at block level the rows are schools, and a click opens
+   * that school's children with their dropout reason. ACiS spells names in its
+   * own casing, so they are resolved to the enrolment roll's canonical name.
+   */
+  acisDrillSummaryRow(row: { key: string }): void {
+    const level = this.ds.level();
+    if (level === 'state') {
+      const d = this.canonicalDistrict(row.key);
+      if (d) { this.acisUnit.set(null); this.ds.drillToDistrict(d); }
+    } else if (level === 'district') {
+      const b = this.canonicalBlock(row.key);
+      if (b) { this.acisUnit.set(null); this.ds.drillToBlock(b); }
+    } else {
+      // block level: rows are schools (key = UDISE) → open that school's lists
+      this.acisUnit.set(row.key);
+      this.acisPdSchool.set(row.key);
+      this.acisSchoolList.set('drop');
+    }
+  }
+
+  /**
+   * At school level the two populations are separate lists, with a switch:
+   * 'drop' = common-pool children (dropouts), 'pd' = potential dropouts.
+   */
+  readonly acisSchoolList = signal<'drop' | 'pd'>('drop');
+
+  /** Name of the opened school (from either population). */
+  readonly acisUnitName = computed(() => {
+    const u = this.acisUnit();
+    if (!u) return '';
+    return this._acisStudents()?.schools.find((s) => s.u === u)?.s
+      ?? this._acisPd()?.schoolRefs.find((s) => s.u === u)?.s ?? u;
+  });
+
+  /** Children list shows only once a school inside the current block is open. */
+  readonly acisShowChildren = computed(() => !!this.acisUnit() && !!this.ds.selectedBlock());
+
+  private canonicalDistrict(name: string): string | null {
+    const u = name.toUpperCase();
+    return this.ds.districts().find((d) => d.name.toUpperCase() === u)?.name ?? null;
+  }
+  private canonicalBlock(name: string): string | null {
+    const u = name.toUpperCase();
+    return this.ds.blocksForDistrict().find((b) => b.block.toUpperCase() === u)?.block ?? null;
+  }
+
+  /** Potential-dropout school opened for its student list (UDISE), or null. */
+  readonly acisPdSchool = signal<string | null>(null);
+  /** PD student list shows only once a school inside the current block is open. */
+  readonly acisShowPdStudents = computed(() => !!this.acisPdSchool() && !!this.ds.selectedBlock());
+
+  /** Students of the opened PD school, with reason — most days absent first. */
+  readonly acisPdStudentRows = computed(() => {
+    const a = this._acisPd();
+    const u = this.acisPdSchool();
+    if (!a || !u) return [];
+    const C = AcisPdCol;
+    return this.pdScopeStudents()
+      .filter((r) => a.schoolRefs[r[C.school] as number]?.u === u)
+      .map((r) => ({
+        emis: String(r[C.emis] ?? ''),
+        name: String(r[C.name] ?? ''),
+        cls: String(r[C.cls] ?? '—'),
+        section: String(r[C.section] ?? '') || '—',
+        gender: r[C.gender] === 1 ? 'Male' : r[C.gender] === 2 ? 'Female' : '—',
+        category: a.categories[r[C.category] as number] ?? '—',
+        reason: a.reasons[r[C.reason] as number] ?? '—',
+        absentDays: r[C.absentDays] as number,
+        repeater: r[C.repeater] === 1 ? 'Repeater' : r[C.repeater] === 0 ? 'Not repeater' : 'Not updated',
+      }))
+      .sort((x, y) => y.absentDays - x.absentDays || x.name.localeCompare(y.name))
+      .map((r, i) => ({ sno: i + 1, ...r }));
+  });
+  acisSelectReason(r: string | null): void { this.acisReason.set(r === this.acisReason() ? null : r); }
+  acisResetFilters(): void {
+    this.acisFSchoolType.set('all');
+    this.acisFGender.set('all');
+    this.acisFClass.set('all');
+    this.acisFCwsn.set('all');
+    this.acisFUmis.set('all');
+  }
+  /** True when any of the five filters is narrowing the figures. */
+  readonly acisFiltered = computed(() => this.acisFSchoolType() !== 'all'
+    || this.acisFGender() !== 'all' || this.acisFClass() !== 'all'
+    || this.acisFCwsn() !== 'all' || this.acisFUmis() !== 'all');
+
+  /** Still fetching the ~6 MB student roster. */
+  readonly acisStudentsLoading = computed(() => !this._acisStudents());
+
+  readonly acisKpiLabel = computed(() => {
+    const id = this.acisKpiId();
+    if (!id) return '';
+    for (const m of KPI_MODULES) { const def = m.kpis.find((k) => k.id === id); if (def) return def.label; }
+    return '';
+  });
+
+  /** Which table the active KPI renders. */
+  readonly acisView = computed<'summary' | 'reason' | 'dept' | 'pdreason' | 'pdgrade' | 'droprate'>(() => {
+    switch (this.acisKpiId()) {
+      case 'ac_rsn': return 'reason';
+      case 'ac_dact': return 'dept';
+      case 'ac_pdrs': return 'pdreason';
+      case 'ac_pdg': return 'pdgrade';
+      case 'ac_dr': case 'ac_drc': return 'droprate';
+      default: return 'summary';   // every summary-grid column KPI
+    }
+  });
+
+  /** Potential-dropout-only views (PD report; no CWSN / UMIS fields). */
+  readonly acisIsPdView = computed(() => ['pdreason', 'pdgrade'].includes(this.acisView()));
+  /** CWSN / UMIS filters can't apply: PD report and the enrolment roll lack them. */
+  readonly acisHideCwsnUmis = computed(() => this.acisIsPdView() || this.acisView() === 'droprate');
+  /** Report window of the potential-dropout export, for the caption. */
+  readonly acisPdWindow = computed(() => {
+    const a = this._acisPd();
+    return a ? `${a.reportFrom} → ${a.reportTo}` : '';
+  });
+
+  // ---- filter option lists (from the real roster) ----
+  readonly acisSchoolTypeOptions = computed(() => {
+    const a = this._acisStudents();
+    const set = new Set<string>();
+    for (const s of a?.schools ?? []) if (s.t) set.add(s.t);
+    return [{ label: 'All school types', value: 'all' },
+      ...[...set].sort().map((t) => ({ label: t, value: t }))];
+  });
+  readonly acisClassOptions = computed(() => {
+    const rows = this._acisReal()?.classWise ?? [];
+    return [{ label: 'All classes', value: 'all' },
+      ...rows.map((r) => ({ label: `Class ${r.cls}`, value: r.cls }))];
+  });
+  readonly acisGenderOptions = [
+    { label: 'All genders', value: 'all' },
+    { label: 'Male', value: '1' },
+    { label: 'Female', value: '2' },
+  ];
+  readonly acisCwsnOptions = [
+    { label: 'All (CWSN & others)', value: 'all' },
+    { label: 'CWSN only', value: 'cwsn' },
+    { label: 'Non-CWSN only', value: 'non' },
+  ];
+  readonly acisUmisOptions = [
+    { label: 'Any UMIS status', value: 'all' },
+    { label: 'Joined higher education', value: 'joined' },
+    { label: 'Not joined higher education', value: 'not' },
+  ];
+
+  /**
+   * Students in the current dashboard scope with the five filters applied.
+   * Rows stay as the raw positional arrays — 291k of them — and are only
+   * projected into objects for the (paged) student list.
+   */
+  private readonly acisScopeStudents = computed<AcisStudentRow[]>(() => {
+    const a = this._acisStudents();
+    if (!a) return [];
+    const C = AcisStudentCol;
+    const dist = this.ds.selectedDistrict()?.toUpperCase() ?? null;
+    const blk = this.ds.selectedBlock()?.toUpperCase() ?? null;
+    const fType = this.acisFSchoolType();
+    const fGender = this.acisFGender();
+    const fClass = this.acisFClass();
+    const fCwsn = this.acisFCwsn();
+    const fUmis = this.acisFUmis();
+
+    // pre-resolve which school indexes pass the scope + school-type filter
+    const ok = new Uint8Array(a.schools.length);
+    for (let i = 0; i < a.schools.length; i++) {
+      const s = a.schools[i];
+      if (dist && s.d.toUpperCase() !== dist) continue;
+      if (blk && s.b.toUpperCase() !== blk) continue;
+      if (fType !== 'all' && s.t !== fType) continue;
+      ok[i] = 1;
+    }
+
+    const out: AcisStudentRow[] = [];
+    for (const r of a.students) {
+      if (!ok[r[C.school] as number]) continue;
+      if (fGender !== 'all' && String(r[C.gender]) !== fGender) continue;
+      if (fClass !== 'all' && r[C.cls] !== fClass) continue;
+      if (fCwsn === 'cwsn' && r[C.cwsn] !== 1) continue;
+      if (fCwsn === 'non' && r[C.cwsn] === 1) continue;
+      if (fUmis === 'joined' && r[C.umis] !== 1) continue;
+      if (fUmis === 'not' && r[C.umis] === 1) continue;
+      out.push(r);
+    }
+    return out;
+  });
+
+  /** Grouping unit for the ACiS summary: district → block → school. */
+  readonly acisUnitLabel = computed(() => (this.ds.selectedBlock() ? 'School'
+    : this.ds.selectedDistrict() ? 'Block' : 'District'));
+
+  /** Blank counter bag for one summary unit. */
+  private acisInit() {
+    return {
+      pool: 0, surveyed: 0, admitted: 0, bridged: 0, toBeAdmitted: 0, toBeValidated: 0,
+      withReason: 0, deptTaken: 0, deptPending: 0, cwsn: 0, umis: 0, bridgeSum: 0, bridgeN: 0,
+    };
+  }
+
+  /** Accumulate one student row into a counter bag. */
+  private acisAccum(o: ReturnType<ReviewService['acisInit']>, r: AcisStudentRow, deadDept: number): void {
+    const C = AcisStudentCol;
+    const surveyed = r[C.surveyed] === 1;
+    const admitted = r[C.admitted] === 1;
+    const days = r[C.days] as number;
+    o.pool++;
+    if (surveyed) o.surveyed++;
+    if (admitted) o.admitted++;
+    if (admitted && days >= 0) { o.bridged++; o.bridgeSum += days; o.bridgeN++; }
+    if (r[C.bucket] === 2) o.toBeAdmitted++;
+    if (r[C.bucket] === 1) o.toBeValidated++;
+    if ((r[C.reason] as number) >= 0) o.withReason++;
+    if (r[C.cwsn] === 1) o.cwsn++;
+    if (r[C.umis] === 1) o.umis++;
+    if (surveyed) {
+      if (admitted || r[C.umis] === 1 || r[C.dept] === deadDept) o.deptTaken++;
+      else o.deptPending++;
+    }
+  }
+
+  /** Index of the "no action — deceased" department, or -1. */
+  private readonly acisDeadDept = computed(() => {
+    const d = this._acisStudents()?.depts ?? [];
+    return d.findIndex((x) => /deceased/i.test(x));
+  });
+
+  /**
+   * The ACiS summary grid — one row per district / block / school, with both
+   * populations side by side:
+   *   dropout columns     the common pool (all five filters apply)
+   *   potential dropouts  the PD report (school type / gender / class apply;
+   *                       it has no CWSN or UMIS fields, so those two do not)
+   * Rows are keyed by UPPERCASE district / block name, or UDISE at school level,
+   * so a unit with children in only one population still gets a row. Sorted by
+   * the active KPI's column (a headline-tile click = sort by that column).
+   */
+  readonly acisSummaryRows = computed(() => {
+    const a = this._acisStudents();
+    if (!a) return [];
+    const pdA = this._acisPd();
+    const C = AcisStudentCol;
+    const P = AcisPdCol;
+    const dist = this.ds.selectedDistrict();
+    const blk = this.ds.selectedBlock();
+    const dead = this.acisDeadDept();
+    type Bag = ReturnType<ReviewService['acisInit']> & { name: string; udise: string; pd: number; pdRepeaters: number };
+    const map = new Map<string, Bag>();
+    const bag = (key: string, name: string, udise: string): Bag => {
+      let o = map.get(key);
+      if (!o) { o = { ...this.acisInit(), name, udise, pd: 0, pdRepeaters: 0 }; map.set(key, o); }
+      return o;
+    };
+    const unitOf = (s: { d: string; b: string; u: string; s: string }) => blk
+      ? { key: s.u || s.s.toUpperCase(), name: s.s, udise: s.u }
+      : dist
+        ? { key: s.b.toUpperCase(), name: this.ds.titleCase(s.b), udise: '' }
+        : { key: s.d.toUpperCase(), name: this.ds.titleCase(s.d), udise: '' };
+
+    for (const r of this.acisScopeStudents()) {
+      const u = unitOf(a.schools[r[C.school] as number]);
+      this.acisAccum(bag(u.key, u.name, u.udise), r, dead);
+    }
+    if (pdA) {
+      for (const r of this.pdScopeStudents()) {
+        const u = unitOf(pdA.schoolRefs[r[P.school] as number]);
+        const o = bag(u.key, u.name, u.udise);
+        o.pd++;
+        if (r[P.repeater] === 1) o.pdRepeaters++;
+      }
+    }
+
+    // PD % denominator: the unit's enrolment in the school types the PD report covers
+    const rollFor = (key: string): SchoolRow[] => {
+      if (blk) return this.ds.schoolsForBlock().filter((s) => s.udise === key);
+      if (dist) { const b = this.canonicalBlock(key); return b ? this.ds.schoolRowsFor(dist, b) : []; }
+      const d = this.canonicalDistrict(key);
+      return d ? this.ds.schoolRowsFor(d) : [];
+    };
+
+    const metric = this.acisSortKey(this.acisKpiId());
+    return [...map.entries()]
+      .map(([key, o]) => {
+        const pdEnrolled = this.pdEnrolled(rollFor(key));
+        return {
+          key,
+          unit: o.name,
+          udise: o.udise,
+          pool: o.pool,
+          surveyed: o.surveyed,
+          pendingSurvey: o.pool - o.surveyed,
+          surveyPct: o.pool ? Math.round((o.surveyed / o.pool) * 1000) / 10 : 0,
+          admitted: o.admitted,
+          toBeAdmitted: o.toBeAdmitted,
+          withReason: o.withReason,
+          deptTaken: o.deptTaken,
+          deptPending: o.deptPending,
+          pd: o.pd,
+          pdEnrolled,
+          pdPct: pdEnrolled ? Math.round((o.pd / pdEnrolled) * 10000) / 100 : 0,
+          pdRepeaters: o.pdRepeaters,
+        };
+      })
+      .sort((x, y) => (y[metric] as number) - (x[metric] as number) || x.unit.localeCompare(y.unit))
+      .map((r, i) => ({ sno: i + 1, ...r }));
+  });
+
+  /** Summary-grid column the active KPI sorts by (tile click = sort). */
+  private acisSortKey(id: string | null) {
+    switch (id) {
+      case 'ac_surv': return 'surveyed' as const;
+      case 'ac_pend': return 'pendingSurvey' as const;
+      case 'ac_sp': return 'surveyPct' as const;
+      case 'ac_adm': return 'admitted' as const;
+      case 'ac_tba': return 'toBeAdmitted' as const;
+      case 'ac_dpnd': return 'deptPending' as const;
+      case 'ac_pd': return 'pd' as const;
+      case 'ac_pdp': return 'pdPct' as const;
+      case 'ac_pdr': return 'pdRepeaters' as const;
+      default: return 'pool' as const;
+    }
+  }
+  /** The column currently driving the sort, for header highlighting. */
+  readonly acisSortColumn = computed(() => this.acisSortKey(this.acisKpiId()));
+
+  /** Grand-total row for the ACiS summary grid. */
+  readonly acisSummaryTotals = computed(() => {
+    const rows = this.acisSummaryRows();
+    const s = (f: (r: typeof rows[number]) => number) => rows.reduce((t, r) => t + f(r), 0);
+    const pool = s((r) => r.pool);
+    const surveyed = s((r) => r.surveyed);
+    const pd = s((r) => r.pd);
+    const pdEnrolled = s((r) => r.pdEnrolled);
+    return {
+      count: rows.length,
+      pool,
+      surveyed,
+      pendingSurvey: pool - surveyed,
+      surveyPct: pool ? Math.round((surveyed / pool) * 1000) / 10 : 0,
+      admitted: s((r) => r.admitted),
+      toBeAdmitted: s((r) => r.toBeAdmitted),
+      deptPending: s((r) => r.deptPending),
+      pd,
+      pdPct: pdEnrolled ? Math.round((pd / pdEnrolled) * 10000) / 100 : 0,
+      pdRepeaters: s((r) => r.pdRepeaters),
+    };
+  });
+
+  /**
+   * The opened school's common-pool children (dropouts), with their dropout
+   * reason — every child of that school within the five filters. Matched by
+   * UDISE (the summary grid's school-level key).
+   */
+  readonly acisStudentRows = computed(() => {
+    const a = this._acisStudents();
+    const unit = this.acisUnit();
+    if (!a || !unit) return [];
+    const C = AcisStudentCol;
+    const reason = this.acisReason();
+
+    const out = [] as {
+      sno: number; emis: string; name: string; district: string; block: string;
+      udise: string; school: string; schoolType: string; category: string; cls: string;
+      gender: string; cwsn: string; disability: string; surveyStatus: string;
+      admitStatus: string; bucket: string; reason: string; subReason: string;
+      dept: string; umis: string; days: number; transferDate: string; surveyDate: string;
+    }[];
+    for (const r of this.acisScopeStudents()) {
+      const s = a.schools[r[C.school] as number];
+      if ((s.u || s.s.toUpperCase()) !== unit) continue;
+      const ri = r[C.reason] as number;
+      if (reason && (ri < 0 || a.reasons[ri] !== reason)) continue;
+      const si = r[C.subReason] as number;
+      const di = r[C.dept] as number;
+      out.push({
+        sno: 0,
+        emis: String(r[C.emis] ?? ''),
+        name: String(r[C.name] ?? ''),
+        district: this.ds.titleCase(s.d),
+        block: this.ds.titleCase(s.b),
+        udise: s.u,
+        school: s.s,
+        schoolType: s.t,
+        category: s.c,
+        cls: String(r[C.cls] ?? '—'),
+        gender: r[C.gender] === 1 ? 'Male' : r[C.gender] === 2 ? 'Female' : '—',
+        cwsn: r[C.cwsn] === 1 ? 'Yes' : 'No',
+        disability: String(r[C.disability] ?? '') || '—',
+        surveyStatus: r[C.surveyed] === 1 ? 'Surveyed' : 'Not surveyed',
+        admitStatus: r[C.admitted] === 1 ? 'Admitted' : 'Not admitted',
+        bucket: r[C.bucket] === 1 ? 'To be validated' : r[C.bucket] === 2 ? 'To be admitted' : '—',
+        reason: ri >= 0 ? a.reasons[ri] : '—',
+        subReason: si >= 0 ? a.subReasons[si] : '—',
+        dept: di >= 0 ? a.depts[di] : '—',
+        umis: r[C.umis] === 1 ? 'Joined higher edu.' : '—',
+        days: (r[C.days] as number) >= 0 ? (r[C.days] as number) : 0,
+        transferDate: String(r[C.transferDate] ?? ''),
+        surveyDate: String(r[C.surveyDate] ?? ''),
+      });
+    }
+    const clsN = (c: string) => parseInt(c, 10) || 99;
+    out.sort((x, y) => clsN(x.cls) - clsN(y.cls) || x.name.localeCompare(y.name));
+    return out.map((r, i) => ({ ...r, sno: i + 1 }));
+  });
+
+  readonly acisStudentTotals = computed(() => {
+    const rows = this.acisStudentRows();
+    const withDays = rows.filter((r) => r.days > 0);
+    return {
+      count: rows.length,
+      admitted: rows.filter((r) => r.admitStatus === 'Admitted').length,
+      cwsn: rows.filter((r) => r.cwsn === 'Yes').length,
+      avgDays: withDays.length
+        ? Math.round((withDays.reduce((t, r) => t + r.days, 0) / withDays.length) * 10) / 10 : 0,
+    };
+  });
+
+  /**
+   * Class × gender matrix (metric 1 — TC dropouts class/gender/district wise,
+   * and metric 5.c — class-wise average bridging duration). Computed from the
+   * filtered roster so the five filters apply here too.
+   */
+  readonly acisClassRows = computed(() => {
+    const C = AcisStudentCol;
+    const init = () => ({ pool: 0, boys: 0, girls: 0, cwsn: 0, surveyed: 0, admitted: 0, bridgeSum: 0, bridgeN: 0 });
+    const map = new Map<string, ReturnType<typeof init>>();
+    for (const r of this.acisScopeStudents()) {
+      const cls = String(r[C.cls] ?? '') || '—';
+      if (!map.has(cls)) map.set(cls, init());
+      const o = map.get(cls)!;
+      o.pool++;
+      if (r[C.gender] === 1) o.boys++; else if (r[C.gender] === 2) o.girls++;
+      if (r[C.cwsn] === 1) o.cwsn++;
+      if (r[C.surveyed] === 1) o.surveyed++;
+      const days = r[C.days] as number;
+      if (r[C.admitted] === 1) { o.admitted++; if (days >= 0) { o.bridgeSum += days; o.bridgeN++; } }
+    }
+    const clsNum = (c: string) => (parseInt(c, 10) || 99);
+    return [...map.entries()]
+      .sort((a, b) => clsNum(a[0]) - clsNum(b[0]))
+      .map(([cls, o], i) => ({
+        sno: i + 1,
+        cls: cls === '—' ? '—' : `Class ${cls}`,
+        pool: o.pool,
+        boys: o.boys,
+        girls: o.girls,
+        cwsn: o.cwsn,
+        surveyed: o.surveyed,
+        admitted: o.admitted,
+        pendingAdmission: o.pool - o.admitted,
+        bridgeDays: o.bridgeN ? Math.round((o.bridgeSum / o.bridgeN) * 10) / 10 : 0,
+      }));
+  });
+
+  readonly acisClassTotals = computed(() => {
+    const rows = this.acisClassRows();
+    const s = (f: (r: typeof rows[number]) => number) => rows.reduce((t, r) => t + f(r), 0);
+    const pool = s((r) => r.pool);
+    const admitted = s((r) => r.admitted);
+    const wN = rows.reduce((t, r) => t + (r.bridgeDays ? r.admitted : 0), 0);
+    return {
+      count: rows.length,
+      pool,
+      boys: s((r) => r.boys),
+      girls: s((r) => r.girls),
+      cwsn: s((r) => r.cwsn),
+      surveyed: s((r) => r.surveyed),
+      admitted,
+      pendingAdmission: pool - admitted,
+      bridgeDays: wN
+        ? Math.round((rows.reduce((t, r) => t + r.bridgeDays * r.admitted, 0) / wN) * 10) / 10 : 0,
+    };
+  });
+
+  /** Reason-wise dropout counts (metric 8), with the sub-reason breakdown. */
+  readonly acisReasonRows = computed(() => {
+    const a = this._acisStudents();
+    if (!a) return [];
+    const C = AcisStudentCol;
+    const init = () => ({ total: 0, admitted: 0, pending: 0, cwsn: 0, subs: new Map<string, number>() });
+    const map = new Map<string, ReturnType<typeof init>>();
+    let withReason = 0;
+    for (const r of this.acisScopeStudents()) {
+      const ri = r[C.reason] as number;
+      if (ri < 0) continue;
+      withReason++;
+      const label = a.reasons[ri];
+      if (!map.has(label)) map.set(label, init());
+      const o = map.get(label)!;
+      o.total++;
+      if (r[C.admitted] === 1) o.admitted++; else o.pending++;
+      if (r[C.cwsn] === 1) o.cwsn++;
+      const si = r[C.subReason] as number;
+      const sub = si >= 0 ? a.subReasons[si] : '—';
+      o.subs.set(sub, (o.subs.get(sub) ?? 0) + 1);
+    }
+    return [...map.entries()]
+      .sort((x, y) => y[1].total - x[1].total)
+      .map(([reason, o], i) => ({
+        sno: i + 1,
+        reason,
+        total: o.total,
+        share: withReason ? Math.round((o.total / withReason) * 1000) / 10 : 0,
+        admitted: o.admitted,
+        pending: o.pending,
+        cwsn: o.cwsn,
+        topSub: [...o.subs.entries()].sort((p, q) => q[1] - p[1])[0]?.[0] ?? '—',
+        subs: [...o.subs.entries()].sort((p, q) => q[1] - p[1]).map(([sub, count]) => ({ sub, count })),
+      }));
+  });
+
+  readonly acisReasonTotals = computed(() => {
+    const rows = this.acisReasonRows();
+    const s = (f: (r: typeof rows[number]) => number) => rows.reduce((t, r) => t + f(r), 0);
+    return {
+      count: rows.length,
+      total: s((r) => r.total),
+      admitted: s((r) => r.admitted),
+      pending: s((r) => r.pending),
+      cwsn: s((r) => r.cwsn),
+      share: 100,
+    };
+  });
+
+  /** Sub-reasons of the expanded reason row. */
+  readonly acisSubReasonRows = computed(() => {
+    const reason = this.acisReason();
+    if (!reason) return [];
+    const row = this.acisReasonRows().find((r) => r.reason === reason);
+    if (!row) return [];
+    return row.subs.map((s, i) => ({
+      sno: i + 1,
+      sub: s.sub,
+      count: s.count,
+      share: row.total ? Math.round((s.count / row.total) * 1000) / 10 : 0,
+    }));
+  });
+
+  /** Department-wise action taken / to be taken (metric 9). */
+  readonly acisDeptRows = computed(() => {
+    const a = this._acisStudents();
+    if (!a) return [];
+    const C = AcisStudentCol;
+    const dead = this.acisDeadDept();
+    const init = () => ({ total: 0, taken: 0, pending: 0, cwsn: 0 });
+    const map = new Map<string, ReturnType<typeof init>>();
+    for (const r of this.acisScopeStudents()) {
+      const di = r[C.dept] as number;
+      if (di < 0 || r[C.surveyed] !== 1) continue;
+      const label = a.depts[di];
+      if (!map.has(label)) map.set(label, init());
+      const o = map.get(label)!;
+      o.total++;
+      if (r[C.admitted] === 1 || r[C.umis] === 1 || di === dead) o.taken++; else o.pending++;
+      if (r[C.cwsn] === 1) o.cwsn++;
+    }
+    return [...map.entries()]
+      .sort((x, y) => y[1].pending - x[1].pending || y[1].total - x[1].total)
+      .map(([dept, o], i) => ({
+        sno: i + 1,
+        dept,
+        total: o.total,
+        taken: o.taken,
+        pending: o.pending,
+        cwsn: o.cwsn,
+        takenPct: o.total ? Math.round((o.taken / o.total) * 1000) / 10 : 0,
+      }));
+  });
+
+  readonly acisDeptTotals = computed(() => {
+    const rows = this.acisDeptRows();
+    const s = (f: (r: typeof rows[number]) => number) => rows.reduce((t, r) => t + f(r), 0);
+    const total = s((r) => r.total);
+    const taken = s((r) => r.taken);
+    return {
+      count: rows.length,
+      total,
+      taken,
+      pending: s((r) => r.pending),
+      cwsn: s((r) => r.cwsn),
+      takenPct: total ? Math.round((taken / total) * 1000) / 10 : 0,
+    };
+  });
+
+  /**
+   * Month-wise common-pool entries from the start of the academic year
+   * (metric 12). Real: counted off transfer_date / common_pool_date. The
+   * potential-dropout series on the same view is the assumed one.
+   */
+  readonly acisTrendRows = computed(() => {
+    const C = AcisStudentCol;
+    const init = () => ({ entered: 0, surveyed: 0, admitted: 0 });
+    const map = new Map<string, ReturnType<typeof init>>();
+    for (const r of this.acisScopeStudents()) {
+      const d = String(r[C.transferDate] ?? '') || String(r[C.surveyDate] ?? '');
+      const m = d.slice(0, 7);
+      if (!/^\d{4}-\d{2}$/.test(m)) continue;
+      if (!map.has(m)) map.set(m, init());
+      const o = map.get(m)!;
+      o.entered++;
+      if (r[C.surveyed] === 1) o.surveyed++;
+      if (r[C.admitted] === 1) o.admitted++;
+    }
+    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const rows = [...map.entries()].sort();
+    let running = 0;
+    return rows.map(([month, o], i) => {
+      running += o.entered;
+      const mi = parseInt(month.slice(5), 10) - 1;
+      return {
+        sno: i + 1,
+        month,
+        label: `${MONTHS[mi] ?? month} ${month.slice(0, 4)}`,
+        entered: o.entered,
+        surveyed: o.surveyed,
+        admitted: o.admitted,
+        pending: o.entered - o.admitted,
+        cumulative: running,
+      };
+    });
+  });
+
+  readonly acisTrendTotals = computed(() => {
+    const rows = this.acisTrendRows();
+    const s = (f: (r: typeof rows[number]) => number) => rows.reduce((t, r) => t + f(r), 0);
+    return {
+      count: rows.length,
+      entered: s((r) => r.entered),
+      surveyed: s((r) => r.surveyed),
+      admitted: s((r) => r.admitted),
+      pending: s((r) => r.pending),
+      cumulative: rows.length ? rows[rows.length - 1].cumulative : 0,
+    };
+  });
+
+  /**
+   * Potential dropouts per unit (REAL — EMIS Potential Dropout report): PD =
+   * students absent 15+ days in the last 30.
+   *
+   *   PD % = PD students / enrolled students × 100
+   *
+   * The PD report only covers the school types it lists (government schools),
+   * so the denominator is enrolment in those school types — dividing by the
+   * whole roll would dilute PD % with private schools the report never covers.
+   * School type / gender / class filters narrow numerator AND denominator.
+   */
+  /** School types the PD report covers (its denominator universe). */
+  private readonly pdSchoolTypes = computed(
+    () => new Set((this._acisPd()?.schoolRefs ?? []).map((s) => s.t)),
+  );
+
+  /** Enrolled students in `rows` that match the PD filters (PD % denominator). */
+  private pdEnrolled(rows: SchoolRow[]): number {
+    const fType = this.acisFSchoolType();
+    const fGender = this.acisFGender();
+    const fClass = this.acisFClass();
+    const types = this.pdSchoolTypes();
+    const gi = fClass !== 'all' ? (parseInt(fClass, 10) || 0) + 2 : -1; // GRADE_ORDER: I = index 3
+    let n = 0;
+    for (const s of rows) {
+      if (fType === 'all' ? !types.has(s.stype) : s.stype !== fType) continue;
+      if (gi >= 3) {
+        if (fGender !== '2') n += s.gb?.[gi] ?? 0;
+        if (fGender !== '1') n += s.gg?.[gi] ?? 0;
+      } else {
+        n += fGender === '1' ? (s.boys ?? 0) : fGender === '2' ? (s.girls ?? 0) : (s.students ?? 0);
+      }
+    }
+    return n;
+  }
+
+  /** PD students in the current scope with school type / gender / class applied. */
+  private readonly pdScopeStudents = computed<(number | string)[][]>(() => {
+    const a = this._acisPd();
+    if (!a) return [];
+    const C = AcisPdCol;
+    const dist = this.ds.selectedDistrict()?.toUpperCase() ?? null;
+    const blk = this.ds.selectedBlock()?.toUpperCase() ?? null;
+    const fType = this.acisFSchoolType();
+    const fGender = this.acisFGender();
+    const fClass = this.acisFClass();
+    const ok = new Uint8Array(a.schoolRefs.length);
+    for (let i = 0; i < a.schoolRefs.length; i++) {
+      const s = a.schoolRefs[i];
+      if (dist && s.d.toUpperCase() !== dist) continue;
+      if (blk && s.b.toUpperCase() !== blk) continue;
+      if (fType !== 'all' && s.t !== fType) continue;
+      ok[i] = 1;
+    }
+    return a.students.filter((r) => ok[r[C.school] as number] === 1
+      && (fGender === 'all' || String(r[C.gender]) === fGender)
+      && (fClass === 'all' || r[C.cls] === fClass));
+  });
+
+  /** PD reason-wise counts (reason category → reason), within the filters. */
+  readonly acisPdReasonRows = computed(() => {
+    const a = this._acisPd();
+    if (!a) return [];
+    const C = AcisPdCol;
+    const map = new Map<string, { category: string; reason: string; pd: number; repeaters: number; boys: number; girls: number }>();
+    const all = this.pdScopeStudents();
+    for (const r of all) {
+      const category = a.categories[r[C.category] as number] ?? '—';
+      const reason = a.reasons[r[C.reason] as number] ?? '—';
+      const k = `${category}||${reason}`;
+      let o = map.get(k);
+      if (!o) { o = { category, reason, pd: 0, repeaters: 0, boys: 0, girls: 0 }; map.set(k, o); }
+      o.pd++;
+      if (r[C.repeater] === 1) o.repeaters++;
+      if (r[C.gender] === 1) o.boys++; else if (r[C.gender] === 2) o.girls++;
+    }
+    const total = all.length;
+    return [...map.values()]
+      .sort((x, y) => y.pd - x.pd)
+      .map((o, i) => ({ sno: i + 1, ...o, share: total ? Math.round((o.pd / total) * 1000) / 10 : 0 }));
+  });
+
+  readonly acisPdReasonTotals = computed(() => {
+    const rows = this.acisPdReasonRows();
+    const s = (f: (r: typeof rows[number]) => number) => rows.reduce((t, r) => t + f(r), 0);
+    return { count: rows.length, pd: s((r) => r.pd), repeaters: s((r) => r.repeaters), boys: s((r) => r.boys), girls: s((r) => r.girls) };
+  });
+
+  /** Reason categories, largest first — the columns of the grade-wise matrix. */
+  readonly acisPdCategories = computed(() => {
+    const a = this._acisPd();
+    if (!a) return [] as string[];
+    const C = AcisPdCol;
+    const n = new Map<string, number>();
+    for (const r of this.pdScopeStudents()) {
+      const c = a.categories[r[C.category] as number] ?? '—';
+      n.set(c, (n.get(c) ?? 0) + 1);
+    }
+    return [...n.entries()].sort((x, y) => y[1] - x[1]).map(([c]) => c);
+  });
+
+  /** Potential dropouts grade-wise, split by reason category. */
+  readonly acisPdGradeRows = computed(() => {
+    const a = this._acisPd();
+    if (!a) return [];
+    const C = AcisPdCol;
+    const map = new Map<string, { pd: number; boys: number; girls: number; repeaters: number; cats: Record<string, number> }>();
+    for (const r of this.pdScopeStudents()) {
+      const cls = String(r[C.cls] || '—');
+      let o = map.get(cls);
+      if (!o) { o = { pd: 0, boys: 0, girls: 0, repeaters: 0, cats: {} }; map.set(cls, o); }
+      o.pd++;
+      if (r[C.gender] === 1) o.boys++; else if (r[C.gender] === 2) o.girls++;
+      if (r[C.repeater] === 1) o.repeaters++;
+      const c = a.categories[r[C.category] as number] ?? '—';
+      o.cats[c] = (o.cats[c] ?? 0) + 1;
+    }
+    const num = (c: string) => parseInt(c, 10) || 99;
+    return [...map.entries()]
+      .sort((x, y) => num(x[0]) - num(y[0]))
+      .map(([cls, o], i) => ({ sno: i + 1, cls: cls === '—' ? '—' : `Class ${cls}`, ...o }));
+  });
+
+  readonly acisPdGradeTotals = computed(() => {
+    const rows = this.acisPdGradeRows();
+    const cats: Record<string, number> = {};
+    for (const r of rows) for (const [c, v] of Object.entries(r.cats)) cats[c] = (cats[c] ?? 0) + v;
+    const s = (f: (r: typeof rows[number]) => number) => rows.reduce((t, r) => t + f(r), 0);
+    return { count: rows.length, pd: s((r) => r.pd), boys: s((r) => r.boys), girls: s((r) => r.girls), repeaters: s((r) => r.repeaters), cats };
+  });
+
+  // ---- infographic breakdowns (ACiS dashboard charts) ----
+  /**
+   * Management-wise and grade-wise splits for the two populations:
+   *   potential dropouts  PD report (absent 15+ of the last 30 days)
+   *   dropouts            the common pool (children who left school)
+   * Both read the scoped + filtered rows, so they follow the dashboard scope
+   * and the school type / gender / class filters. Grade rows carry a
+   * boys/girls split for a stacked chart.
+   */
+  private gradeSplit(rows: (number | string)[][], clsCol: number, genderCol: number) {
+    const m = new Map<string, { boys: number; girls: number }>();
+    for (const r of rows) {
+      const c = String(r[clsCol] || '—');
+      let o = m.get(c);
+      if (!o) { o = { boys: 0, girls: 0 }; m.set(c, o); }
+      if (r[genderCol] === 1) o.boys++; else if (r[genderCol] === 2) o.girls++;
+    }
+    const n = (c: string) => parseInt(c, 10) || 99;
+    return [...m.entries()].sort((a, b) => n(a[0]) - n(b[0]))
+      .map(([c, o]) => ({ label: c === '—' ? '—' : `Class ${c}`, ...o }));
+  }
+
+  /**
+   * The four management groups the dashboard reports on, from school type:
+   * Government (incl. Central Govt), Fully Aided, Partially Aided, Private
+   * (Un-aided). Anything unrecognised is shown as "Not recorded".
+   */
+  readonly ACIS_MGMT_GROUPS = ['Government', 'Fully Aided', 'Partially Aided', 'Private'] as const;
+  private mgmtGroup(schoolType: string): string {
+    const t = (schoolType ?? '').toLowerCase();
+    if (t.startsWith('government') || t.startsWith('central')) return 'Government';
+    if (t.startsWith('fully')) return 'Fully Aided';
+    if (t.startsWith('partial')) return 'Partially Aided';
+    if (t.startsWith('un-aided') || t.startsWith('unaided') || t.startsWith('private')) return 'Private';
+    return 'Not recorded';
+  }
+
+  /** Count rows per management group, in the fixed group order (zeros kept). */
+  private byMgmtGroup(types: string[]): { label: string; value: number }[] {
+    const m = new Map<string, number>();
+    for (const t of types) { const g = this.mgmtGroup(t); m.set(g, (m.get(g) ?? 0) + 1); }
+    const out = this.ACIS_MGMT_GROUPS.map((g) => ({ label: g as string, value: m.get(g) ?? 0 }));
+    const other = m.get('Not recorded');
+    if (other) out.push({ label: 'Not recorded', value: other });
+    return out;
+  }
+
+  readonly acisPdByManagement = computed(() => {
+    const a = this._acisPd();
+    if (!a) return [];
+    return this.byMgmtGroup(this.pdScopeStudents().map((r) => a.schoolRefs[r[AcisPdCol.school] as number]?.t ?? ''));
+  });
+  readonly acisPdByGrade = computed(() =>
+    this.gradeSplit(this.pdScopeStudents(), AcisPdCol.cls, AcisPdCol.gender));
+
+  readonly acisDropByManagement = computed(() => {
+    const a = this._acisStudents();
+    if (!a) return [];
+    return this.byMgmtGroup(this.acisScopeStudents().map((r) => a.schools[r[AcisStudentCol.school] as number]?.t ?? ''));
+  });
+  readonly acisDropByGrade = computed(() =>
+    this.gradeSplit(this.acisScopeStudents(), AcisStudentCol.cls, AcisStudentCol.gender));
+
+  /**
+   * School category groups: Primary / Middle / High / Hr. Secondary, from the
+   * `School_Category` / `Category` field. Anything else (pre-primary, "Others")
+   * is reported as "Others" only when it is non-zero.
+   */
+  readonly ACIS_CATEGORY_GROUPS = ['Primary', 'Middle', 'High', 'Hr. Secondary'] as const;
+  private categoryGroup(cat: string): string {
+    const c = (cat ?? '').toLowerCase();
+    if (c.startsWith('higher secondary') || c.startsWith('hr')) return 'Hr. Secondary';
+    if (c.startsWith('high')) return 'High';
+    if (c.startsWith('middle')) return 'Middle';
+    if (c.startsWith('primary')) return 'Primary';
+    return 'Others';
+  }
+  private byCategory(cats: string[]): Record<string, number> {
+    const m: Record<string, number> = {};
+    for (const c of cats) { const g = this.categoryGroup(c); m[g] = (m[g] ?? 0) + 1; }
+    return m;
+  }
+  /** Common-pool students and potential dropouts per school category, same scope + filters. */
+  readonly acisByCategory = computed(() => {
+    const cp = this._acisStudents();
+    const pdA = this._acisPd();
+    const pool = cp ? this.byCategory(this.acisScopeStudents().map((r) => cp.schools[r[AcisStudentCol.school] as number]?.c ?? '')) : {};
+    const pd = pdA ? this.byCategory(this.pdScopeStudents().map((r) => pdA.schoolRefs[r[AcisPdCol.school] as number]?.c ?? '')) : {};
+    const groups: string[] = [...this.ACIS_CATEGORY_GROUPS];
+    if ((pool['Others'] ?? 0) + (pd['Others'] ?? 0) > 0) groups.push('Others');
+    return groups.map((g) => ({ label: g, pool: pool[g] ?? 0, pd: pd[g] ?? 0 }));
+  });
+
+  // ================= ACiS — DROPOUT RATE =================
+  /**
+   * Dropout rate (REAL):  N ÷ D × 100
+   *   N  common-pool children of the class / level who have NOT been
+   *      re-enrolled (Admit_status ≠ Admitted) — they left school and are
+   *      still out.
+   *   D  students enrolled in that class / level, from the 2026-27 enrolment
+   *      roll (grade-wise boys + girls), in the same scope.
+   * School type, gender and class filters narrow both N and D. CWSN and UMIS
+   * cannot apply here — the enrolment roll has neither — so the dropout-rate
+   * view hides those two filters and ignores them.
+   *
+   * Reason groups (metric sheet): Migration · CWSN · Illness · Child marriage ·
+   * Other; children not surveyed yet have no reason ("Not recorded").
+   */
+  readonly ACIS_LEVELS = [
+    { label: 'Primary (I–V)', from: 1, to: 5 },
+    { label: 'Upper Primary (VI–VIII)', from: 6, to: 8 },
+    { label: 'Secondary (IX–X)', from: 9, to: 10 },
+    { label: 'Hr. Secondary (XI–XII)', from: 11, to: 12 },
+  ] as const;
+  readonly ACIS_DROP_REASONS = ['Migration', 'CWSN', 'Illness', 'Child marriage', 'Other', 'Not recorded'] as const;
+
+  private dropReasonGroup(reason: string | undefined, sub: string | undefined): string {
+    if (!reason || reason === '—') return 'Not recorded';
+    if (/child marriage/i.test(sub ?? '')) return 'Child marriage';
+    if (/MIGRATION/i.test(reason)) return 'Migration';
+    if (/DIFFERENTLY/i.test(reason)) return 'CWSN';
+    if (/HEALTH/i.test(reason)) return 'Illness';
+    return 'Other';
+  }
+
+  /** Enrolment roll for the current scope (all schools at state level). */
+  private scopeRoll(): SchoolRow[] {
+    const dist = this.ds.selectedDistrict();
+    const blk = this.ds.selectedBlock();
+    if (blk) return this.ds.schoolsForBlock();
+    if (dist) return this.ds.schoolRowsFor(dist);
+    return this.ds.districts().flatMap((d) => this.ds.schoolRowsFor(d.name));
+  }
+
+  /** Grade-wise enrolment (classes I–XII) of `rows`, with school type + gender filters. */
+  private enrolByGrade(rows: SchoolRow[], typeOk: (stype: string) => boolean): number[] {
+    const fGender = this.acisFGender();
+    const out = new Array(13).fill(0);              // index = class 1..12
+    for (const s of rows) {
+      if (!typeOk(s.stype)) continue;
+      for (let c = 1; c <= 12; c++) {
+        const gi = c + 2;                           // GRADE_ORDER: I = index 3
+        if (fGender !== '2') out[c] += s.gb?.[gi] ?? 0;
+        if (fGender !== '1') out[c] += s.gg?.[gi] ?? 0;
+      }
+    }
+    return out;
+  }
+
+  /** Not-re-enrolled common-pool children in scope, with type / gender / class filters only. */
+  private readonly dropScopeStudents = computed<AcisStudentRow[]>(() => {
+    const a = this._acisStudents();
+    if (!a) return [];
+    const C = AcisStudentCol;
+    const dist = this.ds.selectedDistrict()?.toUpperCase() ?? null;
+    const blk = this.ds.selectedBlock()?.toUpperCase() ?? null;
+    const fType = this.acisFSchoolType();
+    const fGender = this.acisFGender();
+    const fClass = this.acisFClass();
+    const ok = new Uint8Array(a.schools.length);
+    for (let i = 0; i < a.schools.length; i++) {
+      const s = a.schools[i];
+      if (dist && s.d.toUpperCase() !== dist) continue;
+      if (blk && s.b.toUpperCase() !== blk) continue;
+      if (fType !== 'all' && s.t !== fType) continue;
+      ok[i] = 1;
+    }
+    return a.students.filter((r) => ok[r[C.school] as number] === 1
+      && r[C.admitted] !== 1
+      && (fGender === 'all' || String(r[C.gender]) === fGender)
+      && (fClass === 'all' || r[C.cls] === fClass));
+  });
+
+  /** Grade-wise dropout rate rows (classes I–XII) with the reason split. */
+  readonly acisDropGradeRows = computed(() => {
+    const a = this._acisStudents();
+    if (!a) return [];
+    const C = AcisStudentCol;
+    const fType = this.acisFSchoolType();
+    const fClass = this.acisFClass();
+    const D = this.enrolByGrade(this.scopeRoll(), (t) => fType === 'all' || t === fType);
+    const blank = () => Object.fromEntries(this.ACIS_DROP_REASONS.map((g) => [g, 0])) as Record<string, number>;
+    const N = Array.from({ length: 13 }, () => ({ n: 0, reasons: blank() }));
+    for (const r of this.dropScopeStudents()) {
+      const c = parseInt(String(r[C.cls]), 10);
+      if (!(c >= 1 && c <= 12)) continue;
+      const ri = r[C.reason] as number;
+      const si = r[C.subReason] as number;
+      const g = this.dropReasonGroup(ri >= 0 ? a.reasons[ri] : undefined, si >= 0 ? a.subReasons[si] : undefined);
+      N[c].n++;
+      N[c].reasons[g]++;
+    }
+    const rows = [];
+    for (let c = 1; c <= 12; c++) {
+      if (fClass !== 'all' && String(c) !== fClass) continue;
+      rows.push({
+        cls: c, label: `Class ${c}`, enrolled: D[c], dropouts: N[c].n,
+        rate: D[c] ? Math.round((N[c].n / D[c]) * 10000) / 100 : 0,
+        reasons: N[c].reasons,
+      });
+    }
+    return rows;
+  });
+
+  /** Level-wise roll-up of the grade rows (Primary / Upper Primary / Secondary / Hr. Sec). */
+  readonly acisDropLevelRows = computed(() => {
+    const g = this.acisDropGradeRows();
+    return this.ACIS_LEVELS.map((lv) => {
+      const rows = g.filter((r) => r.cls >= lv.from && r.cls <= lv.to);
+      const enrolled = rows.reduce((t, r) => t + r.enrolled, 0);
+      const dropouts = rows.reduce((t, r) => t + r.dropouts, 0);
+      const reasons = Object.fromEntries(this.ACIS_DROP_REASONS.map((k) =>
+        [k, rows.reduce((t, r) => t + (r.reasons[k] ?? 0), 0)])) as Record<string, number>;
+      return { label: lv.label, enrolled, dropouts, rate: enrolled ? Math.round((dropouts / enrolled) * 10000) / 100 : 0, reasons };
+    }).filter((r) => r.enrolled > 0 || r.dropouts > 0);
+  });
+
+  /** Totals across classes I–XII. */
+  readonly acisDropTotals = computed(() => {
+    const g = this.acisDropGradeRows();
+    const enrolled = g.reduce((t, r) => t + r.enrolled, 0);
+    const dropouts = g.reduce((t, r) => t + r.dropouts, 0);
+    const reasons = Object.fromEntries(this.ACIS_DROP_REASONS.map((k) =>
+      [k, g.reduce((t, r) => t + (r.reasons[k] ?? 0), 0)])) as Record<string, number>;
+    return { enrolled, dropouts, rate: enrolled ? Math.round((dropouts / enrolled) * 10000) / 100 : 0, reasons };
+  });
+
+  /** Dropout rate per management group (Government / Fully Aided / Partially Aided / Private). */
+  readonly acisDropTypeRows = computed(() => {
+    const a = this._acisStudents();
+    if (!a) return [];
+    const C = AcisStudentCol;
+    const fClass = this.acisFClass();
+    const roll = this.scopeRoll();
+    const n: Record<string, number> = {};
+    for (const r of this.dropScopeStudents()) {
+      const c = parseInt(String(r[C.cls]), 10);
+      if (!(c >= 1 && c <= 12)) continue;
+      const g = this.mgmtGroup(a.schools[r[C.school] as number]?.t ?? '');
+      n[g] = (n[g] ?? 0) + 1;
+    }
+    return this.ACIS_MGMT_GROUPS.map((g) => {
+      const D = this.enrolByGrade(roll, (t) => this.mgmtGroup(t) === g && (this.acisFSchoolType() === 'all' || t === this.acisFSchoolType()));
+      const enrolled = fClass === 'all' ? D.reduce((t, v) => t + v, 0) : D[parseInt(fClass, 10)] ?? 0;
+      const dropouts = n[g] ?? 0;
+      return { label: g as string, enrolled, dropouts, rate: enrolled ? Math.round((dropouts / enrolled) * 10000) / 100 : 0 };
+    });
+  });
+
+  /** Tile-level denominator: enrolment in classes I–XII (all school types). */
+  enrolI12Fields(rows: SchoolRow[]): Partial<DrillRow> {
+    let n = 0;
+    for (const s of rows) for (let gi = 3; gi <= 14; gi++) n += (s.gb?.[gi] ?? 0) + (s.gg?.[gi] ?? 0);
+    return { acisEnrolI12: n };
+  }
+
+  /** PD class options (from the PD report itself). */
+  readonly acisPdClassOptions = computed(() => {
+    const set = new Set<string>();
+    for (const r of this._acisPd()?.students ?? []) if (r[AcisPdCol.cls]) set.add(String(r[AcisPdCol.cls]));
+    return [{ label: 'All classes', value: 'all' },
+      ...[...set].sort((a, b) => (parseInt(a, 10) || 99) - (parseInt(b, 10) || 99))
+        .map((c) => ({ label: `Class ${c}`, value: c }))];
+  });
+
+  /** PD school-type options (the types the PD report covers). */
+  readonly acisPdSchoolTypeOptions = computed(() => [
+    { label: 'All school types', value: 'all' },
+    ...[...this.pdSchoolTypes()].sort().map((t) => ({ label: t, value: t })),
+  ]);
+
+  /** Enrolment denominator for the tile-level PD % (government-school roll). */
+  pdBaseFields(rows: SchoolRow[]): Partial<DrillRow> {
+    if (!this._acisPd()) return {};
+    const types = this.pdSchoolTypes();
+    let n = 0;
+    for (const s of rows) if (types.has(s.stype)) n += s.students ?? 0;
+    return { acisPdBase: n };
+  }
+
+  // ================= SMC (meetings, resolutions, grants) =================
+  /**
+   * The SMC component covers two units of analysis — the MEETING and the
+   * RESOLUTION — plus the school composite grant, all over the same scopes, so
+   * it gets its own drill.
+   *
+   * Every figure is read through the active rolling window (`smcPeriod`): the
+   * metric sheet asks for last 12 / 9 / 6 / 3 months, and `all` (the full
+   * export) is the default so the headline tiles are stable. The windows are
+   * anchored to the latest date in the export, not to the clock.
+   *
+   * `smcView()` picks the table from the active KPI:
+   *   meetings   unit summary (eligible / held / not held / attendance) → school list
+   *   emergency  emergency resolved vs unresolved + department-wise abstract
+   *   other      the same for non-emergency resolutions
+   *   all        every resolution, same shape
+   *   grant      allocated vs utilised (utilisation is ASSUMED)
+   */
+  readonly smcPeriod = signal<SmcPeriodKey>('all');
+  readonly smcPeriodOptions: { label: string; value: SmcPeriodKey }[] = [
+    { label: 'All (full export)', value: 'all' },
+    { label: 'Last 1 year', value: 'p12' },
+    { label: 'Last 9 months', value: 'p9' },
+    { label: 'Last 6 months', value: 'p6' },
+    { label: 'Last 3 months', value: 'p3' },
+  ];
+  setSmcPeriod(p: SmcPeriodKey): void { this.smcPeriod.set(p); }
+  /** Label + window start, for the "showing X since Y" caption. */
+  readonly smcPeriodLabel = computed(
+    () => this.smcPeriodOptions.find((o) => o.value === this.smcPeriod())?.label ?? '',
+  );
+  readonly smcPeriodFrom = computed(() => {
+    const p = this.smcPeriod();
+    if (p === 'all') return '';
+    return this._smcReal()?.cutoffs?.[p] ?? '';
+  });
+  readonly smcAnchorDate = computed(() => this._smcReal()?.anchorDate ?? '');
+
+  readonly smcKpiTabs: { id: string; label: string }[] = [
+    { id: 'm_mh', label: 'Meetings held' },
+    { id: 'm_mn', label: 'Meetings not held' },
+    { id: 'm_ma', label: 'Meeting attendance' },
+    { id: 'm_r', label: 'All resolutions' },
+    { id: 'm_e', label: 'Emergency' },
+    { id: 'm_or', label: 'Other resolutions' },
+    { id: 'm_ga', label: 'Grant utilisation' },
+  ];
+  /** Every SMC KPI id that routes into this drill, mapped to its view. */
+  private readonly SMC_KPI_VIEW: Record<string, 'meetings' | 'emergency' | 'other' | 'all' | 'grant'> = {
+    m_mh: 'meetings', m_mn: 'meetings', m_ma: 'meetings', m_mt: 'meetings',
+    m_r: 'all', m_c: 'all', m_p: 'all', m_k: 'all',
+    m_e: 'emergency', m_er: 'emergency', m_ek: 'emergency',
+    m_or: 'other', m_ou: 'other', m_ok: 'other',
+    m_ga: 'grant', m_gu: 'grant', m_gp: 'grant',
+  };
+
+  readonly smcKpiId = signal<string | null>(null);
+  /** District / block / school name drilled into for the school list. */
+  readonly smcUnit = signal<string | null>(null);
+
+  hasSmcDrill(kpiId: string): boolean { return !!this.SMC_KPI_VIEW[kpiId]; }
+  openSmcDrill(kpiId: string): void {
+    this.loadSmcDetail();
+    this.smcKpiId.set(this.SMC_KPI_VIEW[kpiId] ? kpiId : 'm_mh');
+    this.smcUnit.set(null);
+  }
+  closeSmcDrill(): void { this.smcKpiId.set(null); this.smcUnit.set(null); }
+  setSmcKpi(id: string): void { this.smcKpiId.set(id); this.smcUnit.set(null); }
+  smcSelectUnit(u: string | null): void { this.smcUnit.set(u); }
+
+  /**
+   * Drill the SMC grid one level deeper: state → district → block → school.
+   * This moves the dashboard scope (same as the generic drill), so the grid,
+   * the tiles and the breadcrumb all follow. At block level the rows are
+   * already schools, so a click there opens the school profile drawer.
+   */
+  smcDrillRow(row: { key: string }): void {
+    const level = this.ds.level();
+    this.smcUnit.set(null);
+    if (level === 'state') this.ds.drillToDistrict(row.key);
+    else if (level === 'district') this.ds.drillToBlock(row.key);
+  }
+
+  /**
+   * True when the meetings view should render the per-school table rather than
+   * the unit summary: either the scope is already a block (so the children ARE
+   * schools), or a unit was opened explicitly.
+   */
+  readonly smcShowSchools = computed(() => !!this.smcUnit() || !!this.ds.selectedBlock());
+
+  readonly smcKpiLabel = computed(() => {
+    const id = this.smcKpiId();
+    if (!id) return '';
+    for (const m of KPI_MODULES) { const def = m.kpis.find((k) => k.id === id); if (def) return def.label; }
+    return '';
+  });
+
+  readonly smcView = computed(() => this.SMC_KPI_VIEW[this.smcKpiId() ?? ''] ?? 'meetings');
+  /**
+   * Which KPI tab to highlight. Several KPIs share a view (m_mh/m_mn/m_ma/m_mt
+   * are all "meetings"), and the tile grid can open any of the 17 SMC KPIs, so
+   * fall back to the first tab belonging to the active view.
+   */
+  readonly smcActiveTab = computed(() => {
+    const id = this.smcKpiId() ?? 'm_mh';
+    if (this.smcKpiTabs.some((t) => t.id === id)) return id;
+    const view = this.smcView();
+    return this.smcKpiTabs.find((t) => this.SMC_KPI_VIEW[t.id] === view)?.id ?? 'm_mh';
+  });
+  /** Only the grant view carries synthesized figures. */
+  readonly smcAssumed = computed(() => this.smcView() === 'grant');
+  /** The detail asset backs the school lists and department abstracts. */
+  readonly smcDetailLoading = computed(() => !this._smcDetail());
+
+  readonly smcUnitLabel = computed(() => (this.ds.selectedBlock() ? 'School'
+    : this.ds.selectedDistrict() ? 'Block' : 'District'));
+
+  /** Active window as a day-offset floor into the detail asset's `day` column. */
+  private readonly smcDayFloor = computed(() => {
+    const d = this._smcDetail();
+    const p = this.smcPeriod();
+    if (!d || p === 'all') return -1;
+    const cut = d.cutoffs?.[p];
+    if (!cut) return -1;
+    return Math.round((Date.parse(cut) - Date.parse(d.baseDate)) / 86400000);
+  });
+
+  /** Turn a detail-asset day offset back into an ISO date. */
+  private smcDayToIso(day: number): string {
+    const d = this._smcDetail();
+    if (!d || day < 0) return '';
+    return new Date(Date.parse(d.baseDate) + day * 86400000).toISOString().slice(0, 10);
+  }
+
+  /** Detail-asset school indexes inside the current dashboard scope. */
+  private readonly smcScopeSchoolMask = computed<Uint8Array>(() => {
+    const d = this._smcDetail();
+    if (!d) return new Uint8Array(0);
+    const dist = this.ds.selectedDistrict()?.toUpperCase() ?? null;
+    const blk = this.ds.selectedBlock()?.toUpperCase() ?? null;
+    const mask = new Uint8Array(d.schools.length);
+    for (let i = 0; i < d.schools.length; i++) {
+      const s = d.schools[i];
+      if (dist && s.d.toUpperCase() !== dist) continue;
+      if (blk && s.b.toUpperCase() !== blk) continue;
+      mask[i] = 1;
+    }
+    return mask;
+  });
+
+  /** Meeting rows inside scope and inside the active window. */
+  private readonly smcScopeMeetings = computed<number[][]>(() => {
+    const d = this._smcDetail();
+    if (!d) return [];
+    const M = SmcMeetingCol;
+    const mask = this.smcScopeSchoolMask();
+    const floor = this.smcDayFloor();
+    return d.meetings.filter((m) => mask[m[M.school]] === 1 && m[M.day] >= floor);
+  });
+
+  /** Resolution rows inside scope and inside the active window. */
+  private readonly smcScopeResolutions = computed<number[][]>(() => {
+    const d = this._smcDetail();
+    if (!d) return [];
+    const R = SmcResolutionCol;
+    const mask = this.smcScopeSchoolMask();
+    const floor = this.smcDayFloor();
+    return d.resolutions.filter((r) => mask[r[R.school]] === 1 && r[R.day] >= floor);
+  });
+
+  /**
+   * Meetings-held abstract per unit (metric 1a/1b/1c). Built from `drillRows()`,
+   * which already carries the window-aware counters plus the eligible-school
+   * denominator, so this needs no detail asset.
+   */
+  readonly smcMeetingRows = computed(() => {
+    return this.drillRows()
+      .map((r) => {
+        const eligible = r.smcEligibleSchools ?? 0;
+        const held = r.smcSchoolsHeld ?? 0;
+        const present = r.smcPresent ?? 0;
+        const absent = r.smcAbsent ?? 0;
+        return {
+          key: r.key,
+          unit: r.name,
+          eligible,
+          held,
+          notHeld: r.smcSchoolsNotHeld ?? Math.max(0, eligible - held),
+          heldPct: eligible ? Math.round((held / eligible) * 1000) / 10 : 0,
+          meetings: r.smcMeetings ?? 0,
+          avgMeetings: held ? Math.round(((r.smcMeetings ?? 0) / held) * 10) / 10 : 0,
+          present,
+          absent,
+          vacant: r.smcVacant ?? 0,
+          attendancePct: present + absent ? Math.round((present / (present + absent)) * 1000) / 10 : 0,
+        };
+      })
+      .sort((a, b) => b.notHeld - a.notHeld || a.unit.localeCompare(b.unit))
+      .map((r, i) => ({ sno: i + 1, ...r }));
+  });
+
+  readonly smcMeetingTotals = computed(() => {
+    const rows = this.smcMeetingRows();
+    const s = (f: (r: typeof rows[number]) => number) => rows.reduce((t, r) => t + f(r), 0);
+    const eligible = s((r) => r.eligible);
+    const held = s((r) => r.held);
+    const present = s((r) => r.present);
+    const absent = s((r) => r.absent);
+    return {
+      count: rows.length,
+      eligible,
+      held,
+      notHeld: s((r) => r.notHeld),
+      heldPct: eligible ? Math.round((held / eligible) * 1000) / 10 : 0,
+      meetings: s((r) => r.meetings),
+      avgMeetings: held ? Math.round((s((r) => r.meetings) / held) * 10) / 10 : 0,
+      present,
+      absent,
+      vacant: s((r) => r.vacant),
+      attendancePct: present + absent ? Math.round((present / (present + absent)) * 1000) / 10 : 0,
+    };
+  });
+
+  /**
+   * Per-school meeting detail for the drilled unit (metric 1c, and the actual
+   * list behind "meetings not held"). The eligible universe comes from the
+   * enrolment roll; meeting counts come from the detail asset.
+   */
+  readonly smcSchoolRows = computed(() => {
+    const d = this._smcDetail();
+    if (!d || !this.smcShowSchools()) return [];
+    const M = SmcMeetingCol;
+    const unit = this.smcUnit();
+    const dist = this.ds.selectedDistrict();
+    const blk = this.ds.selectedBlock();
+    const mgmts = this.smcManagements();
+
+    // Which schools to list: an explicitly opened unit wins, otherwise the
+    // current scope (which smcShowSchools() guarantees is a block).
+    let roll: SchoolRow[];
+    if (unit && blk) roll = this.ds.schoolsForBlock().filter((s) => s.name === unit);
+    else if (unit && dist) roll = this.ds.schoolRowsFor(dist, unit);
+    else if (unit) roll = this.ds.schoolRowsFor(unit);
+    else roll = this.ds.schoolsForBlock();
+    roll = roll.filter((s) => mgmts.has(s.mgmt ?? ''));
+
+    // meeting totals per UDISE for the unit, inside the active window
+    const byUdise = new Map<string, { meetings: number; present: number; absent: number; vacant: number; last: number }>();
+    for (const m of this.smcScopeMeetings()) {
+      const s = d.schools[m[M.school]];
+      if (!s.u) continue;
+      let o = byUdise.get(s.u);
+      if (!o) { o = { meetings: 0, present: 0, absent: 0, vacant: 0, last: -1 }; byUdise.set(s.u, o); }
+      o.meetings++;
+      o.present += m[M.present];
+      o.absent += m[M.absent];
+      o.vacant += m[M.vacant];
+      if (m[M.day] > o.last) o.last = m[M.day];
+    }
+
+    const notHeldOnly = this.smcKpiId() === 'm_mn';
+    const out = roll.map((s) => {
+      const o = byUdise.get(s.udise);
+      const present = o?.present ?? 0;
+      const absent = o?.absent ?? 0;
+      return {
+        udise: s.udise,
+        school: s.name,
+        management: s.mgmt,
+        category: s.ctype,
+        students: s.students ?? 0,
+        meetings: o?.meetings ?? 0,
+        held: (o?.meetings ?? 0) > 0 ? 'Yes' : 'No',
+        present,
+        absent,
+        vacant: o?.vacant ?? 0,
+        attendancePct: present + absent ? Math.round((present / (present + absent)) * 1000) / 10 : 0,
+        lastMeeting: o && o.last >= 0 ? this.smcDayToIso(o.last) : '—',
+      };
+    }).filter((r) => !notHeldOnly || r.held === 'No');
+
+    out.sort((a, b) => a.meetings - b.meetings || a.school.localeCompare(b.school));
+    return out.map((r, i) => ({ sno: i + 1, ...r }));
+  });
+
+  readonly smcSchoolTotals = computed(() => {
+    const rows = this.smcSchoolRows();
+    const s = (f: (r: typeof rows[number]) => number) => rows.reduce((t, r) => t + f(r), 0);
+    const present = s((r) => r.present);
+    const absent = s((r) => r.absent);
+    return {
+      count: rows.length,
+      held: rows.filter((r) => r.held === 'Yes').length,
+      notHeld: rows.filter((r) => r.held === 'No').length,
+      students: s((r) => r.students),
+      meetings: s((r) => r.meetings),
+      present,
+      absent,
+      vacant: s((r) => r.vacant),
+      attendancePct: present + absent ? Math.round((present / (present + absent)) * 1000) / 10 : 0,
+    };
+  });
+
+  /**
+   * Resolution completion status per unit (metrics 2 and 3). The active view
+   * decides whether emergency, non-emergency or all resolutions are counted;
+   * all three come off `drillRows()` and so respect the active window.
+   */
+  readonly smcResolutionRows = computed(() => {
+    const view = this.smcView();
+    return this.drillRows()
+      .map((r) => {
+        const raised = view === 'emergency' ? (r.smcEmergencyRaised ?? 0)
+          : view === 'other' ? (r.smcOtherRaised ?? 0) : (r.smcRaised ?? 0);
+        const resolved = view === 'emergency' ? (r.smcEmergencyResolved ?? 0)
+          : view === 'other' ? (r.smcOtherResolved ?? 0) : (r.smcClosed ?? 0);
+        const unresolved = view === 'emergency' ? (r.smcEmergencyOpen ?? 0)
+          : view === 'other' ? (r.smcOtherOpen ?? 0) : (r.smcPending ?? 0);
+        const base = resolved + unresolved;
+        return {
+          key: r.key,
+          unit: r.name,
+          schools: r.ns ?? 0,
+          raised,
+          resolved,
+          unresolved,
+          withdrawn: Math.max(0, raised - base),
+          completionPct: base ? Math.round((resolved / base) * 1000) / 10 : 0,
+        };
+      })
+      .sort((a, b) => b.unresolved - a.unresolved || a.unit.localeCompare(b.unit))
+      .map((r, i) => ({ sno: i + 1, ...r }));
+  });
+
+  readonly smcResolutionTotals = computed(() => {
+    const rows = this.smcResolutionRows();
+    const s = (f: (r: typeof rows[number]) => number) => rows.reduce((t, r) => t + f(r), 0);
+    const resolved = s((r) => r.resolved);
+    const unresolved = s((r) => r.unresolved);
+    return {
+      count: rows.length,
+      schools: s((r) => r.schools),
+      raised: s((r) => r.raised),
+      resolved,
+      unresolved,
+      withdrawn: s((r) => r.withdrawn),
+      completionPct: resolved + unresolved ? Math.round((resolved / (resolved + unresolved)) * 1000) / 10 : 0,
+    };
+  });
+
+  /**
+   * Department-wise abstract (the second half of metrics 2 and 3). Computed
+   * from the detail asset so it works at every scope, filtered to the active
+   * view's emergency flag and to the active window.
+   */
+  readonly smcDeptRows = computed(() => {
+    const d = this._smcDetail();
+    if (!d) return [];
+    const R = SmcResolutionCol;
+    const view = this.smcView();
+    const init = () => ({ raised: 0, resolved: 0, unresolved: 0, withdrawn: 0, emergency: 0 });
+    const map = new Map<string, ReturnType<typeof init>>();
+    for (const r of this.smcScopeResolutions()) {
+      const emg = r[R.emergency] === 1;
+      if (view === 'emergency' && !emg) continue;
+      if (view === 'other' && emg) continue;
+      const label = d.depts[r[R.dept]] ?? '—';
+      let o = map.get(label);
+      if (!o) { o = init(); map.set(label, o); }
+      o.raised++;
+      if (emg) o.emergency++;
+      const st = r[R.status];
+      if (st === 1) o.resolved++;
+      else if (st === 2) o.withdrawn++;
+      else o.unresolved++;        // unresolved + work in progress
+    }
+    return [...map.entries()]
+      .sort((a, b) => b[1].unresolved - a[1].unresolved || b[1].raised - a[1].raised)
+      .map(([dept, o], i) => ({
+        sno: i + 1,
+        dept,
+        raised: o.raised,
+        resolved: o.resolved,
+        unresolved: o.unresolved,
+        withdrawn: o.withdrawn,
+        emergency: o.emergency,
+        completionPct: o.resolved + o.unresolved
+          ? Math.round((o.resolved / (o.resolved + o.unresolved)) * 1000) / 10 : 0,
+      }));
+  });
+
+  readonly smcDeptTotals = computed(() => {
+    const rows = this.smcDeptRows();
+    const s = (f: (r: typeof rows[number]) => number) => rows.reduce((t, r) => t + f(r), 0);
+    const resolved = s((r) => r.resolved);
+    const unresolved = s((r) => r.unresolved);
+    return {
+      count: rows.length,
+      raised: s((r) => r.raised),
+      resolved,
+      unresolved,
+      withdrawn: s((r) => r.withdrawn),
+      emergency: s((r) => r.emergency),
+      completionPct: resolved + unresolved ? Math.round((resolved / (resolved + unresolved)) * 1000) / 10 : 0,
+    };
+  });
+
+  /**
+   * Maintenance / composite grant utilisation per unit (metric 4). Allocation
+   * is the published enrolment slab rule applied to the real roll; the utilised
+   * share is ASSUMED (deterministic per school) because the export carries no
+   * grant ledger. Figures are in ₹ lakh.
+   */
+  readonly smcGrantRows = computed(() => {
+    return this.drillRows()
+      .map((r) => {
+        const alloc = r.smcGrantAllocated ?? 0;
+        const used = r.smcGrantUtilised ?? 0;
+        return {
+          key: r.key,
+          unit: r.name,
+          schools: r.smcEligibleSchools ?? 0,
+          students: r.n ?? 0,
+          allocated: alloc,
+          utilised: used,
+          balance: Math.round((alloc - used) * 10) / 10,
+          utilPct: alloc ? Math.round((used / alloc) * 1000) / 10 : 0,
+        };
+      })
+      .sort((a, b) => a.utilPct - b.utilPct || a.unit.localeCompare(b.unit))
+      .map((r, i) => ({ sno: i + 1, ...r }));
+  });
+
+  readonly smcGrantTotals = computed(() => {
+    const rows = this.smcGrantRows();
+    const s = (f: (r: typeof rows[number]) => number) => rows.reduce((t, r) => t + f(r), 0);
+    const alloc = Math.round(s((r) => r.allocated) * 10) / 10;
+    const used = Math.round(s((r) => r.utilised) * 10) / 10;
+    return {
+      count: rows.length,
+      schools: s((r) => r.schools),
+      students: s((r) => r.students),
+      allocated: alloc,
+      utilised: used,
+      balance: Math.round((alloc - used) * 10) / 10,
+      utilPct: alloc ? Math.round((used / alloc) * 1000) / 10 : 0,
+    };
+  });
 }
 
 /** Topic tabs for the drill-down table, matching the prototype's lenses. */
 export type DrillTopic = 'enr' | 'att' | 'inf' | 'dinf' | 'aca' | 'sch'
-  | 'thiran' | 'scholarship' | 'smc' | 'palli' | 'dps';
+  | 'thiran' | 'scholarship' | 'smc' | 'palli' | 'dps' | 'acis';
 
 /** A row of KPI cards for one domain, rendered on a single line. */
 export interface KpiSection {
@@ -3547,6 +5911,49 @@ export interface DrillRow {
   dpsGt30?: number;
   dpsAvgDays?: number;
   dpsMaxDays?: number;
+
+  // ---- All Children in School (ACiS) — common pool ----
+  acisPool?: number;              // children in the common pool (TC dropouts)
+  acisSurveyed?: number;
+  acisPendingSurvey?: number;
+  acisSurveyPct?: number;
+  acisAdmitted?: number;
+  acisBridged?: number;
+  acisBridgeDays?: number;        // mean days: common pool → survey/admission
+  acisToBeAdmitted?: number;
+  acisToBeValidated?: number;     // pending SMC validation
+  acisWithReason?: number;
+  acisDeptTaken?: number;
+  acisDeptPending?: number;
+  acisCwsn?: number;
+  acisUmis?: number;              // joined higher education (UMIS)
+  acisPdRepeat?: number;          // PD repeaters (real Red_Flag_Status)
+  acisPd?: number;                // potential dropouts — absent 15+ of last 30 days (real)
+  acisPdWithReason?: number;      // PD students with a reason recorded
+  acisPdBase?: number;            // enrolment in PD-covered school types (PD % denominator)
+  acisPdPct?: number;             // tile-level PD %, via scopeValues RATIO
+  acisDropOut?: number;           // dropouts not re-enrolled (common pool − admitted)
+  acisEnrolI12?: number;          // enrolment classes I–XII (dropout-rate denominator)
+
+  // ---- SMC meetings, emergency/other split, grants ----
+  smcEmergencyRaised?: number;
+  smcEmergencyResolved?: number;
+  smcEmergencyClosureRate?: number;
+  smcOtherRaised?: number;
+  smcOtherResolved?: number;
+  smcOtherOpen?: number;
+  smcOtherClosureRate?: number;
+  smcMeetings?: number;           // meetings held in the active window
+  smcSchoolsHeld?: number;        // distinct schools that held a meeting
+  smcSchoolsNotHeld?: number;     // eligible schools with no meeting
+  smcEligibleSchools?: number;    // SMC-covered schools in scope (denominator)
+  smcPresent?: number;
+  smcAbsent?: number;
+  smcVacant?: number;
+  smcMeetAttendPct?: number;      // present / (present + absent)
+  smcGrantAllocated?: number;     // ₹ lakh — real slab rule on real enrolment
+  smcGrantUtilised?: number;      // ₹ lakh — ASSUMED utilisation share
+  smcGrantUtilPct?: number;
 }
 
 /** One row of the per-KPI school list (flag-KPI drill-down). */
