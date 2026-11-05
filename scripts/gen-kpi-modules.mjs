@@ -41,18 +41,12 @@ const pct = (n, d) => (d ? Math.round((n / d) * 1000) / 10 : 0);
 
 // ---- reference lists from KPI.md ----
 const SCHOLARSHIP_SCHEMES = [
-  'ADW GIS (3-5)',
-  'ADW GIS (6-8)',
-  'ADW GOI PMSS',
-  'ADW GOI Pre-Matric Component 1',
-  'ADW GOI Pre-Matric Component-II-UCO',
-  'Muslim Girls Educational Scheme',
-  'Pre-Matric Scholarship Scheme - BC',
-  'Pre-Matric Scholarship Scheme - MBC/DNC',
-  'Rural Girls Incentive Scheme - MBC/DNC',
-  'TW GIS',
-  'TW GOI Post Matric Scheme',
-  'TW GOI Pre-Matric Scholarship Scheme',
+  'Post-Matric (SC/SC(A)/ST)',
+  'NMMS (Merit-cum-Means)',
+  'Pre-Matric (SC/SC(A)/ST)',
+  'Pre-Matric (BC/MBC/DNC)',
+  'Girl Child Incentive',
+  'Special Cash Incentive',
 ];
 const SOCIAL_CATEGORIES = ['SC', 'ST', 'BC', 'MBC/DNC', 'Others'];
 const SCHOOL_CATEGORIES = ['Primary', 'Middle', 'High', 'Higher Secondary'];

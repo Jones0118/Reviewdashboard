@@ -248,6 +248,10 @@ export const SmcResolutionCol = {
   emergency: 3,
   level: 4,
   day: 5,
+  /** Resolution category (index into `cats`). */
+  cat: 6,
+  /** Resolution sub-category (index into `subcats`). */
+  subcat: 7,
 } as const;
 
 export interface SmcDetailAsset {
@@ -263,6 +267,10 @@ export interface SmcDetailAsset {
   schools: SmcSchoolRef[];
   depts: string[];
   levels: string[];
+  /** Resolution categories (indexed by `SmcResolutionCol.cat`). */
+  cats?: string[];
+  /** Resolution sub-categories (indexed by `SmcResolutionCol.subcat`). */
+  subcats?: string[];
   meetings: number[][];
   resolutions: number[][];
 }

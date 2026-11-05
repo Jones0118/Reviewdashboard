@@ -698,6 +698,10 @@ async function ingestSmc() {
   const deptIdx = new Map();
   const levels = [];
   const levelIdx = new Map();
+  const cats = [];
+  const catIdx = new Map();
+  const subcats = [];
+  const subcatIdx = new Map();
   const intern = (list, map, label) => {
     const k = (label ?? '').toString().trim() || '—';
     if (!map.has(k)) { map.set(k, list.length); list.push(k); }
@@ -722,7 +726,7 @@ async function ingestSmc() {
 
   // ---- pass 1: read both files into memory as compact rows ----
   const meetings = [];     // [schIdx, dayOffset, present, absent, vacant, members]
-  const resolutions = [];  // [schIdx, deptIdx, status, emergency, levelIdx, dayOffset]
+  const resolutions = [];  // [schIdx, deptIdx, status, emergency, levelIdx, dayOffset, catIdx, subcatIdx]
   let maxDate = '';
   const seeDate = (d) => { if (d && d > maxDate && d <= '2099-12-31') maxDate = d; };
 
@@ -752,6 +756,8 @@ async function ingestSmc() {
       (row['is_emergency'] ?? '').toString().trim().toUpperCase() === 'YES' ? 1 : 0,
       intern(levels, levelIdx, row['Level']),
       date,
+      intern(cats, catIdx, row['category name']),
+      intern(subcats, subcatIdx, row['subcategory name']),
     ]);
   });
 
@@ -858,11 +864,11 @@ async function ingestSmc() {
     cutoffs: cutoff,
     managements: SMC_MANAGEMENTS,
     meetingFields: ['school', 'day', 'present', 'absent', 'vacant', 'members'],
-    resolutionFields: ['school', 'dept', 'status', 'emergency', 'level', 'day'],
+    resolutionFields: ['school', 'dept', 'status', 'emergency', 'level', 'day', 'cat', 'subcat'],
     statusLabels: ['Unresolved', 'Resolved', 'Withdrawn', 'Work in progress'],
-    schools, depts, levels,
+    schools, depts, levels, cats, subcats,
     meetings: meetings.map((m) => [m[0], smcDayOffset(m[1]), m[2], m[3], m[4], m[5]]),
-    resolutions: resolutions.map((r) => [r[0], r[1], r[2], r[3], r[4], smcDayOffset(r[5])]),
+    resolutions: resolutions.map((r) => [r[0], r[1], r[2], r[3], r[4], smcDayOffset(r[5]), r[6], r[7]]),
   };
 
   const distAll = Object.values(out.districts);

@@ -220,6 +220,44 @@ m_ga allocated (₹ lakh), m_gu utilised (₹ lakh). Grant **utilisation is ASSU
   ClosureRate), smcOtherRaised/Resolved/Open/ClosureRate, smcMeetings, smcSchoolsHeld,
   smcSchoolsNotHeld, smcEligibleSchools, smcPresent/Absent/Vacant, smcMeetAttendPct,
   smcGrantAllocated/Utilised/UtilPct.
+- **SMC drill changes (05-Nov-2026):** govt-only already via `managements`. Removed the
+  "Meetings not held" and "Meeting attendance" KPI tabs (`smcKpiTabs` now m_mh, m_r, m_e,
+  m_or, m_ga) and dropped m_mn/m_ma from `SMC_KPI_VIEW` (their tiles still open → fall back
+  to m_mh). **Attendance % = present / (present + absent + vacant)** — vacant seats are part
+  of the reconstituted member strength, so they now count in the denominator (steering formula
+  2). Changed in `realFields` smcMeetAttendPct, `smcMeetingRows/Totals`, `smcSchoolRows/Totals`.
+  Meetings-held unit grid: columns Total Schools, Meeting Held, Meeting Not Held, % Schools
+  Meeting Conducted (= held schools / total schools), Total Meetings, Members Present/Absent,
+  Avg Attendance %; the "Avg per School" column was removed. School drill grid: UDISE, School
+  Name, Category, No. of Meetings Held, Avg Attendance %, Present, Absent, Last Meeting
+  Conducted Date (Management / Students / Meeting-Held Yes-No / Vacant columns removed; vacant
+  still computed for the attendance denominator). "Last 12 months" = the existing `p12` period.
+- **SMC month filter (05-Nov-2026):** replaced the rolling-window dropdown with From/To month
+  selects. `smcMonthFrom/To` ('YYYY-MM', '' = data ends), `smcActiveFrom/To`, `smcMonthOptions`,
+  `smcMonthList`, `smcDayWindow` (floor+ceil day offsets), `setSmcMonthFrom/To`, `smcClearMonths`,
+  `smcMonthLabel`. Default From = **June of the latest data year** (2026-06), To = latest month
+  (2026-10). Meetings unit grid (`smcMeetingRows`) and resolution unit grid (`smcResolutionRows`)
+  are now rebuilt FROM THE DETAIL ASSET grouped by child unit (district at state, block in a
+  district) so any month range works — they no longer read the pre-bucketed `drillRows()`.
+  `smcScopeMeetings/Resolutions` now filter by `[floor, ceil]`. The grant view still uses the
+  full allocation (time-independent). The pre-bucketed `smcPeriod` is retained but unused in UI.
+- **SMC resolution school drill + detail (05-Nov-2026):** in the resolution views (all/
+  emergency/other), clicking a block (or `smcSelectUnit`) shows `smcResolutionSchoolRows` —
+  per govt-school raised/resolved/unresolved/withdrawn/completion%/last-raised, gated by
+  `smcResShowSchools` (unit selected or block scope). Each row has a View button →
+  `smcOpenResolutionDetail(udise, school)` sets `smcResolutionPick` → `smcResolutionDetailRows`
+  lists that school's individual resolutions (Raised On, Department, Level, Emergency, Status)
+  for the active view + month range; "Back to schools" via `smcCloseResolutionDetail`. The
+  department-wise abstract still renders under the unit/school table but is hidden while a
+  single school's resolution detail is open. `smcResolutionPick` is cleared by setSmcKpi /
+  smcDrillRow / smcSelectUnit / closeSmcDrill.
+- **SMC resolution detail columns + ingest (05-Nov-2026):** the per-school resolution detail
+  now shows Raised On, Resolution Category, Sub-category, Department, Level, Status (Emergency
+  column removed). Added `cat`/`subcat` to the ingest resolution rows (`category name` /
+  `subcategory name` CSV columns), `resolutionFields` now 8 cols, `SmcDetailAsset.cats/subcats`,
+  `SmcResolutionCol.cat=6/subcat=7`; re-ran `ingest-real.mjs smc` (values are in Tamil, as in
+  source). Removed the "Of which Emergency" column from the department-wise abstract. Renamed
+  KPI `m_e` label "Emergency resolutions not closed" → "Emergency resolutions".
 
 ### Palli Parvai — user-wise drill + duration KPI (REAL — assets/palli-obs.json, User Stories 4–8)
 Source: `Resources\Palli Parvai\PP_Oct_2026_Start and End 20261103.xlsx` → `ingestPalliObs()`
@@ -346,6 +384,17 @@ repeaters, hide(ac_pdrs) PD reasons, hide(ac_pdg) PD grade-wise. **Nothing is as
   that band for that user. `palliDurPick` now has optional `user` and cat `'all'` (= all valid).
   `palliCloseDurList(all = true)`; the list's back button passes `false` to return to the users.
   District-row count cells still open the district-level list directly. Export view `durUsers`.
+- **Month filter replaces the date range** (04-Nov-2026): `palliMonth` ('YYYY-MM', '' = latest),
+  `palliMonthOptions` (months present in palli-obs, newest first — today only 2026-10),
+  `palliActiveMonth(Label)`, `setPalliMonth`. `palliDayRange` = 1st → last day of the month;
+  `palliPeriodFactor` is now always 1 (full monthly target). `palliDateFrom/To` are GONE.
+  Month select shown on the p_co matrix + p_ono matrix (bar above the @switch), in the p_co drill
+  filter bar and in p_dur. One month shared by all tabs. ASSUMED views (p_co matrix
+  `palliObsPct`, p_ono `palliOnoCount` / officials) add `palliMonthSeed()` to their hash — ''
+  for the latest month so the existing values are unchanged. `openPalliDrill` / `setPalliKpi`
+  now always call `loadPalliObs()` (needed for the month list). Exports' subtitle = month label.
+  The ingest still reads ONE export file → more months need a merge step in `ingestPalliObs`.
+- Requirement doc: `Palli-Parvai-Enhancement-Requirements.md` + `.docx` (v1.1) in the repo root.
 - **Asset cache gotcha (fixed 04-Nov-2026):** `loadAsset()` used `cache: 'force-cache'`, so a
   browser kept the FIRST copy of every asset forever — even after a hard refresh — and a
   regenerated `palli-obs.json` (with users / durations) never arrived: the user-wise views showed
@@ -561,6 +610,35 @@ thiran THIRAN, scholarship Scholarship, smc SMC, palli Palli Parvai, dps Recogni
 (Schemes & Grievances `sch` tab is **removed** while those modules are disabled.)
 The tab bar is rendered on the generic drill, the per-KPI school list, and the Palli drill
 so you can switch components from any view-details page.
+
+### Scholarship scheme-wise counts + block/school drill (04-Nov-2026)
+Shown on the **Scholarship "View details" drill** (`selectedDomain() === 'scholarship'`,
+the generic district-grid drill in app.html, just AFTER the district/block/school grid table —
+NOT in the `activeSub()==='numbers'` overview, which the Review Dashboard never renders).
+The 6 schemes come from `kpi-modules.json` (regenerated: Post-Matric SC/SC(A)/ST, NMMS,
+Pre-Matric SC/SC(A)/ST, Pre-Matric BC/MBC/DNC, Girl Child Incentive, Special Cash Incentive).
+Card title "Scheme-wise counts". Columns: Scheme/Block/School · Amount/Student · Eligible · Payment
+Success/Failed/Pending · Success Rate · NPCI Active/Inactive · Aadhaar Not Updated · Amount Paid,
+with a Total row and Excel/CSV/PDF (`exportScholar` in app.ts).
+- **Level 1 (REAL):** `scholarSchemeRows` — one row per scheme from `kpi-modules.json`
+  (`moduleNode().scholarship.schemes`, scope-aware + `scale()`). Amount/Student is a fixed
+  SAMPLE constant per scheme (`SCHOLAR_AMOUNT`); Amount Paid = paySuccess × amount.
+- **Level 2 (SAMPLE):** click a scheme → `scholarBlockRows` — the scheme's scope figures split
+  across the scope's blocks by enrolment weight (× a per-block hash), via `scholarSplit` (last
+  unit absorbs the rounding remainder so parts === scope total). Badged "Sample split".
+- **Level 3 (SAMPLE):** click a block → `scholarSchoolRows` — the block row split across that
+  block's schools the same way. Reconciles to the block row.
+- **Level 4 (SAMPLE):** click a school → `scholarSchoolDetail` / `scholarSchoolDetailTotals` —
+  that school's per-scheme breakdown (its enrolment share of each scheme × per-UDISE hash),
+  `scholarSchool` signal, `scholarOpen/CloseSchool`; "Back to schools" button.
+- **Gender filter** (All / Boys / Girls): `scholarGender` + `scholarGenderOptions`,
+  `setScholarGender`; `scholarGenderFactor` = scope boys/girls enrolment share, applied via
+  `gScale()` to every scheme/block/school/detail count. In the card title.
+- State: `scholarDrillScheme` / `scholarDrillBlock` signals; `scholarOpen/CloseScheme`,
+  `scholarOpen/CloseBlock`. Totals: `scholarSchemeTotals` / `scholarBlockTotals` /
+  `scholarSchoolTotals` (`scholarTotalsOf`). No real block/school scholarship data exists; when
+  a UDISE-level export arrives, replace levels 2–3 with real figures.
+
 
 ---
 

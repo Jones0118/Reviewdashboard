@@ -189,7 +189,7 @@ export const KPI_MODULES: KpiModule[] = [
       hide(P('m_k', 'Closure rate %', 1, 0, 100, 'smcClosureRate', 'smc')),
       // ---- Emergency resolutions completion status (metric 2) ----
       P('m_ek', 'Emergency resolutions completion %', 1, 0, 100, 'smcEmergencyClosureRate', 'smc'),
-      hide(N('m_e', 'Emergency resolutions not closed', -1, 'smcEmergency', 'smc')),
+      hide(N('m_e', 'Emergency resolutions', -1, 'smcEmergency', 'smc')),
       hide(N('m_er', 'Emergency resolved', 1, 'smcEmergencyResolved', 'smc')),
       // ---- Other resolutions completion status (metric 3) ----
       P('m_ok', 'Other resolutions completion %', 1, 0, 100, 'smcOtherClosureRate', 'smc'),

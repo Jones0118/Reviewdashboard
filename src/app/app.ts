@@ -1956,6 +1956,53 @@ export class App implements OnInit {
   }
 
   /**
+   * Scheme-wise scholarship export (REAL scheme totals; SAMPLE block / school
+   * split). Exports whichever level is on screen, all rows, with the scope and
+   * (for the drill) the scheme in the subtitle.
+   */
+  exportScholar(format: 'excel' | 'csv' | 'pdf'): void {
+    const n = 'number' as const, p = 'percent' as const;
+    const scheme = this.rv.scholarDrillScheme();
+    const blk = this.rv.scholarDrillBlock();
+    const school = this.rv.scholarSchool();
+    const firstCol: ExportColumn[] = school
+      ? [{ header: 'Scheme', field: 'scheme' }]
+      : !scheme
+        ? [{ header: 'Scheme', field: 'scheme' }]
+        : !blk
+          ? [{ header: 'Block', field: 'scheme' }]
+          : [{ header: 'UDISE', field: 'udise' }, { header: 'School', field: 'school' }];
+    const columns: ExportColumn[] = [
+      { header: 'Sl. No.', field: 'sno', type: n },
+      ...firstCol,
+      { header: 'Amount / Student', field: 'amountPerStudent', type: n },
+      { header: 'Eligible', field: 'eligible', type: n },
+      { header: 'Payment Success', field: 'paySuccess', type: n },
+      { header: 'Payment Failed', field: 'payFailed', type: n },
+      { header: 'Payment Pending', field: 'payPending', type: n },
+      { header: 'Success Rate', field: 'successRate', type: p },
+      { header: 'NPCI Active', field: 'npciActive', type: n },
+      { header: 'NPCI Inactive', field: 'npciInactive', type: n },
+      { header: 'Aadhaar Not Updated', field: 'aadhaarNotUpdated', type: n },
+      { header: 'Amount Paid', field: 'amountPaid', type: n },
+    ];
+    const rows = school ? this.rv.scholarSchoolDetail() : !scheme ? this.rv.scholarSchemeRows() : !blk ? this.rv.scholarBlockRows() : this.rv.scholarSchoolRows();
+    const g = this.rv.scholarGender();
+    const gLabel = g === 'all' ? '' : ` · ${g === 'boys' ? 'Boys' : 'Girls'}`;
+    const level = school ? `${this.ds.titleCase(school.name)} — scheme-wise`
+      : !scheme ? 'schemes' : !blk ? `${scheme} — block-wise` : `${scheme} — ${this.ds.titleCase(blk.block)} — school-wise`;
+    const note = (scheme || school) ? ' · split is sample data' : '';
+    const req = {
+      title: `Scholarship scheme-wise counts — ${this.ds.scopeLabel()}`,
+      subtitle: `${level}${gLabel}${note}`,
+      columns, rows: [...rows],
+    };
+    if (format === 'excel') this.ex.toExcel(req);
+    else if (format === 'csv') this.ex.toCsv(req);
+    else void this.ex.toPdf(req);
+  }
+
+  /**
    * Palli Parvai drill exports (US 4 / 5 / 7) — every row of the current view
    * (not just the visible page), with the breadcrumb path and date range as
    * the subtitle. Uses the shared ExportService (Excel / CSV / PDF).
@@ -2010,8 +2057,7 @@ export class App implements OnInit {
     const RAG: Record<string, string> = { good: 'Green', warn: 'Amber', bad: 'Red', none: 'N/A' };
     const rows = (spec.rows as any[]).map((r) => ({ ...r, section: '—', ragLabel: RAG[r.rag] ?? '', pct: r.pct ?? 'N/A' }));
     const crumbs = this.rv.palliCrumbs().map((c) => c.label).join(' → ');
-    const w = this.rv.palliObsWindow();
-    const range = `${this.rv.palliDateFrom() || w.from} to ${this.rv.palliDateTo() || w.to}`;
+    const range = this.rv.palliActiveMonthLabel();
     const req = { title: `${spec.title} — ${this.ds.scopeLabel()}`, subtitle: `${crumbs} · ${range}`, columns: [...spec.columns], rows };
     if (format === 'excel') this.ex.toExcel(req);
     else if (format === 'csv') this.ex.toCsv(req);

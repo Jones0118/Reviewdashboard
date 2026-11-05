@@ -1945,8 +1945,9 @@ export class ReviewService {
         out.smcPresent = a[K.present];
         out.smcAbsent = a[K.absent];
         out.smcVacant = a[K.vacant];
-        // vacant seats are not absences, so they stay out of the denominator
-        out.smcMeetAttendPct = rate(a[K.present], a[K.present] + a[K.absent]);
+        // Member attendance % = present / total reconstituted members
+        // (present + absent + vacant). Vacant seats count in the denominator.
+        out.smcMeetAttendPct = rate(a[K.present], a[K.present] + a[K.absent] + a[K.vacant]);
       } else {
         out.smcRaised = smc.raised;
         out.smcClosed = smc.closed;
@@ -2936,6 +2937,237 @@ export class ReviewService {
     (this.scholarshipActive()?.bySocialCategory ?? []).map((c) => ({ name: c.name, value: this.scale(c.students) })),
   );
 
+  // ---- gender filter (Scholarship grid: All / Boys / Girls) ----
+  readonly scholarGender = signal<'all' | 'boys' | 'girls'>('all');
+  readonly scholarGenderOptions = [
+    { label: 'All genders', value: 'all' },
+    { label: 'Boys', value: 'boys' },
+    { label: 'Girls', value: 'girls' },
+  ];
+  setScholarGender(g: 'all' | 'boys' | 'girls'): void { this.scholarGender.set(g); }
+  /**
+   * Fraction of the scope's enrolment that is boys / girls, so the gender filter
+   * scales every scheme count consistently (deterministic, from the roll).
+   */
+  private readonly scholarGenderFactor = computed(() => {
+    const g = this.scholarGender();
+    if (g === 'all') return 1;
+    let boys = 0, girls = 0;
+    for (const e of this.scopeSchoolRows()) { boys += e.row.boys ?? 0; girls += e.row.girls ?? 0; }
+    const tot = boys + girls;
+    if (!tot) return g === 'boys' ? 0.5 : 0.5;
+    return g === 'boys' ? boys / tot : girls / tot;
+  });
+  private gScale(n: number): number { return Math.round(n * this.scholarGenderFactor()); }
+
+  // ---- 2a. SCHOLARSHIP scheme-wise counts + block / school drill ----
+  /**
+   * Scheme-wise counts table (below the KPI tiles) with a district-grid-style
+   * block → school drill.  State and district figures are REAL (kpi-modules.json);
+   * the block and school splits have no source, so they are SAMPLE values
+   * distributed from the scope's school enrolment (deterministic per UDISE) and
+   * badged "Sample". Totals always reconcile to the scope figure above them.
+   */
+  /** Fixed per-student scholarship amount (₹) per scheme — sample reference values. */
+  private readonly SCHOLAR_AMOUNT: Record<string, number> = {
+    'Post-Matric (SC/SC(A)/ST)': 8000,
+    'NMMS (Merit-cum-Means)': 12000,
+    'Pre-Matric (SC/SC(A)/ST)': 3500,
+    'Pre-Matric (BC/MBC/DNC)': 2000,
+    'Girl Child Incentive': 1500,
+    'Special Cash Incentive': 5000,
+  };
+  scholarAmountPerStudent(scheme: string): number {
+    return this.SCHOLAR_AMOUNT[scheme] ?? 3000;
+  }
+
+  /** Columns of the scheme-wise table, as one row object. */
+  private scholarSchemeRow(s: ScholarshipScheme) {
+    const amt = this.scholarAmountPerStudent(s.name);
+    const paySuccess = this.gScale(this.scale(s.paySuccess));
+    return {
+      scheme: s.name,
+      amountPerStudent: amt,
+      eligible: this.gScale(this.scale(s.eligible)),
+      paySuccess,
+      payFailed: this.gScale(this.scale(s.payFailed)),
+      payPending: this.gScale(this.scale(s.payPending)),
+      successRate: this.pct(s.paySuccess, s.eligible),
+      npciActive: this.gScale(this.scale(s.npciActive)),
+      npciInactive: this.gScale(this.scale(s.npciInactive)),
+      aadhaarNotUpdated: this.gScale(this.scale(s.aadhaarNotUpdated)),
+      amountPaid: paySuccess * amt,
+    };
+  }
+
+  /** Level 1 — one row per scheme for the current scope (REAL). */
+  readonly scholarSchemeRows = computed(() => {
+    const schemes = this.moduleNode()?.scholarship.schemes ?? [];
+    return schemes.map((s, i) => ({ sno: i + 1, ...this.scholarSchemeRow(s) }));
+  });
+  private scholarTotalsOf(rows: ReturnType<ReviewService['scholarSchemeRows']>) {
+    const sum = (f: (r: typeof rows[number]) => number) => rows.reduce((t, r) => t + f(r), 0);
+    const eligible = sum((r) => r.eligible), paySuccess = sum((r) => r.paySuccess);
+    return {
+      eligible, paySuccess, payFailed: sum((r) => r.payFailed), payPending: sum((r) => r.payPending),
+      successRate: this.pct(paySuccess, eligible), npciActive: sum((r) => r.npciActive),
+      npciInactive: sum((r) => r.npciInactive), aadhaarNotUpdated: sum((r) => r.aadhaarNotUpdated),
+      amountPaid: sum((r) => r.amountPaid),
+    };
+  }
+  readonly scholarSchemeTotals = computed(() => this.scholarTotalsOf(this.scholarSchemeRows()));
+
+  // ---- drill state: a clicked scheme, then a clicked block ----
+  readonly scholarDrillScheme = signal<string | null>(null);
+  readonly scholarDrillBlock = signal<{ district: string; block: string } | null>(null);
+  scholarOpenScheme(scheme: string): void { this.scholarDrillScheme.set(scheme); this.scholarDrillBlock.set(null); this.scholarSchool?.set(null); }
+  scholarOpenBlock(district: string, block: string): void { this.scholarDrillBlock.set({ district, block }); this.scholarSchool?.set(null); }
+  scholarCloseScheme(): void { this.scholarDrillScheme.set(null); this.scholarDrillBlock.set(null); this.scholarSchool?.set(null); }
+  scholarCloseBlock(): void { this.scholarDrillBlock.set(null); this.scholarSchool?.set(null); }
+  readonly scholarDrillSchemeObj = computed<ScholarshipScheme | null>(() => {
+    const name = this.scholarDrillScheme();
+    if (!name) return null;
+    return this.moduleNode()?.scholarship.schemes.find((s) => s.name === name) ?? null;
+  });
+
+  /**
+   * Split a scope total across keyed units by enrolment weight, deterministically.
+   * The last unit absorbs the rounding remainder so the parts always sum to `total`.
+   */
+  private scholarSplit<T extends { key: string; weight: number }>(units: T[], total: number): Map<string, number> {
+    const out = new Map<string, number>();
+    const wSum = units.reduce((a, u) => a + u.weight, 0) || 1;
+    let acc = 0;
+    units.forEach((u, i) => {
+      const v = i === units.length - 1 ? total - acc : Math.round((u.weight / wSum) * total);
+      out.set(u.key, Math.max(0, v)); acc += v;
+    });
+    return out;
+  }
+
+  /** Build a scheme row (same shape as the table) from raw part counts. */
+  private scholarPartRow(label: string, amt: number, eligible: number, paySuccess: number,
+    payFailed: number, payPending: number, npciActive: number, npciInactive: number, aadhaar: number) {
+    return {
+      scheme: label, amountPerStudent: amt, eligible, paySuccess, payFailed, payPending,
+      successRate: this.pct(paySuccess, eligible), npciActive, npciInactive,
+      aadhaarNotUpdated: aadhaar, amountPaid: paySuccess * amt,
+    };
+  }
+
+  /** Blocks in the current scope with their enrolment weight. */
+  private scholarScopeBlocks(): { district: string; block: string; weight: number }[] {
+    const map = new Map<string, { district: string; block: string; weight: number }>();
+    for (const e of this.scopeSchoolRows()) {
+      const k = `${e.district}||${e.block}`;
+      const cur = map.get(k) ?? { district: e.district, block: e.block, weight: 0 };
+      cur.weight += Math.max(1, e.row.students ?? 0);
+      map.set(k, cur);
+    }
+    return [...map.values()];
+  }
+
+  /** Level 2 — SAMPLE per-block split of the selected scheme (reconciles to the scope). */
+  readonly scholarBlockRows = computed(() => {
+    const s = this.scholarDrillSchemeObj();
+    if (!s) return [] as (ReturnType<ReviewService['scholarPartRow']> & { sno: number; district: string; block: string; key: string })[];
+    const amt = this.scholarAmountPerStudent(s.name);
+    const blocks = this.scholarScopeBlocks()
+      .map((b) => ({ ...b, key: `${b.district}||${b.block}`, w2: b.weight * (0.6 + this.hash01(`${b.district}|${b.block}`, 'sch-' + s.name) * 0.8) }))
+      .map((b) => ({ ...b, weight: b.w2 }));
+    const units = blocks.map((b) => ({ key: b.key, weight: b.weight }));
+    const elig = this.scholarSplit(units, this.gScale(this.scale(s.eligible)));
+    const succ = this.scholarSplit(units, this.gScale(this.scale(s.paySuccess)));
+    const fail = this.scholarSplit(units, this.gScale(this.scale(s.payFailed)));
+    const pend = this.scholarSplit(units, this.gScale(this.scale(s.payPending)));
+    const npA = this.scholarSplit(units, this.gScale(this.scale(s.npciActive)));
+    const npI = this.scholarSplit(units, this.gScale(this.scale(s.npciInactive)));
+    const aad = this.scholarSplit(units, this.gScale(this.scale(s.aadhaarNotUpdated)));
+    return blocks
+      .map((b) => ({
+        district: b.district, block: b.block, key: b.key,
+        ...this.scholarPartRow(this.ds.titleCase(b.block), amt,
+          elig.get(b.key) ?? 0, succ.get(b.key) ?? 0, fail.get(b.key) ?? 0, pend.get(b.key) ?? 0,
+          npA.get(b.key) ?? 0, npI.get(b.key) ?? 0, aad.get(b.key) ?? 0),
+      }))
+      .sort((x, y) => y.eligible - x.eligible)
+      .map((r, i) => ({ sno: i + 1, ...r }));
+  });
+  readonly scholarBlockTotals = computed(() => this.scholarTotalsOf(this.scholarBlockRows() as any));
+
+  /** Level 3 — SAMPLE per-school split of the selected scheme within the clicked block. */
+  readonly scholarSchoolRows = computed(() => {
+    const s = this.scholarDrillSchemeObj();
+    const b = this.scholarDrillBlock();
+    if (!s || !b) return [] as any[];
+    const amt = this.scholarAmountPerStudent(s.name);
+    // the block row (sample) is the total this level must reconcile to
+    const blockRow = this.scholarBlockRows().find((r) => r.key === `${b.district}||${b.block}`);
+    if (!blockRow) return [];
+    const schools = this.ds.schoolRowsFor(b.district, b.block)
+      .map((row) => ({ row, key: row.udise, weight: Math.max(1, row.students ?? 0) * (0.5 + this.hash01(row.udise, 'sch-' + s.name)) }));
+    const units = schools.map((x) => ({ key: x.key, weight: x.weight }));
+    const elig = this.scholarSplit(units, blockRow.eligible);
+    const succ = this.scholarSplit(units, blockRow.paySuccess);
+    const fail = this.scholarSplit(units, blockRow.payFailed);
+    const pend = this.scholarSplit(units, blockRow.payPending);
+    const npA = this.scholarSplit(units, blockRow.npciActive);
+    const npI = this.scholarSplit(units, blockRow.npciInactive);
+    const aad = this.scholarSplit(units, blockRow.aadhaarNotUpdated);
+    return schools
+      .map((x) => ({
+        udise: x.row.udise, school: x.row.name,
+        ...this.scholarPartRow(x.row.name, amt,
+          elig.get(x.key) ?? 0, succ.get(x.key) ?? 0, fail.get(x.key) ?? 0, pend.get(x.key) ?? 0,
+          npA.get(x.key) ?? 0, npI.get(x.key) ?? 0, aad.get(x.key) ?? 0),
+      }))
+      .sort((x, y) => y.eligible - x.eligible)
+      .map((r, i) => ({ sno: i + 1, ...r }));
+  });
+  readonly scholarSchoolTotals = computed(() => this.scholarTotalsOf(this.scholarSchoolRows() as any));
+
+  // ---- school-wise scholarship detail (clicking a school in the school list) ----
+  readonly scholarSchool = signal<{ udise: string; name: string } | null>(null);
+  scholarOpenSchool(udise: string, name: string): void { this.scholarSchool.set({ udise, name }); }
+  scholarCloseSchool(): void { this.scholarSchool.set(null); }
+
+  /**
+   * SAMPLE per-scheme detail for the clicked school: every scheme's eligible /
+   * paid / failed / pending etc., split from the school's share of the scope
+   * (deterministic per UDISE + scheme), plus amount paid and gender factor.
+   * There is no real school-level scholarship source, so this is sample data.
+   */
+  readonly scholarSchoolDetail = computed(() => {
+    const sc = this.scholarSchool();
+    const schemes = this.moduleNode()?.scholarship.schemes ?? [];
+    if (!sc || !schemes.length) return [] as any[];
+    // the school's enrolment weight vs the whole scope → its share of each scheme
+    const rows = this.scopeSchoolRows();
+    let wSum = 0; let myW = 0;
+    for (const e of rows) {
+      const w = Math.max(1, e.row.students ?? 0);
+      wSum += w;
+      if (e.row.udise === sc.udise) myW = w;
+    }
+    const share = wSum ? myW / wSum : 0;
+    return schemes.map((s, i) => {
+      const amt = this.scholarAmountPerStudent(s.name);
+      const j = (base: number) => Math.round(this.gScale(this.scale(base)) * share * (0.6 + this.hash01(sc.udise, 'scd-' + s.name) * 0.8));
+      const eligible = j(s.eligible);
+      const paySuccess = Math.min(eligible, j(s.paySuccess));
+      const payFailed = Math.min(eligible - paySuccess, j(s.payFailed));
+      const payPending = Math.max(0, eligible - paySuccess - payFailed);
+      const npciActive = Math.min(eligible, j(s.npciActive));
+      return {
+        sno: i + 1, scheme: s.name, amountPerStudent: amt, eligible, paySuccess, payFailed, payPending,
+        successRate: this.pct(paySuccess, eligible), npciActive, npciInactive: Math.max(0, eligible - npciActive),
+        aadhaarNotUpdated: j(s.aadhaarNotUpdated), amountPaid: paySuccess * amt,
+      };
+    });
+  });
+  readonly scholarSchoolDetailTotals = computed(() => this.scholarTotalsOf(this.scholarSchoolDetail() as any));
+
+
   // ---- 3. DIGITAL INFRASTRUCTURE ----
   readonly digitalKpis = computed(() => {
     const d = this.moduleNode()?.digital;
@@ -3082,8 +3314,8 @@ export class ReviewService {
     // { id: 'p_low', label: 'Low performers' },
     // { id: 'p_top', label: 'Top performers' },
   ];
-  setPalliKpi(id: string): void { this.palliKpiId.set(id); this.palliDesignation.set(null); this.palliSnoReset(); this.palliOnoReset(); this.palliLlClose(); this.palliCloseDurList(); if (id === 'p_dur') { this.palliDurDesig.set(''); this.loadPalliObs(); } }
-  openPalliDrill(id: string): void { if (this.hasPalliDrill(id)) { this.palliKpiId.set(id); this.palliDesignation.set(null); this.palliSnoReset(); this.palliOnoReset(); this.palliLlClose(); this.palliCloseDurList(); if (id === 'p_dur') { this.palliDurDesig.set(''); this.loadPalliObs(); } } }
+  setPalliKpi(id: string): void { this.palliKpiId.set(id); this.palliDesignation.set(null); this.palliSnoReset(); this.palliOnoReset(); this.palliLlClose(); this.palliCloseDurList(); this.loadPalliObs(); if (id === 'p_dur') this.palliDurDesig.set(''); }
+  openPalliDrill(id: string): void { if (this.hasPalliDrill(id)) { this.palliKpiId.set(id); this.palliDesignation.set(null); this.palliSnoReset(); this.palliOnoReset(); this.palliLlClose(); this.palliCloseDurList(); this.loadPalliObs(); if (id === 'p_dur') this.palliDurDesig.set(''); } }
   closePalliDrill(): void { this.palliKpiId.set(null); this.palliDesignation.set(null); this.palliSnoReset(); this.palliOnoReset(); this.palliObsPopup.set(null); this.palliLlClose(); this.palliCloseDurList(); }
   /** Opening a designation (matrix level) loads the real observation data for the levels below. */
   selectPalliDesignation(d: string | null): void { this.palliLlClose(); this.palliDesignation.set(d); if (d) this.loadPalliObs(); }
@@ -3106,7 +3338,7 @@ export class ReviewService {
 
   /** Deterministic observation % for a district+designation (stable, 60–95%). */
   private palliObsPct(district: string, designation: string): number {
-    return Math.round((60 + this.hash01(`${district}|${designation}`, 'obs') * 35) * 10) / 10;
+    return Math.round((60 + this.hash01(`${district}|${designation}${this.palliMonthSeed()}`, 'obs') * 35) * 10) / 10;
   }
 
   /** KPI 1 — District rows with a % per designation (stakeholder columns). */
@@ -3261,8 +3493,38 @@ export class ReviewService {
   });
 
   // ---- filters (US 4 / 5 / 7 / 8) ----
-  readonly palliDateFrom = signal('');
-  readonly palliDateTo = signal('');
+  /**
+   * Month filter (replaces the From/To date range) — 'YYYY-MM', '' = latest
+   * month in the export. Shared by % Class Observation (matrix + drill),
+   * % Officials Not Observed and Observation duration.
+   */
+  readonly palliMonth = signal('');
+  /** Months present in the observation export, newest first. */
+  readonly palliMonthOptions = computed(() => {
+    const a = this._palliObs();
+    if (!a) return [] as { label: string; value: string }[];
+    const days = new Set<number>();
+    for (const o of a.observations) days.add(o[PalliObsCol.day]);
+    const months = new Set([...days].map((d) => this.palliDayIso(d).slice(0, 7)));
+    return [...months].sort().reverse().map((m) => ({ label: this.palliMonthLabel(m), value: m }));
+  });
+  /** The month in effect ('' until the export has loaded). */
+  readonly palliActiveMonth = computed(() => this.palliMonth() || this.palliMonthOptions()[0]?.value || '');
+  readonly palliActiveMonthLabel = computed(() => this.palliMonthLabel(this.palliActiveMonth()));
+  palliMonthLabel(m: string): string {
+    if (!m) return '';
+    const [y, mo] = m.split('-').map(Number);
+    return new Date(Date.UTC(y, mo - 1, 1)).toLocaleString('en-IN', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  }
+  /** Hash suffix for the ASSUMED Palli views: '' for the latest month (keeps existing values), else the month. */
+  private readonly palliMonthSeed = computed(() => {
+    const m = this.palliActiveMonth();
+    return !m || m === this.palliMonthOptions()[0]?.value ? '' : `|${m}`;
+  });
+  setPalliMonth(m: string): void {
+    this.palliMonth.set(m || '');
+    this.palliReport.set(null);
+  }
   /** Search box of the current level (user name / id, or school / UDISE). */
   readonly palliSearch = signal('');
   /** Duration category filter for the observation lists. */
@@ -3274,10 +3536,10 @@ export class ReviewService {
     { label: '30 min or more', value: 'ge30' },
   ];
   palliClearFilters(): void {
-    this.palliDateFrom.set(''); this.palliDateTo.set('');
+    this.palliMonth.set('');
     this.palliSearch.set(''); this.palliDurFilter.set('all');
   }
-  readonly palliFiltered = computed(() => !!(this.palliDateFrom() || this.palliDateTo() || this.palliSearch())
+  readonly palliFiltered = computed(() => !!(this.palliMonth() || this.palliSearch())
     || this.palliDurFilter() !== 'all');
 
   private palliDayIso(day: number): string {
@@ -3296,19 +3558,17 @@ export class ReviewService {
     for (const o of a.observations) { const d = o[PalliObsCol.day]; if (d < lo) lo = d; if (d > hi) hi = d; }
     return { from: this.palliDayIso(lo), to: this.palliDayIso(hi) };
   });
-  /** Day bounds of the active date range. */
+  /** Day bounds of the selected month. */
   private readonly palliDayRange = computed(() => {
-    const w = this.palliObsWindow();
-    const from = this.palliDateFrom() || w.from;
-    const to = this.palliDateTo() || w.to;
-    return { lo: from ? this.palliIsoDay(from) : -Infinity, hi: to ? this.palliIsoDay(to) : Infinity, from, to };
+    const m = this.palliActiveMonth();
+    if (!m) return { lo: -Infinity, hi: Infinity, from: '', to: '' };
+    const [y, mo] = m.split('-').map(Number);
+    const from = `${m}-01`;
+    const to = new Date(Date.UTC(y, mo, 0)).toISOString().slice(0, 10);   // last day of the month
+    return { lo: this.palliIsoDay(from), hi: this.palliIsoDay(to), from, to };
   });
-  /** Target proration: days in range ÷ 31 (the export is one month, October). */
-  readonly palliPeriodFactor = computed(() => {
-    const r = this.palliDayRange();
-    if (!Number.isFinite(r.lo) || !Number.isFinite(r.hi)) return 1;
-    return Math.max(0, Math.min(31, r.hi - r.lo + 1)) / 31;
-  });
+  /** Target period: one whole month → the full monthly target. */
+  readonly palliPeriodFactor = computed(() => 1);
 
   /** Observations in the date range whose observer is one of the 8 drill designations. */
   private readonly palliRangeObs = computed(() => {
@@ -3764,7 +4024,7 @@ export class ReviewService {
 
   /** Number of officials of a designation in a district who made 0 observations. */
   private palliOnoCount(district: string, designation: string): number {
-    const base = 2 + Math.round(this.hash01(`${district}|${designation}`, 'p_ono_n') * 6); // 2–8
+    const base = 2 + Math.round(this.hash01(`${district}|${designation}${this.palliMonthSeed()}`, 'p_ono_n') * 6); // 2–8
     return base;
   }
 
@@ -3786,7 +4046,7 @@ export class ReviewService {
     const n = this.palliOnoCount(d, des);
     const out: { sno: number; district: string; userName: string; designation: string; target: number; observed: number }[] = [];
     for (let i = 0; i < n; i++) {
-      const seed = this.hash01(`${d}|${des}|${i}`, 'p_ono_u');
+      const seed = this.hash01(`${d}|${des}|${i}${this.palliMonthSeed()}`, 'p_ono_u');
       const target = 20 + Math.round(seed * 40); // 20–60 target classes
       out.push({
         sno: i + 1, district: this.ds.titleCase(d),
@@ -5257,10 +5517,64 @@ export class ReviewService {
   });
   readonly smcAnchorDate = computed(() => this._smcReal()?.anchorDate ?? '');
 
+  // ---- Month-range filter (From → To), default June of the latest year → latest month ----
+  /**
+   * SMC month filter. The pre-bucketed rolling windows (`smcPeriod`) cover
+   * `all/p12/p9/p6/p3`; this adds an explicit month range computed straight
+   * from the detail asset, so any June→current span works. `smcMonthFrom` /
+   * `smcMonthTo` are 'YYYY-MM' ('' = use the data's own ends).
+   */
+  readonly smcMonthFrom = signal('');
+  readonly smcMonthTo = signal('');
+  /** Distinct months present in the detail asset, oldest → newest. */
+  readonly smcMonthList = computed(() => {
+    const d = this._smcDetail();
+    if (!d) return [] as string[];
+    const base = Date.parse(d.baseDate);
+    const set = new Set<string>();
+    for (const m of d.meetings) set.add(new Date(base + m[SmcMeetingCol.day] * 86400000).toISOString().slice(0, 7));
+    for (const r of d.resolutions) set.add(new Date(base + r[SmcResolutionCol.day] * 86400000).toISOString().slice(0, 7));
+    return [...set].sort();
+  });
+  /** Default "From" = June of the latest year in the data (per request). */
+  private readonly smcDefaultFrom = computed(() => {
+    const months = this.smcMonthList();
+    if (!months.length) return '';
+    const latestYear = months[months.length - 1].slice(0, 4);
+    const june = `${latestYear}-06`;
+    return months.includes(june) ? june : months[0];
+  });
+  readonly smcMonthOptions = computed(() =>
+    this.smcMonthList().map((m) => ({ value: m, label: this.smcMonthLabel(m) })),
+  );
+  smcMonthLabel(m: string): string {
+    if (!m) return '';
+    const [y, mo] = m.split('-').map(Number);
+    return new Date(Date.UTC(y, mo - 1, 1)).toLocaleString('en-IN', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+  }
+  readonly smcActiveFrom = computed(() => this.smcMonthFrom() || this.smcDefaultFrom());
+  readonly smcActiveTo = computed(() => this.smcMonthTo() || this.smcMonthList().at(-1) || '');
+  setSmcMonthFrom(m: string): void { this.smcMonthFrom.set(m || ''); }
+  setSmcMonthTo(m: string): void { this.smcMonthTo.set(m || ''); }
+  smcClearMonths(): void { this.smcMonthFrom.set(''); this.smcMonthTo.set(''); }
+  /** Day-offset bounds [floor, ceil] of the active month range into the detail asset. */
+  private readonly smcDayWindow = computed(() => {
+    const d = this._smcDetail();
+    if (!d) return { floor: -Infinity, ceil: Infinity };
+    const base = Date.parse(d.baseDate);
+    const from = this.smcActiveFrom(), to = this.smcActiveTo();
+    const floor = from ? Math.round((Date.parse(`${from}-01T00:00:00Z`) - base) / 86400000) : -Infinity;
+    let ceil = Infinity;
+    if (to) {
+      const [y, mo] = to.split('-').map(Number);
+      const lastDay = new Date(Date.UTC(y, mo, 0)).getTime();   // last day of the "to" month
+      ceil = Math.round((lastDay - base) / 86400000);
+    }
+    return { floor, ceil };
+  });
+
   readonly smcKpiTabs: { id: string; label: string }[] = [
     { id: 'm_mh', label: 'Meetings held' },
-    { id: 'm_mn', label: 'Meetings not held' },
-    { id: 'm_ma', label: 'Meeting attendance' },
     { id: 'm_r', label: 'All resolutions' },
     { id: 'm_e', label: 'Emergency' },
     { id: 'm_or', label: 'Other resolutions' },
@@ -5268,7 +5582,7 @@ export class ReviewService {
   ];
   /** Every SMC KPI id that routes into this drill, mapped to its view. */
   private readonly SMC_KPI_VIEW: Record<string, 'meetings' | 'emergency' | 'other' | 'all' | 'grant'> = {
-    m_mh: 'meetings', m_mn: 'meetings', m_ma: 'meetings', m_mt: 'meetings',
+    m_mh: 'meetings', m_mt: 'meetings',
     m_r: 'all', m_c: 'all', m_p: 'all', m_k: 'all',
     m_e: 'emergency', m_er: 'emergency', m_ek: 'emergency',
     m_or: 'other', m_ou: 'other', m_ok: 'other',
@@ -5285,9 +5599,9 @@ export class ReviewService {
     this.smcKpiId.set(this.SMC_KPI_VIEW[kpiId] ? kpiId : 'm_mh');
     this.smcUnit.set(null);
   }
-  closeSmcDrill(): void { this.smcKpiId.set(null); this.smcUnit.set(null); }
-  setSmcKpi(id: string): void { this.smcKpiId.set(id); this.smcUnit.set(null); }
-  smcSelectUnit(u: string | null): void { this.smcUnit.set(u); }
+  closeSmcDrill(): void { this.smcKpiId.set(null); this.smcUnit.set(null); this.smcResolutionPick.set(null); }
+  setSmcKpi(id: string): void { this.smcKpiId.set(id); this.smcUnit.set(null); this.smcResolutionPick.set(null); }
+  smcSelectUnit(u: string | null): void { this.smcUnit.set(u); this.smcResolutionPick.set(null); }
 
   /**
    * Drill the SMC grid one level deeper: state → district → block → school.
@@ -5298,6 +5612,7 @@ export class ReviewService {
   smcDrillRow(row: { key: string }): void {
     const level = this.ds.level();
     this.smcUnit.set(null);
+    this.smcResolutionPick.set(null);
     if (level === 'state') this.ds.drillToDistrict(row.key);
     else if (level === 'district') this.ds.drillToBlock(row.key);
   }
@@ -5369,14 +5684,14 @@ export class ReviewService {
     return mask;
   });
 
-  /** Meeting rows inside scope and inside the active window. */
+  /** Meeting rows inside scope and inside the active month range. */
   private readonly smcScopeMeetings = computed<number[][]>(() => {
     const d = this._smcDetail();
     if (!d) return [];
     const M = SmcMeetingCol;
     const mask = this.smcScopeSchoolMask();
-    const floor = this.smcDayFloor();
-    return d.meetings.filter((m) => mask[m[M.school]] === 1 && m[M.day] >= floor);
+    const { floor, ceil } = this.smcDayWindow();
+    return d.meetings.filter((m) => mask[m[M.school]] === 1 && m[M.day] >= floor && m[M.day] <= ceil);
   });
 
   /** Resolution rows inside scope and inside the active window. */
@@ -5385,8 +5700,8 @@ export class ReviewService {
     if (!d) return [];
     const R = SmcResolutionCol;
     const mask = this.smcScopeSchoolMask();
-    const floor = this.smcDayFloor();
-    return d.resolutions.filter((r) => mask[r[R.school]] === 1 && r[R.day] >= floor);
+    const { floor, ceil } = this.smcDayWindow();
+    return d.resolutions.filter((r) => mask[r[R.school]] === 1 && r[R.day] >= floor && r[R.day] <= ceil);
   });
 
   /**
@@ -5394,29 +5709,67 @@ export class ReviewService {
    * which already carries the window-aware counters plus the eligible-school
    * denominator, so this needs no detail asset.
    */
+  /**
+   * Meetings-held abstract per unit (metric 1a/1b/1c) for the active MONTH
+   * range. Built from the detail asset so any June→current span works: meetings
+   * are grouped by the child unit (district at state, block in a district),
+   * eligible schools come from the govt-managed roll, and attendance % uses
+   * present / (present + absent + vacant) per steering formula 2.
+   */
   readonly smcMeetingRows = computed(() => {
-    return this.drillRows()
-      .map((r) => {
-        const eligible = r.smcEligibleSchools ?? 0;
-        const held = r.smcSchoolsHeld ?? 0;
-        const present = r.smcPresent ?? 0;
-        const absent = r.smcAbsent ?? 0;
-        return {
-          key: r.key,
-          unit: r.name,
-          eligible,
-          held,
-          notHeld: r.smcSchoolsNotHeld ?? Math.max(0, eligible - held),
-          heldPct: eligible ? Math.round((held / eligible) * 1000) / 10 : 0,
-          meetings: r.smcMeetings ?? 0,
-          avgMeetings: held ? Math.round(((r.smcMeetings ?? 0) / held) * 10) / 10 : 0,
-          present,
-          absent,
-          vacant: r.smcVacant ?? 0,
-          attendancePct: present + absent ? Math.round((present / (present + absent)) * 1000) / 10 : 0,
-        };
-      })
-      .sort((a, b) => b.notHeld - a.notHeld || a.unit.localeCompare(b.unit))
+    const d = this._smcDetail();
+    if (!d) return [] as any[];
+    const M = SmcMeetingCol;
+    const level = this.ds.level();                 // state → group by district; district → by block
+    const groupByBlock = level === 'district';
+    if (level === 'block' || level === 'school') return [];   // at block level the view switches to schools
+
+    // eligible (govt) schools per unit, from the roll
+    const mgmts = this.smcManagements();
+    const eligibleByUnit = new Map<string, number>();
+    const blocks = this.ds.data()?.blocks ?? [];
+    const dist = this.ds.selectedDistrict();
+    for (const b of blocks) {
+      if (groupByBlock && b.district !== dist) continue;
+      const unit = groupByBlock ? b.block : b.district;
+      let n = eligibleByUnit.get(unit) ?? 0;
+      for (const s of this.ds.schoolRowsFor(b.district, b.block)) if (mgmts.has(s.mgmt ?? '')) n++;
+      eligibleByUnit.set(unit, n);
+    }
+
+    // meetings aggregated per unit, per school (so "held schools" is distinct schools)
+    type Agg = { held: Set<number>; meetings: number; present: number; absent: number; vacant: number };
+    const init = (): Agg => ({ held: new Set(), meetings: 0, present: 0, absent: 0, vacant: 0 });
+    const byUnit = new Map<string, Agg>();
+    for (const m of this.smcScopeMeetings()) {
+      const s = d.schools[m[M.school]];
+      const unit = groupByBlock ? s.b : s.d;
+      if (!unit) continue;
+      let a = byUnit.get(unit);
+      if (!a) { a = init(); byUnit.set(unit, a); }
+      a.held.add(m[M.school]);
+      a.meetings++;
+      a.present += m[M.present];
+      a.absent += m[M.absent];
+      a.vacant += m[M.vacant];
+    }
+
+    const units = new Set<string>([...eligibleByUnit.keys(), ...byUnit.keys()]);
+    const rows = [...units].map((unit) => {
+      const a = byUnit.get(unit) ?? init();
+      const eligible = eligibleByUnit.get(unit) ?? 0;
+      const held = a.held.size;
+      const members = a.present + a.absent + a.vacant;
+      return {
+        key: unit, unit: this.ds.titleCase(unit),
+        eligible, held, notHeld: Math.max(0, eligible - held),
+        heldPct: eligible ? Math.round((held / eligible) * 1000) / 10 : 0,
+        meetings: a.meetings, present: a.present, absent: a.absent, vacant: a.vacant,
+        attendancePct: members ? Math.round((a.present / members) * 1000) / 10 : 0,
+      };
+    });
+    return rows
+      .sort((x, y) => y.notHeld - x.notHeld || x.unit.localeCompare(y.unit))
       .map((r, i) => ({ sno: i + 1, ...r }));
   });
 
@@ -5427,6 +5780,8 @@ export class ReviewService {
     const held = s((r) => r.held);
     const present = s((r) => r.present);
     const absent = s((r) => r.absent);
+    const vacant = s((r) => r.vacant);
+    const members = present + absent + vacant;
     return {
       count: rows.length,
       eligible,
@@ -5434,11 +5789,10 @@ export class ReviewService {
       notHeld: s((r) => r.notHeld),
       heldPct: eligible ? Math.round((held / eligible) * 1000) / 10 : 0,
       meetings: s((r) => r.meetings),
-      avgMeetings: held ? Math.round((s((r) => r.meetings) / held) * 10) / 10 : 0,
       present,
       absent,
-      vacant: s((r) => r.vacant),
-      attendancePct: present + absent ? Math.round((present / (present + absent)) * 1000) / 10 : 0,
+      vacant,
+      attendancePct: members ? Math.round((present / members) * 1000) / 10 : 0,
     };
   });
 
@@ -5484,6 +5838,8 @@ export class ReviewService {
       const o = byUdise.get(s.udise);
       const present = o?.present ?? 0;
       const absent = o?.absent ?? 0;
+      const vacant = o?.vacant ?? 0;
+      const members = present + absent + vacant;   // total reconstituted members
       return {
         udise: s.udise,
         school: s.name,
@@ -5494,8 +5850,8 @@ export class ReviewService {
         held: (o?.meetings ?? 0) > 0 ? 'Yes' : 'No',
         present,
         absent,
-        vacant: o?.vacant ?? 0,
-        attendancePct: present + absent ? Math.round((present / (present + absent)) * 1000) / 10 : 0,
+        vacant,
+        attendancePct: members ? Math.round((present / members) * 1000) / 10 : 0,
         lastMeeting: o && o.last >= 0 ? this.smcDayToIso(o.last) : '—',
       };
     }).filter((r) => !notHeldOnly || r.held === 'No');
@@ -5509,6 +5865,8 @@ export class ReviewService {
     const s = (f: (r: typeof rows[number]) => number) => rows.reduce((t, r) => t + f(r), 0);
     const present = s((r) => r.present);
     const absent = s((r) => r.absent);
+    const vacant = s((r) => r.vacant);
+    const members = present + absent + vacant;
     return {
       count: rows.length,
       held: rows.filter((r) => r.held === 'Yes').length,
@@ -5517,8 +5875,8 @@ export class ReviewService {
       meetings: s((r) => r.meetings),
       present,
       absent,
-      vacant: s((r) => r.vacant),
-      attendancePct: present + absent ? Math.round((present / (present + absent)) * 1000) / 10 : 0,
+      vacant,
+      attendancePct: members ? Math.round((present / members) * 1000) / 10 : 0,
     };
   });
 
@@ -5527,26 +5885,44 @@ export class ReviewService {
    * decides whether emergency, non-emergency or all resolutions are counted;
    * all three come off `drillRows()` and so respect the active window.
    */
+  /**
+   * Resolution completion status per unit (metrics 2 and 3) for the active
+   * MONTH range, grouped by the child unit from the detail asset so the month
+   * filter applies. The active view decides emergency / other / all.
+   */
   readonly smcResolutionRows = computed(() => {
+    const d = this._smcDetail();
+    if (!d) return [] as any[];
+    const R = SmcResolutionCol;
     const view = this.smcView();
-    return this.drillRows()
-      .map((r) => {
-        const raised = view === 'emergency' ? (r.smcEmergencyRaised ?? 0)
-          : view === 'other' ? (r.smcOtherRaised ?? 0) : (r.smcRaised ?? 0);
-        const resolved = view === 'emergency' ? (r.smcEmergencyResolved ?? 0)
-          : view === 'other' ? (r.smcOtherResolved ?? 0) : (r.smcClosed ?? 0);
-        const unresolved = view === 'emergency' ? (r.smcEmergencyOpen ?? 0)
-          : view === 'other' ? (r.smcOtherOpen ?? 0) : (r.smcPending ?? 0);
-        const base = resolved + unresolved;
+    const level = this.ds.level();
+    if (level === 'school') return [];
+    const groupByBlock = level === 'district';
+    type Agg = { raised: number; resolved: number; unresolved: number; withdrawn: number; schools: Set<number> };
+    const init = (): Agg => ({ raised: 0, resolved: 0, unresolved: 0, withdrawn: 0, schools: new Set() });
+    const byUnit = new Map<string, Agg>();
+    for (const r of this.smcScopeResolutions()) {
+      const emg = r[R.emergency] === 1;
+      if (view === 'emergency' && !emg) continue;
+      if (view === 'other' && emg) continue;
+      const s = d.schools[r[R.school]];
+      const unit = groupByBlock ? s.b : s.d;
+      if (!unit) continue;
+      let a = byUnit.get(unit);
+      if (!a) { a = init(); byUnit.set(unit, a); }
+      a.raised++; a.schools.add(r[R.school]);
+      const st = r[R.status];
+      if (st === 1) a.resolved++;
+      else if (st === 2) a.withdrawn++;
+      else a.unresolved++;
+    }
+    return [...byUnit.entries()]
+      .map(([unit, a]) => {
+        const base = a.resolved + a.unresolved;
         return {
-          key: r.key,
-          unit: r.name,
-          schools: r.ns ?? 0,
-          raised,
-          resolved,
-          unresolved,
-          withdrawn: Math.max(0, raised - base),
-          completionPct: base ? Math.round((resolved / base) * 1000) / 10 : 0,
+          key: unit, unit: this.ds.titleCase(unit), schools: a.schools.size,
+          raised: a.raised, resolved: a.resolved, unresolved: a.unresolved, withdrawn: a.withdrawn,
+          completionPct: base ? Math.round((a.resolved / base) * 1000) / 10 : 0,
         };
       })
       .sort((a, b) => b.unresolved - a.unresolved || a.unit.localeCompare(b.unit))
@@ -5567,6 +5943,105 @@ export class ReviewService {
       withdrawn: s((r) => r.withdrawn),
       completionPct: resolved + unresolved ? Math.round((resolved / (resolved + unresolved)) * 1000) / 10 : 0,
     };
+  });
+
+  /**
+   * True when the resolution view should show the per-SCHOOL table instead of
+   * the unit (district/block) summary: the scope is already a block, or a unit
+   * was opened explicitly. Mirrors `smcShowSchools` for the meetings view.
+   */
+  readonly smcResShowSchools = computed(() => !!this.smcUnit() || !!this.ds.selectedBlock());
+
+  /**
+   * School-wise resolution summary for the drilled block (active view + month
+   * range). One row per govt school that raised at least one resolution.
+   */
+  readonly smcResolutionSchoolRows = computed(() => {
+    const d = this._smcDetail();
+    if (!d || !this.smcResShowSchools()) return [] as any[];
+    const R = SmcResolutionCol;
+    const view = this.smcView();
+    const mgmts = this.smcManagements();
+    type Agg = { raised: number; resolved: number; unresolved: number; withdrawn: number; emergency: number; last: number };
+    const init = (): Agg => ({ raised: 0, resolved: 0, unresolved: 0, withdrawn: 0, emergency: 0, last: -1 });
+    const byUdise = new Map<string, Agg & { school: string; category: string }>();
+    for (const r of this.smcScopeResolutions()) {
+      const emg = r[R.emergency] === 1;
+      if (view === 'emergency' && !emg) continue;
+      if (view === 'other' && emg) continue;
+      const s = d.schools[r[R.school]];
+      if (!s.u || !mgmts.has(s.m)) continue;
+      let a = byUdise.get(s.u);
+      if (!a) { a = { ...init(), school: s.s, category: s.c }; byUdise.set(s.u, a); }
+      a.raised++;
+      if (emg) a.emergency++;
+      const st = r[R.status];
+      if (st === 1) a.resolved++;
+      else if (st === 2) a.withdrawn++;
+      else a.unresolved++;
+      if (r[R.day] > a.last) a.last = r[R.day];
+    }
+    return [...byUdise.entries()]
+      .map(([udise, a]) => {
+        const base = a.resolved + a.unresolved;
+        return {
+          udise, school: a.school, category: a.category,
+          raised: a.raised, resolved: a.resolved, unresolved: a.unresolved, withdrawn: a.withdrawn,
+          emergency: a.emergency,
+          completionPct: base ? Math.round((a.resolved / base) * 1000) / 10 : 0,
+          lastRaised: a.last >= 0 ? this.smcDayToIso(a.last) : '—',
+        };
+      })
+      .sort((x, y) => y.unresolved - x.unresolved || x.school.localeCompare(y.school))
+      .map((r, i) => ({ sno: i + 1, ...r }));
+  });
+
+  readonly smcResolutionSchoolTotals = computed(() => {
+    const rows = this.smcResolutionSchoolRows();
+    const s = (f: (r: typeof rows[number]) => number) => rows.reduce((t, r) => t + f(r), 0);
+    const resolved = s((r) => r.resolved);
+    const unresolved = s((r) => r.unresolved);
+    return {
+      count: rows.length, raised: s((r) => r.raised), resolved, unresolved,
+      withdrawn: s((r) => r.withdrawn), emergency: s((r) => r.emergency),
+      completionPct: resolved + unresolved ? Math.round((resolved / (resolved + unresolved)) * 1000) / 10 : 0,
+    };
+  });
+
+  /** A school picked (via the View button) to list its individual resolutions. */
+  readonly smcResolutionPick = signal<{ udise: string; school: string } | null>(null);
+  smcOpenResolutionDetail(udise: string, school: string): void { this.smcResolutionPick.set({ udise, school }); }
+  smcCloseResolutionDetail(): void { this.smcResolutionPick.set(null); }
+
+  /** Individual resolutions of the picked school (active view + month range). */
+  readonly smcResolutionDetailRows = computed(() => {
+    const d = this._smcDetail();
+    const pick = this.smcResolutionPick();
+    if (!d || !pick) return [] as any[];
+    const R = SmcResolutionCol;
+    const view = this.smcView();
+    const status = d.statusLabels ?? ['Unresolved', 'Resolved', 'Withdrawn', 'Work in progress'];
+    return this.smcScopeResolutions()
+      .filter((r) => {
+        const s = d.schools[r[R.school]];
+        if (s.u !== pick.udise) return false;
+        const emg = r[R.emergency] === 1;
+        if (view === 'emergency' && !emg) return false;
+        if (view === 'other' && emg) return false;
+        return true;
+      })
+      .map((r, i) => ({
+        sno: i + 1,
+        date: this.smcDayToIso(r[R.day]),
+        category: d.cats?.[r[R.cat]] ?? '—',
+        subcategory: d.subcats?.[r[R.subcat]] ?? '—',
+        dept: d.depts[r[R.dept]] ?? '—',
+        level: d.levels[r[R.level]] ?? '—',
+        emergency: r[R.emergency] === 1 ? 'Yes' : 'No',
+        status: status[r[R.status]] ?? '—',
+      }))
+      .sort((a, b) => (a.date < b.date ? 1 : -1))
+      .map((r, i) => ({ ...r, sno: i + 1 }));
   });
 
   /**
