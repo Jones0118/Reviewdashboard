@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { NgxEchartsDirective } from 'ngx-echarts';
 import { SelectModule } from 'primeng/select';
+import { MultiSelectModule } from 'primeng/multiselect';
 import { CountUpDirective } from './count-up.directive';
 
 import { AuthService } from '../services/auth.service';
@@ -32,7 +33,7 @@ import { inr, inrAxis, inrShort } from '../utils/format';
   selector: 'app-glance',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule, NgxEchartsDirective, SelectModule, CountUpDirective],
+  imports: [CommonModule, FormsModule, NgxEchartsDirective, SelectModule, MultiSelectModule, CountUpDirective],
   templateUrl: './glance.html',
   styleUrl: './glance.scss',
 })
@@ -105,30 +106,35 @@ export class GlancePage implements OnInit {
     { label: 'High', re: /^high/i },
     { label: 'Hr Sec', re: /hr\.?\s?sec/i },
   ];
-  readonly mgmtChip = signal('All');
-  readonly typeChip = signal('All');
-  /** Dropdown options (label = value) for the Management and Category selects. */
-  readonly mgmtOptions = this.MGMT_CHIPS.map((c) => ({ label: c.label === 'All' ? 'All managements' : c.label, value: c.label }));
-  readonly typeOptions = this.TYPE_CHIPS.map((c) => ({ label: c.label === 'All' ? 'All categories' : c.label, value: c.label }));
-  setMgmt(label: string | null): void {
-    const c = this.MGMT_CHIPS.find((x) => x.label === label) ?? this.MGMT_CHIPS[0];
-    this.mgmtChip.set(c.label);
-    this.ds.filters.update((f) => ({ ...f, stype: c.stype }));
+  /** Selected Management / Category labels (empty = all). Multi-select; selections are OR-ed. */
+  readonly mgmtSel = signal<string[]>([]);
+  readonly typeSel = signal<string[]>([]);
+  /** Multi-select options for the Management and Category filters ("All" = nothing selected). */
+  readonly mgmtOptions = this.MGMT_CHIPS.filter((c) => c.label !== 'All').map((c) => ({ label: c.label, value: c.label }));
+  readonly typeOptions = this.TYPE_CHIPS.filter((c) => c.label !== 'All').map((c) => ({ label: c.label, value: c.label }));
+  setMgmt(labels: string[] | null): void {
+    const sel = labels ?? [];
+    this.mgmtSel.set(sel);
+    const stype = this.MGMT_CHIPS.filter((c) => sel.includes(c.label)).flatMap((c) => c.stype);
+    this.ds.filters.update((f) => ({ ...f, stype }));
   }
-  setType(label: string | null): void {
-    const c = this.TYPE_CHIPS.find((x) => x.label === label) ?? this.TYPE_CHIPS[0];
-    this.typeChip.set(c.label);
-    const cats = c.re ? this.ds.catOptions().map((o) => o.value).filter((v) => c.re!.test(v)) : [];
-    this.ds.filters.update((f) => ({ ...f, cat: cats }));
+  setType(labels: string[] | null): void {
+    const sel = labels ?? [];
+    this.typeSel.set(sel);
+    const res = this.TYPE_CHIPS.filter((c) => sel.includes(c.label) && c.re).map((c) => c.re!);
+    const cat = res.length ? this.ds.catOptions().map((o) => o.value).filter((v) => res.some((re) => re.test(v))) : [];
+    this.ds.filters.update((f) => ({ ...f, cat }));
   }
   resetChips(): void {
-    this.mgmtChip.set('All'); this.typeChip.set('All');
+    this.mgmtSel.set([]); this.typeSel.set([]);
     this.ds.filters.update((f) => ({ ...f, stype: [], cat: [] }));
   }
-  readonly filterActive = computed(() => this.mgmtChip() !== 'All' || this.typeChip() !== 'All');
+  readonly filterActive = computed(() => this.mgmtSel().length > 0 || this.typeSel().length > 0);
   readonly filterSummary = computed(() => {
-    const parts = [this.mgmtChip(), this.typeChip()].filter((x) => x !== 'All');
-    return parts.length ? parts.join(' · ') + ' schools' : 'All schools';
+    const m = this.mgmtSel(), c = this.typeSel();
+    if (!m.length && !c.length) return 'All schools';
+    const parts = [m.length ? m.join(' / ') : null, c.length ? c.join(' / ') : null].filter(Boolean);
+    return parts.join(' \u00B7 ') + ' schools';
   });
 
   // ---- scope (State -> District -> Block), shared DataService state ----
@@ -335,9 +341,7 @@ export class GlancePage implements OnInit {
     return [
       {
         label: 'No. of schools', icon: 'fa-solid fa-school', big: inr(n.schools),
-        sub: hasTypes
-          ? `Govt ${inr(govtSch)} · Aided ${inr(aidedSch)} · Private ${inr(privSch)}`
-          : 'All managements',
+        sub: 'All managements',
         splits: hasTypes ? [split(['Govt', govtSch], ['Aided', aidedSch], ['Private', privSch])] : [],
       },
       {
@@ -422,14 +426,36 @@ export class GlancePage implements OnInit {
       });
     }
 
-    // SMC — emergency resolutions completion
-    const emg = this.glanceKpi('SMC', 'm_ek');
-    if (emg) {
-      const oth = this.glanceKpi('SMC', 'm_ok'), att = this.glanceKpi('SMC', 'm_ma');
+    // SMC – resolutions closed (closure rate = closed / raised; the catalog's m_k, a view-details KPI)
+    const vals = this.kv.scopeValues();
+    const mk = KPI_MODULES.find((m) => m.title === 'SMC')?.kpis.find((k) => k.id === 'm_k');
+    const closure = vals['smcClosureRate'] ?? null;
+    if (mk && closure != null) {
+      const emg = this.glanceKpi('SMC', 'm_ek'), oth = this.glanceKpi('SMC', 'm_ok');
       out.push({
-        icon: 'fa-solid fa-people-group', title: 'SMC emergency resolutions', module: emg.module, id: emg.id, topic: emg.topic,
-        value: emg.value, pill: this.glancePill(emg.band), delta: null, spark: null,
-        note: `Share of emergency resolutions resolved · other resolutions ${oth?.value ?? '–'} · meeting attendance ${att?.value ?? '–'}.`,
+        icon: 'fa-solid fa-people-group', title: 'SMC resolutions closed', module: 'SMC', id: 'm_k', topic: 'smc',
+        value: this.kv.format(mk, closure), pill: this.glancePill(this.kv.band(mk, closure)), delta: null, spark: null,
+        note: `${inr(vals['smcPending'] ?? 0)} resolutions still open of ${inr(vals['smcRaised'] ?? 0)} raised · emergency ${emg?.value ?? '–'} · other ${oth?.value ?? '–'} completed.`,
+      });
+    }
+
+    // All Children in School – common pool students
+    const pool = this.glanceKpi('All Children in School', 'ac_pool');
+    if (pool) {
+      const sp = this.glanceKpi('All Children in School', 'ac_sp'), adm = this.glanceKpi('All Children in School', 'ac_adm'), tba = this.glanceKpi('All Children in School', 'ac_tba');
+      out.push({
+        icon: 'fa-solid fa-map', title: 'Common pool students', module: pool.module, id: pool.id, topic: pool.topic,
+        value: pool.value, pill: this.glancePill(sp?.band ?? 'none'), delta: null, spark: null,
+        note: `Left one school, not yet admitted to another · ${sp?.value ?? '–'} surveyed · ${adm?.value ?? '–'} admitted · ${tba?.value ?? '–'} to be admitted.`,
+      });
+    }
+
+    // Palli Paarvai – observations against the monthly class-observation target
+    const pal = this.palliTargetPct();
+    if (pal) {
+      out.push({
+        icon: 'fa-solid fa-eye', title: 'Palli Paarvai observation %', module: 'Palli Paarvai', id: 'p_co', topic: 'palli',
+        value: pal.value, pill: pal.pill, delta: null, spark: null, note: pal.note,
       });
     }
     // V3 icon-tile tones, cycled per card: [tile bg, icon fg]
@@ -620,6 +646,34 @@ export class GlancePage implements OnInit {
    * observation line list (palli-obs.json), scoped to the selected district /
    * block, with a month filter built from the months present in the data.
    */
+  /**
+   * Palli Paarvai observation %: observations by the five tracked designations
+   * in the selected month(s) against their monthly class-observation target
+   * (Designation_wise_Target_Calculation sheet, state-wide sanctioned posts).
+   * The target model exists only state-wide, so the % is computed at state
+   * scope; district / block scopes report the observation count instead.
+   */
+  readonly palliTargetPct = computed(() => {
+    if (this.palliLoading() || this.rv.palliObsError()) return null;
+    const rows = this.palliByDesig();
+    const obs = rows.reduce((s, r) => s + r.n, 0);
+    const monthsInScope = this.palliMonths().length - 1;           // minus "All months"
+    const months = this.palliMonth() === 'all' ? Math.max(1, monthsInScope) : 1;
+    const monthLabel = this.palliMonths().find((m) => m.key === this.palliMonth())?.label ?? 'all months';
+    if (this.ds.level() !== 'state') {
+      return { value: inr(obs), pill: null, note: `Observations by CEO, DEO, BEO and BRTE in ${this.ds.scopeLabel()} · ${monthLabel} · target model is state-wide, so no % at this scope.` };
+    }
+    const model = this.rv.palliTargetModel();
+    const target = this.PALLI_DESIGS.reduce((s, d) => s + (model.find((m) => m.official === d)?.classesPerMonth ?? 0), 0) * months;
+    if (!target) return null;
+    const pct = Math.round((obs / target) * 1000) / 10;
+    const def = KPI_MODULES.find((m) => m.title === 'Palli Paarvai')?.kpis.find((k) => k.id === 'p_co');
+    return {
+      value: `${pct}%`,
+      pill: def ? this.glancePill(this.kv.band(def, pct)) : null,
+      note: `${inr(obs)} observations against a target of ${inr(target)} · ${monthLabel} · CEO, DEO (Sec / Ele), BEO and BRTE.`,
+    };
+  });
   readonly PALLI_DESIGS = ['CEO', 'DEO (Secondary)', 'DEO (Elementary)', 'BEO', 'BRTE'];
   readonly palliMonth = signal<string>('all');
   setPalliMonth(m: string): void { this.palliMonth.set(m); }

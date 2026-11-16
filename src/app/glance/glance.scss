@@ -71,7 +71,11 @@
   .freset { min-height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--pri-dk); background: transparent; color: var(--pri-dk);
     font-size: 12px; font-weight: 600; cursor: pointer; &:hover { background: var(--pri-soft); } }
 }:host ::ng-deep .gl-flt { min-width: 200px; height: 40px; font-size: 14px; border-radius: 8px; border-color: #E2E8F0; background: var(--soft); }
-:host ::ng-deep .gl-flt-sm { min-width: 170px; }
+:host ::ng-deep .gl-flt-sm { min-width: 190px; }
+/* multi-select chips must fit the 40px control */
+:host ::ng-deep .gl-flt.p-multiselect { height: auto; min-height: 40px; }
+:host ::ng-deep .gl-flt .p-multiselect-label { padding-top: 4px; padding-bottom: 4px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+:host ::ng-deep .gl-flt .p-multiselect-chip { font-size: 12px; }
 .gl-loading { padding: 60px 20px; text-align: center; color: var(--mu); font-size: 14px; }
 
 /* ---- shell ---- */

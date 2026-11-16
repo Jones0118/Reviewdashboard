@@ -86,10 +86,12 @@
                     optionLabel="label" optionValue="value" placeholder="Block: all" [showClear]="true"
                     [filter]="true" filterBy="label" styleClass="gl-flt" ariaLabel="Block" />
         }
-        <p-select [options]="mgmtOptions" [ngModel]="mgmtChip()" (ngModelChange)="setMgmt($event)"
-                  optionLabel="label" optionValue="value" styleClass="gl-flt gl-flt-sm" ariaLabel="Management" />
-        <p-select [options]="typeOptions" [ngModel]="typeChip()" (ngModelChange)="setType($event)"
-                  optionLabel="label" optionValue="value" styleClass="gl-flt gl-flt-sm" ariaLabel="School category" />
+        <p-multiSelect [options]="mgmtOptions" [ngModel]="mgmtSel()" (ngModelChange)="setMgmt($event)"
+                       optionLabel="label" optionValue="value" placeholder="Management: all" display="chip" [maxSelectedLabels]="2"
+                       [showToggleAll]="true" styleClass="gl-flt gl-flt-sm" ariaLabel="Management" />
+        <p-multiSelect [options]="typeOptions" [ngModel]="typeSel()" (ngModelChange)="setType($event)"
+                       optionLabel="label" optionValue="value" placeholder="Category: all" display="chip" [maxSelectedLabels]="2"
+                       [showToggleAll]="true" styleClass="gl-flt gl-flt-sm" ariaLabel="School category" />
       </div>
       <div class="fsum" aria-live="polite">
         <span class="fl">Showing</span><b>{{ filterSummary() }}</b>
@@ -180,40 +182,6 @@
         </div>
       }
     </div>
-
-    <!-- needs attention -->
-    <section class="gl-c" id="gl-attention">
-      <div class="ct"><b class="lg">Needs your attention</b>
-        <span class="s">KPIs outside their expected range at this scope, with the component that owns them</span></div>
-      <div class="gl-acols">
-        <div class="acol crit">
-          <h6>Critical attention</h6>
-          <span class="ch">Off track — below the catalog range</span>
-          @for (a of glanceAttention().critical; track a.module + a.id; let i = $index) {
-            <button type="button" class="na" [class.first]="i === 0" (click)="openGlanceKpi(a)">
-              <span class="n">{{ i + 1 }}</span>
-              <span class="t"><b>{{ a.title }}</b><span>{{ a.sub }}</span></span>
-              <span class="own">{{ a.owner }}</span>
-            </button>
-          } @empty {
-            <div class="gl-empty">Nothing off track at this scope.</div>
-          }
-        </div>
-        <div class="acol micro">
-          <h6>Watch</h6>
-          <span class="ch">Inside the range, but not yet on track</span>
-          @for (a of glanceAttention().watch; track a.module + a.id; let i = $index) {
-            <button type="button" class="na" [class.first]="i === 0" (click)="openGlanceKpi(a)">
-              <span class="n micro">{{ i + 1 }}</span>
-              <span class="t"><b>{{ a.title }}</b><span>{{ a.sub }}</span></span>
-              <span class="own">{{ a.owner }}</span>
-            </button>
-          } @empty {
-            <div class="gl-empty">Nothing on watch at this scope.</div>
-          }
-        </div>
-      </div>
-    </section>
 
     <!-- key insights -->
     <div class="gl-sechead"><h2>Key insights</h2>
@@ -349,6 +317,40 @@
               <div echarts [options]="glanceAcisOpt()" class="gl-chart"></div>
             } @else {
               <div class="gl-nodata">No common-pool students{{ acisMgmt() === 'All' ? '' : ' from ' + acisMgmt() + ' schools' }} at this scope.</div>
+            }
+          </div>
+        </div>
+      </section>
+
+      <!-- needs attention -->
+      <section class="gl-c" id="gl-attention">
+        <div class="ct"><b class="lg">Needs your attention</b>
+          <span class="s">KPIs outside their expected range at this scope, with the component that owns them</span></div>
+        <div class="gl-acols">
+          <div class="acol crit">
+            <h6>Critical attention</h6>
+            <span class="ch">Off track — below the catalog range</span>
+            @for (a of glanceAttention().critical; track a.module + a.id; let i = $index) {
+              <button type="button" class="na" [class.first]="i === 0" (click)="openGlanceKpi(a)">
+                <span class="n">{{ i + 1 }}</span>
+                <span class="t"><b>{{ a.title }}</b><span>{{ a.sub }}</span></span>
+                <span class="own">{{ a.owner }}</span>
+              </button>
+            } @empty {
+              <div class="gl-empty">Nothing off track at this scope.</div>
+            }
+          </div>
+          <div class="acol micro">
+            <h6>Watch</h6>
+            <span class="ch">Inside the range, but not yet on track</span>
+            @for (a of glanceAttention().watch; track a.module + a.id; let i = $index) {
+              <button type="button" class="na" [class.first]="i === 0" (click)="openGlanceKpi(a)">
+                <span class="n micro">{{ i + 1 }}</span>
+                <span class="t"><b>{{ a.title }}</b><span>{{ a.sub }}</span></span>
+                <span class="own">{{ a.owner }}</span>
+              </button>
+            } @empty {
+              <div class="gl-empty">Nothing on watch at this scope.</div>
             }
           </div>
         </div>
