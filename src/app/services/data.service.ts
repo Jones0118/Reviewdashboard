@@ -223,6 +223,14 @@ export class DataService {
     return rows.find((x) => x.name === this.selectedSchool()) ?? null;
   });
 
+  /**
+   * Read-only accessor for the raw school rows in the current scope (not
+   * filtered), with their multi-year `series`. Used by the At-a-glance page to
+   * build a management-wise enrolment trend, which the pre-aggregated
+   * trendState / districtTrend / blockTrend cannot provide.
+   */
+  readonly schoolRowsInScope = computed<SchoolRow[]>(() => this.rowsInScope());
+
   /** All school rows in the current scope (before filtering). */
   private rowsInScope(): SchoolRow[] {
     const s = this._schools();

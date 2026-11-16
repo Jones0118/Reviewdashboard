@@ -699,6 +699,45 @@ with a Total row and Excel/CSV/PDF (`exportScholar` in app.ts).
 
 ## 10. Feature changelog (what was built, newest first)
 
+- **"At a glance" executive page (13-Nov-2026, moved to its own route 16-Nov-2026):** a
+  standalone page at **`/glance`** that ports the layout of
+  `D:\general\Dashboard\review\SED-Review-Dashboard.html` into the Angular app. It is reached
+  from the top menu entry **"At a glance"** (right after Review Dashboard), which opens it in a
+  new browser tab exactly like the SMC / SLAS entries (`tabs[].url = 'glance'`).
+  - **Routing (new):** `main.ts` now bootstraps `root.ts` (`Root`, selector `app-root`, just a
+    `<router-outlet>`); `app.routes.ts` maps `''` → `App` (selector renamed to `app-dashboard`)
+    and `glance` → lazily loaded `glance/glance.ts` (`GlancePage`); `app.config.ts` adds
+    `provideRouter(routes)`. Vercel's SPA rewrite already serves `/glance` from `index.html`.
+  - **Shared values (new):** `services/kpi-values.service.ts` (`KpiValuesService`) now owns
+    `scopeValues` (the student-weighted / summed / ratio aggregation of `rv.drillRows()`),
+    `band(def, v)` and `format(def, v)`. `App` keeps its old private names as one-line
+    delegates (`scopeValues`, `kpiBand`, `kpiFormat`) so nothing else in app.ts changed.
+  - **Page:** `glance/glance.html|scss|ts`. Top bar (brand, year, "Review Dashboard" link,
+    Download PDF = `window.print()`), a scope bar (Tamil Nadu › district › block breadcrumb +
+    the same `p-select`s as the dashboard, bound to the shared `DataService` signals), then the
+    template layout: left panel (`.gl-side`) = Overview + every `KPI_MODULES` component except
+    State Summary, badge = number of that module's KPIs in the `bad` band, each opening the
+    component's own page (its tiled KPIs as cards + "View details"); Overview = headline panel
+    (schools with a three-segment Govt / Aided / Private bar from `ds.rawSchoolRows()` type
+    counts; students with a Boys / Girls bar; teachers with Teaching / Non-teaching and PTR),
+    six insight cards (attendance with real 30-day sparkline, enrolment with real year-wise
+    sparkline, potential dropout, pass %, critical infra gap, SMC emergency completion), two
+    ECharts trends (daily student bars + teacher line vs the 90% mark; year-wise boys/girls
+    stacked enrolment), "Needs your attention" (KPIs in `bad` / `warn` bands, owner =
+    component) and a "Programme completion" strip (ACiS survey, THIRAN BLO/baseline, ICT
+    functional, SMC meeting attendance, assessment coverage).
+  - **Deep link back into the drill:** every card calls `openGlanceKpi` / `openGlanceModule`,
+    which `router.navigate(['/'], { queryParams: { topic, kpi?, module? } })`. `App.ngOnInit`
+    reads `ActivatedRoute.snapshot.queryParamMap`; if `topic` is present it awaits `rv.load()`,
+    switches to Review Dashboard, calls `openKpi` / `openModule`, then clears the params.
+  - **Auth:** the page uses the same `AuthService` (sessionStorage; browsers copy it into a tab
+    opened via `target=_blank`). Not signed in → a "Sign in required" card linking to `/`.
+  - Template blocks with no source here were replaced, not faked: urban/rural → Govt/Aided/
+    Private; monthly this-year/last-year attendance → the real 30-day daily series; Hi-Tech lab
+    utilisation → SMC emergency completion; entitlements → programme completion %. The
+    template's demo "Viewing as" switcher became the real scope bar. The greeting h1 was
+    removed on request. The earlier in-app `activeSub === 'glance'` sub-view no longer exists.
+
 - **SMC expanded** to the full metric sheet: meetings-held abstract (held / not held /
   attendance, with the eligible-management denominator), emergency and other resolution
   completion status with department-wise abstracts, composite-grant utilisation, and the
@@ -743,3 +782,253 @@ node node_modules/@angular/cli/bin/ng.js serve
 & "...\git.exe" commit -m "msg"
 & "...\git.exe" push origin main
 ```
+
+---
+
+## 12. Academic — exam type + class-wise views, Class X & XII only (11-Nov-2026)
+
+Two cards were added to the Academic component's "View details", inside the
+shared-drill `} @else {` branch and gated `@if (rv.activeTopic() === 'aca')`.
+**Order on the page (as requested): exam-type grid → district-wise table →
+class-wise matrix.** The exam-type card is inserted BEFORE the shared drill
+table; the class-wise card sits after it. The shared drill table itself, the
+Assessment toggle under the tile and the per-school class→subject modal are
+untouched.
+
+**Both cards are restricted to the board classes (X and XII)**, read from
+`AcademicData.boardClasses` via `acaBoardClasses`. `acaClassLabel(cls)` maps
+10 → "X", 12 → "XII" (ROMAN map) so the headings read as the review sheet names
+them. `acaBoardSittings` is the single filter both cards go through.
+
+- **Exam type** (`acaExamRows` / `acaExamTotals`) — one row per Quarterly /
+  Half Yearly / Annual. Columns: a two-level header with a per-class band —
+  Class X (Average Mark, Pass %) · Class XII (Average Mark, Pass %) ·
+  Class X & XII together (Average Mark, Pass %) · Mark Entry % · Students
+  Assessed · Avg Change · Pass % Change. `acaBoardCell(perClass, cls, key)`
+  reads a per-class cell. **Clicking a row calls `setExamPeriod(row.exam)`** —
+  the same switch as the Assessment toggle, so the drill table, the tiles and
+  these cards all follow it; the active row carries a tick and `.aca-on`.
+  `hasData` is false for an exam with no board sitting: the row dims
+  (`.aca-empty`), shows a "no board sitting" chip and renders dashes, never 0.
+  The change columns compare against the previous exam that actually HAS board
+  data, so a gap in the middle does not produce a bogus delta.
+- **Class-wise × exam type** (`acaClassMatrix` / `acaClassMatrixTotals`) — rows
+  are Class X and Class XII, columns the exam types, plus "All Exams".
+  `acaMatrixMetric` ('avg' | 'pass' | 'entry') picks what the cells show;
+  `acaCell(cells, exam)` reads a cell, `acaTone(v)` bands it per metric.
+  Clicking a class opens `acaScopeSubjectRows` — subject × exam for that class
+  at the same scope, worst subject first.
+
+Source: `AcademicNode.examClass` (exam × class), real at state, district, block
+and school. Row and column totals are **weighted by students assessed**, never a
+mean of means. When a scope has no exam × class detail the matrix falls back to
+`byClass` filtered to the board classes (`blended: true`, no exam split).
+
+**IMPORTANT data limitation — verified, not assumed:** in the current export,
+classes 10 and 12 carry an **Annual sitting only**. Checked exhaustively: state,
+all 38 districts, every block and all **12,208 schools** yield exactly
+`["10/Annual", "12/Annual"]`. So the Quarterly and Half Yearly rows of the
+exam-type grid, and those two columns of the class matrix, are **legitimately
+empty** today. They are kept in place so the grid fills in once board
+quarterly / half-yearly marks are exported. Do not "fix" this by synthesizing.
+
+State figures (2026-27, Annual): Class X avg 70.1 / pass 88.3%, Class XII avg
+71.0 / pass 89.0%, both together 70.5 / 88.6%, mark entry 86.3%, 4,64,753
+students assessed. Class X has 5 subjects, Class XII has 15.
+
+**Known quirk:** catalog KPI `a_avg` ("Average Mark") is `fmt: 'pct'`, so the
+district-wise drill table prints a mark with a `%` sign, and that table still
+blends ALL classes (6–12) rather than board-only. These two cards do neither —
+they are board-only and render Average Mark without a suffix
+(`acaMetricSuffix`). Making the drill table and the tiles board-only as well
+means rerouting `examStat()` through `acaBoardSittings`, which would zero the
+whole Academic component whenever Quarterly or Half Yearly is the active period
+(no board data exists for those), so it was deliberately NOT done.
+
+## 13. Potential Dropout split out of All Children in School (11-Nov-2026)
+
+The five PD KPIs left the `All Children in School` module and became their own
+component. Rationale: a different population (children **still enrolled** but
+absent 15+ of the last 30 days) from a different source (`acis-pd.json`, the
+EMIS Potential Dropout report), and a different intervention from the common
+pool (children who have already left).
+
+**Catalog** (`kpi-catalog.model.ts`): new module `Potential Dropout`, colour
+`#c2410c`, topic **`pd`** — `ac_pd`, `ac_pdp`, `ac_pdr`, `hide(ac_pdrs)`,
+`hide(ac_pdg)`. They are gone from `All Children in School`, which keeps the
+common pool (`ac_pool` … `ac_drc`).
+
+**ReviewService**: `DrillTopic` gained `'pd'`; `topics` gained
+`{ id:'pd', label:'Potential Dropout', icon:'fa-solid fa-user-clock' }`;
+`setTopic` resets `pdUnit`; `defaultTopicColumns` has a `case 'pd'`.
+New members: `pdKpiTabs` (District summary / PD reasons / PD grade-wise),
+`PD_KPI_VIEW`, `pdKpiId`, `pdUnit`, `pdSchool`, `hasPdDrill`, `openPdDrill`,
+`closePdDrill`, `setPdKpi`, `pdView`, `pdActiveTab`, `pdKpiLabel`,
+`pdUnitLabel`, `pdShowStudents`, `pdSchoolName`, `pdStudentRows`, `pdSortKey`,
+**`pdSummaryRows` / `pdSummaryTotals`**, `pdDrillRow`, `pdCloseStudents`.
+`acisPdStudentRows` and `pdStudentRows` now both call the shared private
+`pdStudentsFor(udise)` so the two lists can never drift.
+Reused as-is: `pdScopeStudents`, `acisPdReasonRows/Totals`, `acisPdCategories`,
+`acisPdGradeRows/Totals`, `acisPdClassOptions`, `acisPdSchoolTypeOptions`,
+`pdEnrolled`, `acisPdWindow`, and the three shared filters
+(`acisFSchoolType` / `acisFGender` / `acisFClass`).
+
+**Given up by ACiS**: `acisKpiTabs` lost the PD reasons / PD grade-wise tabs;
+`ACIS_KPI_IDS` lost the five ids; `acisView` lost `'pdreason'` / `'pdgrade'`;
+`acisIsPdView` is now `computed(() => false)` (kept because the summary grid
+still carries PD columns from a source with no CWSN / UMIS fields).
+
+**app.ts**: `openModule`, `onTopicTab` and `closeDomain` each handle `pd`.
+`openKpi` was refactored — it now **closes every dedicated drill up front** and
+then opens the one the KPI belongs to, instead of each branch listing the
+others; behaviour is identical and adding the next component is a one-line change.
+
+**app.html**: new `@else if (selectedDomain() === 'pd')` branch in the drill
+chain (between `acis` and `smc`) with the topic bar, the KPI tabs, the three
+filters and `@switch (rv.pdView())`:
+`reason` (category × reason) · `grade` (class × reason category) ·
+`default` summary grid — one row per district / block / school with Schools
+Affected, PD, PD %, Repeaters, Boys, Girls, Avg and Max Days Absent, drilling
+district → block → school → that school's student list (EMIS ID, name, class,
+section, gender, reason category, reason, days absent, repeater). The two PD
+`@case` blocks were **removed** from the shared `#acisDrill` template. The
+drill-bar title gained a `rv.pdKpiId()` branch.
+
+**Verified against `acis-pd.json`** (window 2026-09-01 → 2026-10-01): 29,075
+potential dropouts across 8,290 government schools in 38 districts = 0.72% of
+40,36,861 government enrolment. Worst districts Tiruppur 1,998 (1.21%) and
+Krishnagiri 1,992 (1.14%). Class 9 is the peak (6,656), then class 10 (4,305).
+Reasons: "Not updated" 48.5%, illness 27.6%, migration 6.2%. The report covers
+**Government schools only**, so PD % is always measured against the government roll.
+
+**Left alone on purpose** (say the word to change): the ACiS summary grid keeps
+its three PD columns and the ACiS standalone tab keeps its PD charts
+(`acisPdMgmtOpt`, `acisPdGradeOpt`) and the pool-vs-PD category panel — they are
+a deliberate side-by-side comparison of the two populations. The ACiS tab's
+headline strip now has 11 tiles instead of 14, since it reads the ACiS module.
+
+### Overview HTML (12-Nov-2026)
+`Review-Dashboard-Overview.html` (repo root) is a standalone overview page styled from
+`Downloads\School Education Dashboard.html` (same layout/CSS): 6 headline KPIs, 5 charts and
+73 metrics across 12 review modules. Regenerate with
+`node --max-old-space-size=4096 scripts/gen-overview-html.mjs` (reads `src/assets/*`; HTML shell
+is `scripts/overview-template.html`). Values use the dashboard's own definitions (e.g. zero-teacher
+= students>0 && teaching==0; colour bands = catalog lo/hi/dir) and were cross-checked against the
+live landing page. Row tags: `demo` (scholarship), `assumed` (SMC grant utilisation, Palli % Class
+Observation), `landing` (academic exam KPIs and "schools not marked attendance %", copied from the
+landing page because they depend on the selected exam period / attendance window).
+- **Collector: Yes filter (12-Nov-2026):** the Overview shows only genuinely collected metrics —
+  rows tagged `demo` or `assumed` are dropped in the generator (`modules[].rows.filter(r => r.t
+  !== 'demo' && r.t !== 'assumed')`), and any module left with zero rows is dropped entirely
+  (`Scholarship` — every one of its figures was `demo`). `landing`-tagged rows stay (real figures,
+  just sourced from the live landing page). The "Scholarship payment success" chart was removed
+  for the same reason; `SMC` lost its `Grant utilisation %` row (now 8 of 9); `Palli Paarvai` lost
+  `% of Class Observation` (now 5 of 6, all plain counts — its sidebar badge is "counts" not "OK").
+  81→73 metrics, 13→12 modules. The banner badge and the "Metrics by module" subtitle were updated
+  to say "Collector: Yes only"; `DATA.meta.notes` explains the exclusion.
+- **State Summary removed + per-module charts (12-Nov-2026):** dropped the `State Summary` module
+  entirely (redundant with the top KPI strip, which already is the state overview) — sidebar nav
+  and grid card both gone, 73→66 metrics, 12→11 modules. Every remaining module now carries a
+  `chart: [...]` array rendered as a `.vzrow` above its metric rows, using 5 new reusable SVG/CSS
+  components in the template: `ring()`/`ringRow()` (percentage rings — Attendance, THIRAN, Digital
+  Infra, Academic Performance coverage/completion), `donut2()` (two-segment donut + count legend —
+  Digital Infra functional split, SMC meetings held/not-held, DPS district/state, Potential Dropout
+  repeaters), `funnel()` (stepped bars — Palli Paarvai officials→schools→observations, ACiS
+  pool→surveyed→admitted→dept-action), and `bars`/`bars mode:'count'` (reuses `hb()`/new `hbN()` —
+  Enrollment and Infrastructure flag-school %, DPS/Potential-Dropout sub-bars). The generic
+  dispatcher is `vizBlock(block)`; `cards()` calls `m.chart.map(vizBlock)` when not searching.
+  All chart figures are real splits/ratios of each module's own numbers — ONE exception: Academic
+  Performance's "5-year Pass % trend" sparkline is explicitly illustrative (only the last point,
+  86.7%, is real; the earlier 4 are stepped back by the real YoY figure to show a plausible shape),
+  labelled on-page with an italic note and in `DATA.meta.notes`.
+
+- **Page simplified (12-Nov-2026):** on request, removed the `Enrollment`, `Infrastructure` and
+  `Digital Infrastructure` modules, then removed the entire "Metrics by module" grid section
+  (search box + all remaining module cards and their per-module charts — Attendance, Academic
+  Performance, THIRAN, SMC, Palli Paarvai, DPS, ACiS, Potential Dropout all lost their card/chart
+  along with it). The sidebar's "Modules" list and the `cards()`/`nav()` module logic, `av`,
+  `ring`, `ringRow`, `donut2`, `funnel`, `spark`, `hbN`, `vizBlock`, `off`, `BC` and the matching
+  CSS (`.mg/.mc/.mh/.ch/.rw/.rl/.rv/.dt/.tg/.lgd/.em/.vzrow/.vz*/.ringrow/.d2*/.funnel/.fstep/
+  .fbar/.sw` + search `input` styles) were deleted from `overview-template.html` as dead code.
+  The page is now just: brand + "Overview" nav item (`nav()` simplified, no module list) → KPI
+  strip → the 5 original headline charts (Attendance daily, Enrolment by management,
+  Infrastructure gaps, ACiS pipeline, SMC resolution completion) → Notes & definitions. The
+  generator keeps computing a `modules` array (Academic Performance, THIRAN, Scholarship, SMC,
+  Palli Paarvai, DPS, ACiS, Potential Dropout) purely for its own console sanity-check log line;
+  it is NOT included in the `DATA` object shipped to the HTML. `DATA.meta.notes` was trimmed to
+  only the definitions that still apply to what's on screen (dropped the "Collector: Yes"/band/
+  landing-tag/illustrative-trend bullets, since no tagged rows or bands render anywhere now).
+  34.1 KB → 15.2 KB.
+
+- **Reverted (12-Nov-2026):** the "page simplified" change above (State-Summary-only sidebar,
+  Enrollment/Infrastructure/Digital-Infra removed, whole module grid removed) was undone on
+  request — restored `overview-template.html` and `gen-overview-html.mjs` to the prior state:
+  all 11 modules with their per-module charts, the full "Metrics by module" grid with search,
+  and the sidebar module list. 34.1 KB / 66 metrics / 11 modules, matching byte-for-byte what was
+  generated just before the removal. The note above (bulleted "Page simplified") describes a
+  change that is no longer in effect; kept for history, not current.
+
+- **Raw metric rows removed from module cards (12-Nov-2026):** on request, each module card in
+  the "Metrics by module" grid (now titled "Component charts") no longer lists its individual
+  metrics as plain text rows (e.g. "Zero enrolment schools 1,509") — it shows only the header
+  (avatar + title + critical/OK/counts badge), the source line, and the module's `chart` block
+  (rings/donuts/funnels/bars). `cards()` in `overview-template.html` dropped the `rs.map(...)`
+  row rendering; the empty-state now reads "No chart for this component." (none hit this — every
+  remaining module has a chart). Search now filters by module TITLE only (row labels are no
+  longer shown, so searching by a removed metric name wouldn't make sense). `DATA.modules[].rows`
+  is still generated and shipped (used only to compute each card's critical-count badge via
+  `off()`); it is simply not rendered as text anymore. Removed now-dead CSS/JS: `BC` map,
+  `.rw/.rl/.rv/.tg`; `.dt` kept (still used by the Good/Watch/Critical legend). Added
+  `.vzrow-last` so the chart block (now the card's last element) has no trailing border.
+  34.1 KB → 33.3 KB (DATA still carries the row numbers for badges, so the drop is modest).
+
+- **Restructured into per-component pages with a vertical menu (12-Nov-2026):** on feedback that
+  the single-page layout was "messy, too much in one view," the page is now multi-view: Overview
+  is JUST the 6 KPI cards + a one-line hint + Notes (no charts, no module list rendered inline).
+  Each of the 11 sidebar "Components" items opens its OWN dedicated page (header with avatar +
+  title + critical/OK/counts badge + source line + a "← Overview" back button + Export brief),
+  showing only that component's chart(s), each in its own full-size `.c` card in a `.g3` grid
+  (side by side when a component has 2 chart blocks). Implemented via `let view` + `go(v)` +
+  `render()` (dispatches to `overviewPage()` or `modulePage(i)`) in `overview-template.html`,
+  replacing the old `cards()`/single-page grid. The 5 former standalone top-level charts were
+  NOT deleted — they were folded into the matching component's page as a 2nd chart block, each
+  with its own label, so no data was lost in the simplification: Attendance gained the 30-day
+  `linechart` (student+teacher trend, moved from the old top chart); Enrollment gained a 2nd
+  `bars` block for "Enrolment share by management"; Infrastructure's bars were swapped for the
+  richer 6-category version (No ramp/playground/classroom repair/fire safety/drinking water/
+  toilet) that used to be the standalone "Infrastructure gaps" chart; SMC gained a `bargroup`
+  block (full-export vs last-12-months resolution completion, reusing `gb()`); All Children in
+  School's %-based rows chart was dropped in favour of keeping just its funnel (redundant
+  otherwise). Two new chart kinds added to `vizBlock()`: `linechart` (multi-series `lc()` + a
+  `.lg` legend) and `bargroup` (`gb()` + legend). Chart sizes were enlarged (ring 112px, donut2
+  136px, funnel bar 30px, spark 320×120) since each now gets a full card instead of a compact
+  grid tile. `DATA.charts` was removed entirely (folded into `modules[].chart`); `DATA` is now
+  just `{kpis, modules, meta}`. 34.1 KB → 30.5 KB.
+
+- **Themed with "Seline Analytics" design system (12-Nov-2026):** applied the style reference
+  from `Downloads\DESIGN.md` (warm-stone canvas, single cyan accent, hairline borders instead of
+  shadows, pill buttons/badges, flat cards, Inter typography with negative tracking on headings)
+  to `overview-template.html`. Tokens: `--bg:#fafaf9` (stone canvas), `--card:#fff`,
+  `--tx:#0c0a09` (ink), `--mu:#78716c` (warm gray), `--mu2:#a8a29e` (ash), `--bd:#e8e6e5` (stone
+  border), `--accent:#3ba6f1` / `--accent-edge:#3398e1` (cyan), `--sky-wash:#c1e1f7`,
+  `--soot:#1c1917` (the one dark/"inverted" surface — used for the sidebar, flat, no gradient).
+  Buttons are now pill-shaped (`--r-pill:9999px`); cards are 10px radius with only a 1px border +
+  a near-invisible resting shadow, a slightly bigger shadow on hover; avatars are circular and
+  colour-neutral (`rgba(120,113,108,.18)` bg, `color:inherit` so they read correctly on both the
+  dark sidebar and light card headers without a second CSS variant). Sidebar active state = sky-
+  wash background + cyan left accent bar, replacing the old plain white/shadow treatment. Dark-
+  mode CSS was removed (the source theme is explicitly light-only).
+  **Deliberate exception — status colours kept:** the spec's "one accent only, no new chromatic
+  colours" rule is for a marketing page; this dashboard's whole job is flagging real problems, so
+  removing red/amber/green for critical/watch/good would be a correctness regression, not a
+  style win. Kept all three, retoned to warm/muted values consistent with the stone palette
+  (`--cr:#b1453c` on `#f7e8e5`, `--wa:#a66a1e` on `#f7ecd9`, `--ok:#3f7a5c` on `#eaf3ee`) rather
+  than the previous vivid red/amber/green.
+  **Decorative colour fully collapsed to the single accent:** module avatars no longer use each
+  component's brand hex (now neutral grey, differentiated by initial letter only); every chart's
+  colour is now forced in `vizBlock()` regardless of what hex the generator passes — the first/
+  "primary" series or segment is always `var(--accent)` (cyan), any second series/segment is
+  `var(--mu2)` (ash). This changes `rings`/`donut2`/`funnel`/`trend`/`bars`/`linechart`/
+  `bargroup` uniformly; `gen-overview-html.mjs`'s per-module hex values are now unused for
+  colour (harmless — kept only because removing them would be a larger, riskier diff for no
+  visual gain, since the template ignores them).

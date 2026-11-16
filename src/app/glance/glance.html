@@ -1,0 +1,433 @@
+<!-- ===== At a glance: standalone executive page (/glance) ===== -->
+@if (!auth.isAuthenticated()) {
+<div class="login-page">
+  <form class="login-card" (ngSubmit)="submitLogin()">
+    <div class="login-brand">
+      <span class="login-emblem"><i class="fa-solid fa-gauge-high"></i></span>
+      <div>
+        <div class="login-title">School Education Dashboard</div>
+        <div class="login-sub">School Education Department<br/>Government of Tamil Nadu</div>
+      </div>
+    </div>
+    <label class="login-field">
+      <span>Username</span>
+      <span class="lf-input">
+        <i class="fa-solid fa-user"></i>
+        <input type="text" name="username" autocomplete="username" autocapitalize="none"
+               spellcheck="false" placeholder="Enter username"
+               [ngModel]="loginUser()" (ngModelChange)="loginUser.set($event)" />
+      </span>
+    </label>
+    <label class="login-field">
+      <span>Password</span>
+      <span class="lf-input">
+        <i class="fa-solid fa-lock"></i>
+        <input [type]="showPass() ? 'text' : 'password'" name="password"
+               autocomplete="current-password" placeholder="Enter password"
+               [ngModel]="loginPass()" (ngModelChange)="loginPass.set($event)" />
+        <button type="button" class="lf-eye" (click)="showPass.set(!showPass())"
+                [title]="showPass() ? 'Hide password' : 'Show password'">
+          <i class="fa-solid" [class.fa-eye]="!showPass()" [class.fa-eye-slash]="showPass()"></i>
+        </button>
+      </span>
+    </label>
+    @if (auth.error()) {
+      <div class="login-error"><i class="fa-solid fa-circle-exclamation"></i> {{ auth.error() }}</div>
+    }
+    <button type="submit" class="login-btn" [disabled]="auth.busy()">
+      @if (auth.busy()) { <i class="fa-solid fa-spinner fa-spin"></i> Signing in }
+      @else { <i class="fa-solid fa-right-to-bracket"></i> Sign In }
+    </button>
+    <div class="login-note">Same sign-in as the EMIS Dashboard. <a href="/">Open the full dashboard</a></div>
+  </form>
+</div>
+} @else {
+<div class="gl-page">
+  <!-- sticky top: header + viewing/filter bar stay visible while scrolling -->
+  <div class="gl-top">
+  <header class="gl-bar1">
+    <div class="brand">
+      <span class="em"><i class="fa-solid fa-school"></i></span>
+      <span>
+        <small lang="ta">பள்ளிக் கல்வித் துறை · தமிழ்நாடு</small>
+        <b>School Education Dashboard</b>
+      </span>
+    </div>
+    <div class="b1r">
+      <span class="yr">Year <span class="inp">{{ rv.currentYear() }}</span></span>
+      <span class="role"><i class="fa-regular fa-user"></i> {{ auth.user() || 'Signed in' }}</span>
+      <a class="gl-btn ghost" href="/" title="Open the full Review Dashboard"><i class="fa-solid fa-table-cells-large"></i> Review Dashboard</a>
+      <button type="button" class="gl-btn" (click)="print()" title="Opens the print dialog; choose Save as PDF"><i class="fa-solid fa-print"></i> Print / Save as PDF</button>
+    </div>
+  </header>
+  <!-- viewing bar: scope + filters on one line, all dropdowns -->
+  <div class="gl-bar2" role="region" aria-label="Scope and filters">
+    <div class="row">
+      <span class="vas" id="gl-viewing-lbl">Viewing</span>
+      <nav class="crumbs" aria-labelledby="gl-viewing-lbl">
+        <button type="button" (click)="ds.goToState()" [class.active]="ds.level() === 'state'"
+                [attr.aria-current]="ds.level() === 'state' ? 'page' : null"><i class="fa-solid fa-house"></i> Tamil Nadu</button>
+        @if (ds.selectedDistrict()) {
+          <i class="fa-solid fa-chevron-right sep" aria-hidden="true"></i>
+          <button type="button" (click)="ds.goToDistrict()" [class.active]="ds.level() === 'district'"
+                  [attr.aria-current]="ds.level() === 'district' ? 'page' : null">{{ ds.titleCase(ds.selectedDistrict()!) }}</button>
+        }
+        @if (ds.selectedBlock()) {
+          <i class="fa-solid fa-chevron-right sep" aria-hidden="true"></i>
+          <span class="active static" aria-current="page">{{ ds.titleCase(ds.selectedBlock()!) }}</span>
+        }
+      </nav>
+      <div class="sel">
+        <p-select [options]="districtOptions()" [ngModel]="ds.selectedDistrict()" (ngModelChange)="onDistrictChange($event)"
+                  optionLabel="label" optionValue="value" placeholder="District: all" [showClear]="true"
+                  [filter]="true" filterBy="label" styleClass="gl-flt" ariaLabel="District" />
+        @if (ds.selectedDistrict()) {
+          <p-select [options]="blockOptions()" [ngModel]="ds.selectedBlock()" (ngModelChange)="onBlockChange($event)"
+                    optionLabel="label" optionValue="value" placeholder="Block: all" [showClear]="true"
+                    [filter]="true" filterBy="label" styleClass="gl-flt" ariaLabel="Block" />
+        }
+        <p-select [options]="mgmtOptions" [ngModel]="mgmtChip()" (ngModelChange)="setMgmt($event)"
+                  optionLabel="label" optionValue="value" styleClass="gl-flt gl-flt-sm" ariaLabel="Management" />
+        <p-select [options]="typeOptions" [ngModel]="typeChip()" (ngModelChange)="setType($event)"
+                  optionLabel="label" optionValue="value" styleClass="gl-flt gl-flt-sm" ariaLabel="School category" />
+      </div>
+      <div class="fsum" aria-live="polite">
+        <span class="fl">Showing</span><b>{{ filterSummary() }}</b>
+        @if (filterActive()) { <button type="button" class="freset" (click)="resetChips()">Reset</button> }
+      </div>
+    </div>
+  </div>
+  </div><!-- /gl-top -->
+
+  @if (!ready()) {
+    <div class="gl-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading dashboard…</div>
+  } @else {
+<div class="gl-wrap" [class.nav-collapsed]="navCollapsed()">
+  <!-- side panel: Overview + menu → submenu; collapsible to an icon rail -->
+  <aside class="gl-side">
+    <button type="button" class="gl-collapse" (click)="toggleNav()" [title]="navCollapsed() ? 'Expand menu' : 'Collapse menu'"
+            [attr.aria-expanded]="!navCollapsed()" aria-controls="gl-nav-items">
+      <i class="fa-solid" [class.fa-angles-left]="!navCollapsed()" [class.fa-angles-right]="navCollapsed()"></i>
+      @if (!navCollapsed()) { <span>Collapse</span> }
+    </button>
+    <div id="gl-nav-items">
+    <h5>Explore deeper</h5>
+    <button type="button" class="gl-sni" [class.on]="glanceView() === 'overview'" (click)="setGlanceView('overview')" title="Overview"
+            [attr.aria-current]="glanceView() === 'overview' ? 'page' : null">
+      <span class="ib"><i class="fa-solid fa-house"></i></span>
+      <span class="t"><b>Overview</b><span>{{ ds.scopeLabel() }}</span></span>
+    </button>
+    <h5 class="mt">Menu</h5>
+    <!-- menu (group) → submenu (items); a group stays open while one of its items is the page -->
+    @for (g of glanceMenu(); track g.id) {
+      <button type="button" class="gl-sni gl-grp" [class.open]="isGroupOpen(g.id)" (click)="toggleGroup(g.id)"
+              [attr.aria-expanded]="isGroupOpen(g.id)" [attr.aria-controls]="'gl-sub-' + g.id"
+              [title]="g.group + (g.bad ? ' · ' + g.bad + ' KPI(s) off track' : '')">
+        <span class="ib" [class.flag]="g.bad > 0"><i [class]="g.icon"></i></span>
+        <span class="t"><b>{{ g.group }}</b></span>
+        @if (g.bad) { <span class="bg">{{ g.bad }}</span> }
+        <i class="fa-solid fa-chevron-down chev"></i>
+      </button>
+      @if (isGroupOpen(g.id)) {
+        <div class="gl-sub" [id]="'gl-sub-' + g.id">
+          @for (m of g.items; track m.id) {
+            <button type="button" class="gl-sni gl-sni-sub" [class.on]="glanceView() === m.id" [class.dim]="!m.built"
+                    [attr.aria-current]="glanceView() === m.id ? 'page' : null"
+                    (click)="setGlanceView(m.id)" [title]="m.built ? m.label + ' · ' + m.short : m.label + ' · not built yet'">
+              <span class="ib"><i [class]="m.icon"></i></span>
+              <span class="t"><b>{{ m.label }}</b><span>{{ m.sub }}</span></span>
+              @if (m.bad) { <span class="bg">{{ m.bad }}</span> }
+            </button>
+          }
+        </div>
+      }
+    }
+    </div>
+  </aside>
+
+  <main class="gl-main">
+    @if (!glanceModule()) {
+    <!-- ===== Overview ===== -->
+    <div class="gl-crumb">
+      <span class="bc">{{ glanceCrumb() }}</span>
+      <a class="status" href="#gl-attention" title="Jump to Needs your attention">
+        <span class="cr"><i></i>{{ attentionCounts().bad }} off track</span>
+        <span class="wa"><i></i>{{ attentionCounts().warn }} on watch</span>
+        <span class="go"><i class="fa-solid fa-arrow-down"></i></span>
+      </a>
+      <span class="asof">{{ glanceAsOf() }}</span>
+    </div>
+
+    <!-- headline panel -->
+    <div class="gl-bpanel">
+      @for (s of glanceStats(); track s.label; let i = $index) {
+        <div class="gl-bp gl-anim" [style.--i]="i">
+          <div class="r1"><span class="lab">{{ s.label }}</span><span class="ib"><i [class]="s.icon"></i></span></div>
+          <div class="big" [glCountUp]="s.big"></div>
+          <div class="sub">{{ s.sub }}</div>
+          @for (sp of s.splits; track $index) {
+            <div class="sp">
+              <div class="lr">
+                @for (g of sp.segs; track g.k) {
+                  <span><i class="dot" [style.background]="g.color"></i>{{ g.k }} <b [glCountUp]="g.v"></b> <em>{{ g.pct }}%</em></span>
+                }
+              </div>
+              <div class="sbar">
+                @for (g of sp.segs; track g.k) { <i [style.width.%]="g.pct" [style.background]="g.color"></i> }
+              </div>
+            </div>
+          }
+        </div>
+      }
+    </div>
+
+    <!-- needs attention -->
+    <section class="gl-c" id="gl-attention">
+      <div class="ct"><b class="lg">Needs your attention</b>
+        <span class="s">KPIs outside their expected range at this scope, with the component that owns them</span></div>
+      <div class="gl-acols">
+        <div class="acol crit">
+          <h6>Critical attention</h6>
+          <span class="ch">Off track — below the catalog range</span>
+          @for (a of glanceAttention().critical; track a.module + a.id; let i = $index) {
+            <button type="button" class="na" [class.first]="i === 0" (click)="openGlanceKpi(a)">
+              <span class="n">{{ i + 1 }}</span>
+              <span class="t"><b>{{ a.title }}</b><span>{{ a.sub }}</span></span>
+              <span class="own">{{ a.owner }}</span>
+            </button>
+          } @empty {
+            <div class="gl-empty">Nothing off track at this scope.</div>
+          }
+        </div>
+        <div class="acol micro">
+          <h6>Watch</h6>
+          <span class="ch">Inside the range, but not yet on track</span>
+          @for (a of glanceAttention().watch; track a.module + a.id; let i = $index) {
+            <button type="button" class="na" [class.first]="i === 0" (click)="openGlanceKpi(a)">
+              <span class="n micro">{{ i + 1 }}</span>
+              <span class="t"><b>{{ a.title }}</b><span>{{ a.sub }}</span></span>
+              <span class="own">{{ a.owner }}</span>
+            </button>
+          } @empty {
+            <div class="gl-empty">Nothing on watch at this scope.</div>
+          }
+        </div>
+      </div>
+    </section>
+
+    <!-- key insights -->
+    <div class="gl-sechead"><h2>Key insights</h2>
+      <span class="hint">Each card: the number, the change, and what it means · tap to drill down</span></div>
+    <div class="gl-kgrid">
+      @for (k of glanceInsights(); track k.title; let i = $index) {
+        <button class="gl-c gl-kc gl-anim" [style.--i]="i + 3" (click)="openGlanceKpi(k)" [title]="'Drill down ' + k.title">
+          <div class="kh">
+            <span class="ib" [style.background]="k.tileBg" [style.color]="k.tileFg"><i [class]="k.icon"></i></span><b>{{ k.title }}</b>
+            @if (k.pill) { <span class="pill" [class]="'pill ' + k.pill.cls">{{ k.pill.text }}</span> }
+          </div>
+          <div class="mid">
+            <div>
+              <div class="val" [glCountUp]="k.value"></div>
+              @if (k.delta) {
+                <div class="delta" [class.up]="k.delta.dir === 'up'" [class.down]="k.delta.dir === 'down'">
+                  {{ k.delta.dir === 'up' ? '▲' : '▼' }} {{ k.delta.text }}
+                </div>
+              }
+            </div>
+            @if (k.spark) {
+              <svg class="gl-spark" width="120" height="40" viewBox="0 0 120 40" aria-hidden="true">
+                <polyline class="sl" [attr.points]="k.spark.points" fill="none" [attr.stroke]="k.spark.color"
+                          stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle [attr.cx]="k.spark.cx" [attr.cy]="k.spark.cy" r="3" [attr.fill]="k.spark.color"/>
+              </svg>
+            }
+          </div>
+          <p>{{ k.note }}</p>
+        </button>
+      }
+    </div>
+
+    <div class="gl-stack">
+      <!-- key trends -->
+      <section class="gl-c">
+        <div class="ct"><b class="lg">Key trends</b><span class="s">{{ ds.scopeLabel() }}</span></div>
+        <div class="gl-tgrid">
+          <div>
+            <div class="ct"><b>Attendance</b>
+              <div class="gl-win" role="group" aria-label="Attendance view">
+                @for (w of ATT_WINDOWS; track w.key) {
+                  <button type="button" class="chip" [class.on]="attWindow() === w.key" [attr.aria-pressed]="attWindow() === w.key" (click)="setAttWindow(w.key)">{{ w.label }}</button>
+                }
+              </div>
+              <span class="s">
+                @if (attWindow() === 'month') { Monthly % of students present · built from the last {{ glanceAttDays() }} school days }
+                @else { Daily % of students present · last {{ glanceAttDays() }} school days }
+              </span></div>
+            <div class="lgd">
+              <span><i style="background:#2F62C4"></i>Present</span>
+              <span><i style="background:#C9D8F2"></i>Absent</span>
+              <span><i class="dash"></i>Target 90%</span>
+            </div>
+            @if (glanceAttDays()) {
+              <div echarts [options]="glanceAttOpt()" class="gl-chart"></div>
+            } @else {
+              <div class="gl-nodata">No attendance data for this scope.</div>
+            }
+          </div>
+          <div>
+            <div class="ct"><b>Enrolment</b>
+              @if (glanceEnrolTag()) { <span class="tag">{{ glanceEnrolTag() }}</span> }
+              <div class="gl-win" role="group" aria-label="Management">
+                @for (m of ENROL_MGMT; track m.label) {
+                  <button type="button" class="chip" [class.on]="enrolMgmt() === m.label" [attr.aria-pressed]="enrolMgmt() === m.label" (click)="setEnrolMgmt(m.label)">{{ m.label }}</button>
+                }
+              </div>
+              <span class="s">Students on roll · year-wise · stacked boys and girls{{ enrolMgmt() === 'All' ? '' : ' · ' + enrolMgmt() + ' schools' }}</span></div>
+            <div class="lgd">
+              <span><i style="background:#2F62C4"></i>Boys</span>
+              <span><i style="background:#3A9A7A"></i>Girls</span>
+            </div>
+            @if (enrolHasData()) {
+              <div echarts [options]="glanceEnrolOpt()" class="gl-chart"></div>
+            } @else {
+              <div class="gl-nodata">No {{ enrolMgmt() === 'All' ? '' : enrolMgmt() + ' ' }}schools on roll at this scope.</div>
+            }
+          </div>
+          <div>
+            <div class="ct"><b>Palli Paarvai observations</b>
+              <div class="gl-win" role="group" aria-label="Month">
+                @for (m of palliMonths(); track m.key) {
+                  <button type="button" class="chip" [class.on]="palliMonth() === m.key" [attr.aria-pressed]="palliMonth() === m.key" (click)="setPalliMonth(m.key)">{{ m.label }}</button>
+                }
+              </div>
+              <span class="s">Share of observations by observing designation · {{ ds.scopeLabel() }}
+                @if (!palliLoading()) { · {{ fmtN(palliTotal()) }} observations across the five designations }</span></div>
+            <div class="lgd"><span><i style="background:#2F62C4"></i>% of observations</span></div>
+            @if (palliLoading()) {
+              <div class="gl-nodata"><i class="fa-solid fa-spinner fa-spin"></i> Loading observation list…</div>
+            } @else if (rv.palliObsError()) {
+              <div class="gl-nodata">{{ rv.palliObsError() }}</div>
+            } @else {
+              <div echarts [options]="glancePalliOpt()" class="gl-chart"></div>
+            }
+          </div>
+          <div>
+            <div class="ct"><b>Exam progression</b>
+              <div class="gl-win" role="group" aria-label="Exam">
+                @for (e of EXAM_TYPES; track e) {
+                  <button type="button" class="chip" [class.on]="examType() === e" [attr.aria-pressed]="examType() === e" (click)="setExamType(e)">{{ e }}</button>
+                }
+              </div>
+              <span class="s">Class X and XII · average mark and pass % · {{ examType() === 'All' ? 'all sittings' : examType() }} · {{ ds.scopeLabel() }}</span></div>
+            <div class="lgd">
+              <span><i style="background:#8E1B3F"></i>Average Mark (board class)</span>
+              <span><i style="background:#8BC34A; border-radius:50%"></i>Pass %</span>
+            </div>
+            @if (examHasData()) {
+              <div echarts [options]="glanceExamOpt()" class="gl-chart"></div>
+              @if (examMissing().length) {
+                <div class="gl-note"><i class="fa-solid fa-circle-info"></i>
+                  No {{ examType() }} sitting recorded for Class {{ examMissing().join(', ') }} in the export; those classes are left blank, not zero.</div>
+              }
+            } @else {
+              <div class="gl-nodata">No exam results at this scope.</div>
+            }
+          </div>
+          <div>
+            <div class="ct"><b>All Children in School</b>
+              <div class="gl-win" role="group" aria-label="Management">
+                @for (m of ACIS_MGMT; track m.label) {
+                  <button type="button" class="chip" [class.on]="acisMgmt() === m.label" [attr.aria-pressed]="acisMgmt() === m.label" (click)="setAcisMgmt(m.label)">{{ m.label }}</button>
+                }
+              </div>
+              <span class="s">Common-pool students by the category of the school they left · {{ ds.scopeLabel() }}
+                @if (!acisLoading()) { · {{ fmtN(acisTotal()) }} students{{ acisMgmt() === 'All' ? '' : ' · ' + acisMgmt() + ' schools' }} }</span></div>
+            <div class="lgd"><span><i style="background:#2F62C4"></i>Students in common pool</span></div>
+            @if (acisLoading()) {
+              <div class="gl-nodata"><i class="fa-solid fa-spinner fa-spin"></i> Loading common-pool list…</div>
+            } @else if (acisTotal() > 0) {
+              <div echarts [options]="glanceAcisOpt()" class="gl-chart"></div>
+            } @else {
+              <div class="gl-nodata">No common-pool students{{ acisMgmt() === 'All' ? '' : ' from ' + acisMgmt() + ' schools' }} at this scope.</div>
+            }
+          </div>
+        </div>
+      </section>
+
+      <!-- completion strip -->
+      <section class="gl-c">
+        <div class="gl-sechead tight">
+          <h2>Programme completion</h2>
+          <span class="hint">% complete at this scope · colour follows each KPI's catalog band</span></div>
+        <div class="gl-ent">
+          @for (e of glanceCompletion(); track e.module + e.id) {
+            <button (click)="openGlanceKpi(e)" [title]="'Drill down ' + e.label">
+              <div class="top"><span>{{ e.label }}</span><b [glCountUp]="e.pct + '%'"></b></div>
+              <div class="bar"><i [style.width.%]="e.pct" [style.background]="e.color"></i></div>
+            </button>
+          } @empty {
+            <div class="gl-empty">No completion figures at this scope.</div>
+          }
+        </div>
+      </section>
+    </div>
+
+    <div class="gl-foot">
+      <span>Sources: EMIS enrolment roll {{ rv.currentYear() }} · TNSED attendance app · EMIS infrastructure, THIRAN, SMC, Palli Paarvai, DPS and ACiS exports</span>
+      <span class="r">On track / Watch / Off track follow each KPI's catalog range · counts carry no band</span>
+    </div>
+
+    } @else {
+    <!-- ===== Submenu item page ===== -->
+    @let gm = glanceModule()!;
+    <div class="gl-crumb">
+      <span class="bc">{{ glanceCrumb() }} › {{ gm.group }} › {{ gm.label }}</span>
+      <span class="asof">{{ glanceAsOf() }}</span>
+    </div>
+    <div class="gl-modhead" [style.--kc]="gm.color">
+      <span class="av"><i [class]="gm.icon"></i></span>
+      <div>
+        <h1 class="gl-h1">{{ gm.label }}</h1>
+        @if (gm.built) {
+          <span class="s">Data: {{ gm.short }} component · {{ ds.scopeLabel() }} · {{ gm.kpis.length }} KPIs
+            @if (gm.bad) { · <b class="cr">{{ gm.bad }} off track</b> }</span>
+        } @else {
+          <span class="s">{{ gm.group }} · {{ ds.scopeLabel() }}</span>
+        }
+      </div>
+      <button class="gl-btn ghost" (click)="setGlanceView('overview')"><i class="fa-solid fa-arrow-left"></i> Overview</button>
+      @if (gm.built) {
+        <button class="gl-btn" (click)="openGlanceModule({ topic: gm.topic, title: gm.module! })">View details <i class="fa-solid fa-arrow-right"></i></button>
+      }
+    </div>
+    @if (!gm.built) {
+      <section class="gl-c"><div class="gl-nodata"><b class="gl-nodata-t">{{ gm.label }} is not built yet</b>
+        No data source for this item exists in the dashboard. Items with data open their Review component here.</div></section>
+    } @else {
+    <div class="gl-kgrid">
+      @for (k of gm.kpis; track k.id; let i = $index) {
+        <button class="gl-c gl-kc gl-anim" [style.--i]="i" (click)="openGlanceKpi(k)" [title]="k.hasData ? 'Drill down ' + k.label : k.label + ' — no data source yet'">
+          <div class="kh"><b>{{ k.label }}</b>
+            @if (k.pill) { <span class="pill" [class]="'pill ' + k.pill.cls">{{ k.pill.text }}</span> }
+          </div>
+          <div class="mid"><div><div class="val" [class.muted]="!k.hasData" [glCountUp]="k.value"></div></div></div>
+          <p>{{ k.fmt === 'pct' ? 'Percentage KPI, banded by the catalog range' : k.dir < 0 ? 'Count — lower is better' : k.dir > 0 ? 'Count — higher is better' : 'Count' }} · {{ gm.short }}</p>
+        </button>
+      }
+    </div>
+    @if (gm.module === 'Academic Performance') {
+      <div class="kpi-period gl-period">
+        <span class="kpi-period-lbl">Assessment:</span>
+        <button class="kpi-period-btn" [class.on]="rv.examPeriod() === 'All'" (click)="rv.setExamPeriod('All')">All</button>
+        <button class="kpi-period-btn" [class.on]="rv.examPeriod() === 'Quarterly'" (click)="rv.setExamPeriod('Quarterly')">Q</button>
+        <button class="kpi-period-btn" [class.on]="rv.examPeriod() === 'Half Yearly'" (click)="rv.setExamPeriod('Half Yearly')">H</button>
+        <button class="kpi-period-btn" [class.on]="rv.examPeriod() === 'Annual'" (click)="rv.setExamPeriod('Annual')">A</button>
+      </div>
+    }
+    }
+    }
+  </main>
+</div>
+  }
+</div>
+}

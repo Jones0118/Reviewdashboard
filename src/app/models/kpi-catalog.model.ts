@@ -256,14 +256,21 @@ export const KPI_MODULES: KpiModule[] = [
       // ---- Dropout rate (REAL): not-re-enrolled common-pool children ÷ enrolment I–XII ----
       P('ac_dr', 'Dropout rate %', -1, 0, 5, 'acisDropRate', 'acis'),
       N('ac_drc', 'Dropouts not re-enrolled', -1, 'acisDropOut', 'acis'),
-      // ---- Potential dropouts (REAL — EMIS Potential Dropout report) ----
-      // Absent 15+ days in the last 30. Single report window, so PD duration,
-      // monthly PD trend and "regularised" have no source and are not built.
-      N('ac_pd', 'Potential dropouts (15+ days absent)', -1, 'acisPd', 'acis'),
-      P('ac_pdp', 'Potential dropout %', -1, 0, 5, 'acisPdPct', 'acis'),
-      N('ac_pdr', 'Potential dropout repeaters', -1, 'acisPdRepeat', 'acis'),
-      hide(N('ac_pdrs', 'Potential dropout reasons', 0, 'acisPdWithReason', 'acis')),
-      hide(N('ac_pdg', 'Potential dropouts grade-wise', -1, 'acisPd', 'acis')),
+    ],
+  },
+  {
+    // Potential Dropout — split out of "All Children in School" on request.
+    // A different population and a different source: the EMIS Potential
+    // Dropout report lists children absent 15+ of the last 30 days who are
+    // still enrolled, whereas the common pool holds children who have already
+    // left. REAL (acis-pd.json); nothing assumed. One report window exists, so
+    // PD duration buckets, a monthly trend and "regularised" are not built.
+    title: 'Potential Dropout', color: '#c2410c', kpis: [
+      N('ac_pd', 'Potential dropouts (15+ days absent)', -1, 'acisPd', 'pd'),
+      P('ac_pdp', 'Potential dropout %', -1, 0, 5, 'acisPdPct', 'pd'),
+      N('ac_pdr', 'Potential dropout repeaters', -1, 'acisPdRepeat', 'pd'),
+      hide(N('ac_pdrs', 'Potential dropout reasons', 0, 'acisPdWithReason', 'pd')),
+      hide(N('ac_pdg', 'Potential dropouts grade-wise', -1, 'acisPd', 'pd')),
     ],
   },
 ];

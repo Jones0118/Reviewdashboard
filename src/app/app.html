@@ -109,7 +109,10 @@
       @for (t of tabs; track t.label) {
         @if (t.url) {
           <!-- external system: opens in a new tab -->
-          <a class="tab tab-ext" [href]="t.url" target="_blank" rel="noopener noreferrer"
+          <!-- internal routes (e.g. /glance) keep the opener so the sign-in session
+               (sessionStorage) is copied into the new tab; real external sites do not -->
+          <a class="tab tab-ext" [href]="t.url" target="_blank"
+             [attr.rel]="t.url.startsWith('http') ? 'noopener noreferrer' : null"
              [title]="t.label + ' opens in a new tab'">
             {{ t.label }} <i class="fa-solid fa-arrow-up-right-from-square"></i>
           </a>
@@ -455,6 +458,8 @@
               {{ rv.dpsKpiLabel() }} — {{ rv.dpsUnitLabel() }}s in {{ ds.scopeLabel() }}
             } @else if (rv.acisKpiId()) {
               {{ rv.acisKpiLabel() }} — {{ ds.scopeLabel() }}
+            } @else if (rv.pdKpiId()) {
+              {{ rv.pdKpiLabel() }} — {{ ds.scopeLabel() }}
             } @else if (rv.smcKpiId()) {
               {{ rv.smcKpiLabel() }} — {{ ds.scopeLabel() }}
             } @else {
@@ -1396,6 +1401,243 @@
         </div>
         } @else if (selectedDomain() === 'acis') {
         <ng-container *ngTemplateOutlet="acisDrill; context: { $implicit: false }" />
+        } @else if (selectedDomain() === 'pd') {
+        <!-- ===== Potential Dropout dedicated drill (EMIS PD report) ===== -->
+        <!-- Split out of All Children in School: children who are STILL
+             enrolled but absent 15+ of the last 30 days, which is a different
+             population and a different intervention from the common pool. -->
+        <div class="rv-topics">
+          @for (t of rv.topics; track t.id) {
+            <button [class.on]="rv.activeTopic() === t.id" (click)="onTopicTab(t.id)">
+              <i [class]="t.icon"></i> {{ t.label }}
+            </button>
+          }
+        </div>
+        <div class="card table-card">
+          <div class="card-title">
+            <i class="fa-solid fa-user-clock"></i> {{ rv.pdKpiLabel() }} — {{ ds.scopeLabel() }}
+            <span class="smc-window-note">PD report window {{ rv.acisPdWindow() }}</span>
+            <button class="kpi-filter-clear" (click)="closeDomain()" style="margin-left:auto">
+              <i class="fa-solid fa-arrow-left"></i> Back to all KPIs
+            </button>
+          </div>
+
+          <!-- Potential Dropout KPI switcher tabs -->
+          <div class="rv-topics palli-tabs">
+            @for (t of rv.pdKpiTabs; track t.id) {
+              <button [class.on]="rv.pdActiveTab() === t.id" (click)="rv.setPdKpi(t.id)">{{ t.label }}</button>
+            }
+          </div>
+
+          <!-- The PD report carries school type / gender / class, but no CWSN
+               or UMIS fields, so only those three filters are offered. -->
+          <div class="acis-filters">
+            <p-select [options]="rv.acisPdSchoolTypeOptions()" [ngModel]="rv.acisFSchoolType()"
+                      (ngModelChange)="rv.acisFSchoolType.set($event)" optionLabel="label" optionValue="value"
+                      styleClass="acis-sel" [appendTo]="'body'" />
+            <p-select [options]="rv.acisGenderOptions" [ngModel]="rv.acisFGender()"
+                      (ngModelChange)="rv.acisFGender.set($event)" optionLabel="label" optionValue="value"
+                      styleClass="acis-sel" [appendTo]="'body'" />
+            <p-select [options]="rv.acisPdClassOptions()" [ngModel]="rv.acisFClass()"
+                      (ngModelChange)="rv.acisFClass.set($event)" optionLabel="label" optionValue="value"
+                      styleClass="acis-sel" [appendTo]="'body'" />
+            @if (rv.acisFiltered()) {
+              <button class="kpi-filter-clear" (click)="rv.acisResetFilters()">
+                <i class="fa-solid fa-filter-circle-xmark"></i> Clear filters
+              </button>
+            }
+          </div>
+
+          @switch (rv.pdView()) {
+
+            <!-- ===== Reason category x reason (REAL) ===== -->
+            @case ('reason') {
+              <p-table [value]="rv.acisPdReasonRows()" styleClass="p-datatable-sm acis-grid" [scrollable]="true"
+                       [rows]="20" [rowsPerPageOptions]="[10,20,50]"
+                       [paginator]="rv.acisPdReasonRows().length > 0" [rowHover]="true" sortMode="single">
+                <ng-template pTemplate="header">
+                  <tr>
+                    <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
+                    <th pSortableColumn="category">Reason Category <p-sortIcon field="category" /></th>
+                    <th pSortableColumn="reason">Reason <p-sortIcon field="reason" /></th>
+                    <th class="num" pSortableColumn="pd">Potential Dropouts <p-sortIcon field="pd" /></th>
+                    <th class="num" pSortableColumn="share">Share % <p-sortIcon field="share" /></th>
+                    <th class="num" pSortableColumn="repeaters">Repeaters <p-sortIcon field="repeaters" /></th>
+                    <th class="num" pSortableColumn="boys">Boys <p-sortIcon field="boys" /></th>
+                    <th class="num" pSortableColumn="girls">Girls <p-sortIcon field="girls" /></th>
+                  </tr>
+                </ng-template>
+                <ng-template pTemplate="body" let-r>
+                  <tr>
+                    <td class="num acis-sno">{{ r.sno }}</td>
+                    <td>{{ r.category }}</td>
+                    <td class="acis-key">{{ r.reason }}</td>
+                    <td class="num strong">{{ fmt(r.pd) }}</td>
+                    <td class="num">{{ r.share }}%</td>
+                    <td class="num" [class.bad]="r.repeaters > 0">{{ fmt(r.repeaters) }}</td>
+                    <td class="num">{{ fmt(r.boys) }}</td>
+                    <td class="num">{{ fmt(r.girls) }}</td>
+                  </tr>
+                </ng-template>
+                <ng-template pTemplate="footer">
+                  <tr class="rv-total">
+                    <td class="strong" colspan="3">Grand Total ({{ fmt(rv.acisPdReasonTotals().count) }} reasons)</td>
+                    <td class="num strong">{{ fmt(rv.acisPdReasonTotals().pd) }}</td>
+                    <td class="num strong">100%</td>
+                    <td class="num strong">{{ fmt(rv.acisPdReasonTotals().repeaters) }}</td>
+                    <td class="num strong">{{ fmt(rv.acisPdReasonTotals().boys) }}</td>
+                    <td class="num strong">{{ fmt(rv.acisPdReasonTotals().girls) }}</td>
+                  </tr>
+                </ng-template>
+              </p-table>
+            }
+
+            <!-- ===== Class-wise, split by reason category (REAL) ===== -->
+            @case ('grade') {
+              <p-table [value]="rv.acisPdGradeRows()" styleClass="p-datatable-sm acis-grid" [scrollable]="true"
+                       [paginator]="false" [rowHover]="true" sortMode="single">
+                <ng-template pTemplate="header">
+                  <tr>
+                    <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
+                    <th pSortableColumn="cls">Class <p-sortIcon field="cls" /></th>
+                    <th class="num" pSortableColumn="pd">Potential Dropouts <p-sortIcon field="pd" /></th>
+                    <th class="num" pSortableColumn="boys">Boys <p-sortIcon field="boys" /></th>
+                    <th class="num" pSortableColumn="girls">Girls <p-sortIcon field="girls" /></th>
+                    <th class="num" pSortableColumn="repeaters">Repeaters <p-sortIcon field="repeaters" /></th>
+                    @for (c of rv.acisPdCategories(); track c) { <th class="num">{{ c }}</th> }
+                  </tr>
+                </ng-template>
+                <ng-template pTemplate="body" let-r>
+                  <tr>
+                    <td class="num acis-sno">{{ r.sno }}</td>
+                    <td class="acis-key">{{ r.cls }}</td>
+                    <td class="num strong">{{ fmt(r.pd) }}</td>
+                    <td class="num">{{ fmt(r.boys) }}</td>
+                    <td class="num">{{ fmt(r.girls) }}</td>
+                    <td class="num" [class.bad]="r.repeaters > 0">{{ fmt(r.repeaters) }}</td>
+                    @for (c of rv.acisPdCategories(); track c) { <td class="num">{{ fmt(r.cats[c] || 0) }}</td> }
+                  </tr>
+                </ng-template>
+                <ng-template pTemplate="footer">
+                  <tr class="rv-total">
+                    <td class="strong" colspan="2">Grand Total ({{ fmt(rv.acisPdGradeTotals().count) }} classes)</td>
+                    <td class="num strong">{{ fmt(rv.acisPdGradeTotals().pd) }}</td>
+                    <td class="num strong">{{ fmt(rv.acisPdGradeTotals().boys) }}</td>
+                    <td class="num strong">{{ fmt(rv.acisPdGradeTotals().girls) }}</td>
+                    <td class="num strong">{{ fmt(rv.acisPdGradeTotals().repeaters) }}</td>
+                    @for (c of rv.acisPdCategories(); track c) { <td class="num strong">{{ fmt(rv.acisPdGradeTotals().cats[c] || 0) }}</td> }
+                  </tr>
+                </ng-template>
+              </p-table>
+            }
+
+            <!-- ===== District → Block → School summary → students ===== -->
+            @default {
+              @if (!rv.pdShowStudents()) {
+                <div class="acis-grid-note">
+                  <i class="fa-solid fa-circle-info"></i>
+                  Children still on roll who were absent 15+ of the last 30 days ({{ rv.acisPdWindow() }}).
+                  PD % is measured against the unit's enrolment in the school types the report covers.
+                  {{ ds.selectedBlock() ? 'Click a school for its students and their reason.' : 'Click a row to drill down.' }}
+                </div>
+                <p-table [value]="rv.pdSummaryRows()" styleClass="p-datatable-sm acis-grid" [scrollable]="true"
+                         [rows]="10" [rowsPerPageOptions]="[10,20,50]"
+                         [paginator]="rv.pdSummaryRows().length > 0" [rowHover]="true" sortMode="single">
+                  <ng-template pTemplate="header">
+                    <tr>
+                      <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
+                      <th pSortableColumn="unit">{{ rv.pdUnitLabel() }} <p-sortIcon field="unit" /></th>
+                      @if (ds.selectedBlock()) { <th pSortableColumn="udise">UDISE Code <p-sortIcon field="udise" /></th> }
+                      @if (!ds.selectedBlock()) { <th class="num" pSortableColumn="schools">Schools Affected <p-sortIcon field="schools" /></th> }
+                      <th class="num" pSortableColumn="pd">Potential Dropouts <p-sortIcon field="pd" /></th>
+                      <th class="num" pSortableColumn="pdPct">PD % <p-sortIcon field="pdPct" /></th>
+                      <th class="num" pSortableColumn="repeaters">Repeaters <p-sortIcon field="repeaters" /></th>
+                      <th class="num" pSortableColumn="boys">Boys <p-sortIcon field="boys" /></th>
+                      <th class="num" pSortableColumn="girls">Girls <p-sortIcon field="girls" /></th>
+                      <th class="num" pSortableColumn="avgDays">Avg Days Absent <p-sortIcon field="avgDays" /></th>
+                      <th class="num" pSortableColumn="maxDays">Max Days Absent <p-sortIcon field="maxDays" /></th>
+                    </tr>
+                  </ng-template>
+                  <ng-template pTemplate="body" let-r>
+                    <tr class="rv-row" (click)="rv.pdDrillRow(r)"
+                        [title]="ds.selectedBlock() ? 'Show this school\'s potential dropouts' : 'Drill down'">
+                      <td class="num acis-sno">{{ r.sno }}</td>
+                      <td class="acis-unit">{{ r.unit }} <i class="fa-solid fa-chevron-right"></i></td>
+                      @if (ds.selectedBlock()) { <td class="acis-udise">{{ r.udise }}</td> }
+                      @if (!ds.selectedBlock()) { <td class="num">{{ fmt(r.schools) }}</td> }
+                      <td class="num acis-key">{{ fmt(r.pd) }}</td>
+                      <td class="num">
+                        @if (r.enrolled > 0) {
+                          <span class="acis-pill" [class.p-bad]="r.pdPct > 3" [class.p-warn]="r.pdPct > 1 && r.pdPct <= 3"
+                                [class.p-good]="r.pdPct <= 1">{{ r.pdPct }}%</span>
+                        } @else { <span class="acis-dash">—</span> }
+                      </td>
+                      <td class="num" [class.bad]="r.repeaters > 0">{{ fmt(r.repeaters) }}</td>
+                      <td class="num">{{ fmt(r.boys) }}</td>
+                      <td class="num">{{ fmt(r.girls) }}</td>
+                      <td class="num">{{ r.avgDays }}</td>
+                      <td class="num">{{ r.maxDays }}</td>
+                    </tr>
+                  </ng-template>
+                  <ng-template pTemplate="footer">
+                    <tr class="rv-total">
+                      <td class="strong" colspan="3">Grand Total ({{ fmt(rv.pdSummaryTotals().count) }} {{ rv.pdUnitLabel().toLowerCase() }}s)</td>
+                      <td class="num strong">{{ fmt(rv.pdSummaryTotals().pd) }}</td>
+                      <td class="num strong">{{ rv.pdSummaryTotals().pdPct }}%</td>
+                      <td class="num strong">{{ fmt(rv.pdSummaryTotals().repeaters) }}</td>
+                      <td class="num strong">{{ fmt(rv.pdSummaryTotals().boys) }}</td>
+                      <td class="num strong">{{ fmt(rv.pdSummaryTotals().girls) }}</td>
+                      <td class="num strong">{{ rv.pdSummaryTotals().avgDays }}</td>
+                      <td class="num strong">{{ rv.pdSummaryTotals().maxDays }}</td>
+                    </tr>
+                  </ng-template>
+                </p-table>
+              } @else {
+                <div class="palli-subbar">
+                  <button class="dr-back ghost" (click)="rv.pdCloseStudents()">
+                    <i class="fa-solid fa-arrow-left"></i> All schools
+                  </button>
+                  <b>{{ rv.pdSchoolName() }} &middot; potential dropouts</b>
+                </div>
+                <p-table [value]="rv.pdStudentRows()" styleClass="p-datatable-sm acis-grid" [scrollable]="true"
+                         [rows]="20" [rowsPerPageOptions]="[10,20,50,100]"
+                         [paginator]="rv.pdStudentRows().length > 0" sortMode="single">
+                  <ng-template pTemplate="header">
+                    <tr>
+                      <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
+                      <th pSortableColumn="emis">EMIS ID <p-sortIcon field="emis" /></th>
+                      <th pSortableColumn="name">Student Name <p-sortIcon field="name" /></th>
+                      <th pSortableColumn="cls">Class <p-sortIcon field="cls" /></th>
+                      <th pSortableColumn="section">Section <p-sortIcon field="section" /></th>
+                      <th pSortableColumn="gender">Gender <p-sortIcon field="gender" /></th>
+                      <th pSortableColumn="category">Reason Category <p-sortIcon field="category" /></th>
+                      <th pSortableColumn="reason">Reason <p-sortIcon field="reason" /></th>
+                      <th class="num" pSortableColumn="absentDays">Days Absent <p-sortIcon field="absentDays" /></th>
+                      <th pSortableColumn="repeater">Repeater <p-sortIcon field="repeater" /></th>
+                    </tr>
+                  </ng-template>
+                  <ng-template pTemplate="body" let-s>
+                    <tr>
+                      <td class="num acis-sno">{{ s.sno }}</td>
+                      <td class="acis-udise">{{ s.emis }}</td>
+                      <td class="acis-key">{{ s.name }}</td>
+                      <td>{{ s.cls }}</td>
+                      <td>{{ s.section }}</td>
+                      <td>{{ s.gender }}</td>
+                      <td>{{ s.category }}</td>
+                      <td>{{ s.reason }}</td>
+                      <td class="num strong">{{ s.absentDays }}</td>
+                      <td [class.bad]="s.repeater === 'Repeater'">{{ s.repeater }}</td>
+                    </tr>
+                  </ng-template>
+                  <ng-template pTemplate="emptymessage">
+                    <tr><td colspan="10" class="empty">No potential dropouts in this school for the current filters.</td></tr>
+                  </ng-template>
+                </p-table>
+              }
+            }
+          }
+        </div>
         } @else if (selectedDomain() === 'smc') {
         <!-- ===== SMC dedicated drill — meetings, resolutions, grants ===== -->
         <!-- Two units of analysis (the meeting and the resolution) plus the
@@ -1808,6 +2050,114 @@
           }
         </div>
 
+        <!-- ===== Academic: exam type grid (Class X & XII) — shown FIRST =====
+             One row per Quarterly / Half Yearly / Annual sitting with Average
+             Mark and Pass % per board class. Restricted to classes X and XII
+             on request; in the current export those two carry an ANNUAL
+             sitting only (every district, block and all 12,208 schools), so
+             the other rows show dashes until board quarterly / half-yearly
+             marks are exported. -->
+        @if (rv.activeTopic() === 'aca') {
+        <div class="card table-card">
+          <div class="card-title">
+            <i class="fa-solid fa-calendar-days"></i> Exam type — Class X &amp; XII — {{ ds.scopeLabel() }}
+            <span class="hint">click a row to make that exam the active assessment</span>
+            <span class="aca-active-note">Active: <b>{{ rv.examPeriod() }}</b></span>
+          </div>
+          @if (!rv.acaExamRows().length) {
+            <div class="no-data"><i class="fa-solid fa-circle-info"></i> No exam-wise academic data for this scope.</div>
+          } @else {
+          <p-table [value]="rv.acaExamRows()" styleClass="p-datatable-sm acis-grid aca-grid"
+                   [paginator]="false" [rowHover]="true" sortMode="single">
+            <ng-template pTemplate="header">
+              <tr class="acis-group-head">
+                <th colspan="2"></th>
+                @for (c of rv.acaBoardClasses(); track c) {
+                  <th colspan="2" class="aca-grp">Class {{ rv.acaClassLabel(c) }}</th>
+                }
+                <th colspan="2" class="aca-grp-all acis-sep">Class X &amp; XII together</th>
+                <th colspan="2"></th>
+                <th colspan="2" class="acis-sep"></th>
+              </tr>
+              <tr>
+                <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
+                <th pSortableColumn="exam">Exam Type <p-sortIcon field="exam" /></th>
+                @for (c of rv.acaBoardClasses(); track c) {
+                  <th class="num">Average Mark</th>
+                  <th class="num">Pass %</th>
+                }
+                <th class="num acis-sep" pSortableColumn="avg">Average Mark <p-sortIcon field="avg" /></th>
+                <th class="num" pSortableColumn="pass">Pass % <p-sortIcon field="pass" /></th>
+                <th class="num" pSortableColumn="entry">Mark Entry % <p-sortIcon field="entry" /></th>
+                <th class="num" pSortableColumn="total">Students Assessed <p-sortIcon field="total" /></th>
+                <th class="num acis-sep" pSortableColumn="improve">Avg Change <p-sortIcon field="improve" /></th>
+                <th class="num" pSortableColumn="passImprove">Pass % Change <p-sortIcon field="passImprove" /></th>
+              </tr>
+            </ng-template>
+            <ng-template pTemplate="body" let-r>
+              <tr class="rv-row" [class.aca-on]="r.active" [class.aca-empty]="!r.hasData"
+                  (click)="rv.setExamPeriod(r.exam)"
+                  [title]="'Show ' + r.exam + ' figures across the dashboard'">
+                <td class="num acis-sno">{{ r.sno }}</td>
+                <td class="acis-unit">{{ r.exam }}
+                  @if (r.active) { <i class="fa-solid fa-circle-check aca-tick"></i> }
+                  @if (!r.hasData) { <span class="aca-nodata">no board sitting</span> }
+                </td>
+                @for (c of rv.acaBoardClasses(); track c) {
+                  <td class="num">
+                    @if (rv.acaBoardCell(r.perClass, c, 'avg') !== null) {
+                      <span class="acis-pill" [class]="'acis-pill p-' + rv.acaTone(rv.acaBoardCell(r.perClass, c, 'avg'))">{{ rv.acaBoardCell(r.perClass, c, 'avg') }}</span>
+                    } @else { <span class="acis-dash">—</span> }
+                  </td>
+                  <td class="num">
+                    @if (rv.acaBoardCell(r.perClass, c, 'pass') !== null) {
+                      <span [class.bad]="rv.acaBoardCell(r.perClass, c, 'pass')! < 50"
+                            [class.good]="rv.acaBoardCell(r.perClass, c, 'pass')! >= 75">{{ rv.acaBoardCell(r.perClass, c, 'pass') }}%</span>
+                    } @else { <span class="acis-dash">—</span> }
+                  </td>
+                }
+                <td class="num acis-sep acis-key">
+                  @if (r.hasData) { {{ r.avg }} } @else { <span class="acis-dash">—</span> }
+                </td>
+                <td class="num acis-key" [class.bad]="r.hasData && r.pass < 50" [class.good]="r.hasData && r.pass >= 75">
+                  @if (r.hasData) { {{ r.pass }}% } @else { <span class="acis-dash">—</span> }
+                </td>
+                <td class="num" [class.bad]="r.hasData && r.entry < 50" [class.warn]="r.hasData && r.entry >= 50 && r.entry < 80">
+                  @if (r.hasData) { {{ r.entry }}% } @else { <span class="acis-dash">—</span> }
+                </td>
+                <td class="num">{{ r.hasData ? fmt(r.total) : '—' }}</td>
+                <td class="num acis-sep" [class.bad]="r.improve < 0" [class.good]="r.improve > 0">
+                  @if (r.hasPrev) { {{ r.improve > 0 ? '+' : '' }}{{ r.improve }} } @else { <span class="acis-dash">—</span> }
+                </td>
+                <td class="num" [class.bad]="r.passImprove < 0" [class.good]="r.passImprove > 0">
+                  @if (r.hasPrev) { {{ r.passImprove > 0 ? '+' : '' }}{{ r.passImprove }}% } @else { <span class="acis-dash">—</span> }
+                </td>
+              </tr>
+            </ng-template>
+            <ng-template pTemplate="footer">
+              <tr class="rv-total">
+                <td class="strong" colspan="2">Grand Total ({{ rv.acaExamTotals().count }} exam types with board data)</td>
+                @for (c of rv.acaBoardClasses(); track c) {
+                  <td class="num strong">{{ rv.acaBoardCell(rv.acaExamTotals().perClass, c, 'avg') ?? '—' }}</td>
+                  <td class="num strong">
+                    @if (rv.acaBoardCell(rv.acaExamTotals().perClass, c, 'pass') !== null) {
+                      {{ rv.acaBoardCell(rv.acaExamTotals().perClass, c, 'pass') }}%
+                    } @else { — }
+                  </td>
+                }
+                <td class="num strong acis-sep">{{ rv.acaExamTotals().avg }}</td>
+                <td class="num strong">{{ rv.acaExamTotals().pass }}%</td>
+                <td class="num strong">{{ rv.acaExamTotals().entry }}%</td>
+                <td class="num strong">{{ fmt(rv.acaExamTotals().total) }}</td>
+                <td class="acis-sep"></td>
+                <td></td>
+              </tr>
+            </ng-template>
+          </p-table>
+          }
+        </div>
+        }
+
         <div class="card table-card">
           <div class="card-title">
             <i class="fa-solid fa-table-list"></i> {{ rv.drillUnitLabel() }}s — {{ ds.scopeLabel() }}
@@ -1901,6 +2251,125 @@
             </ng-template>
           </p-table>
         </div>
+
+        <!-- ===== Academic: class-wise × exam type (Class X & XII) =====
+             Shown after the district-wise table. Rows are the board classes,
+             columns the exam types; the dropdown switches the cells between
+             Average Mark, Pass % and Mark Entry %. Click a class for its
+             subject-wise breakdown at the same scope. -->
+        @if (rv.activeTopic() === 'aca') {
+          <div class="card table-card">
+            <div class="card-title">
+              <i class="fa-solid fa-table-cells"></i> Class-wise &times; exam type — Class X &amp; XII — {{ ds.scopeLabel() }}
+              <span class="hint">{{ rv.acaMetricLabel() }} &middot; click a class for its subjects</span>
+              <span class="aca-metric-sel">
+                <p-select [options]="rv.acaMetricOptions" [ngModel]="rv.acaMatrixMetric()"
+                          (ngModelChange)="rv.setAcaMatrixMetric($event)" optionLabel="label" optionValue="value"
+                          styleClass="acis-sel" [appendTo]="'body'" />
+              </span>
+            </div>
+            @if (!rv.acaClassMatrix().length) {
+              <div class="no-data"><i class="fa-solid fa-circle-info"></i> No class-wise academic data for this scope.</div>
+            } @else {
+            <div class="acis-grid-note">
+              <i class="fa-solid fa-circle-info"></i>
+              Showing <b>{{ rv.acaMetricLabel() }}</b> for the board classes only (X and XII).
+              A dash means that class has no sitting for that exam — in the current export classes X
+              and XII carry an <b>Annual</b> sitting only, so Quarterly and Half Yearly stay empty
+              until board quarterly / half-yearly marks are exported.
+            </div>
+            <p-table [value]="rv.acaClassMatrix()" styleClass="p-datatable-sm acis-grid aca-grid"
+                     [paginator]="false" [rowHover]="true" sortMode="single">
+              <ng-template pTemplate="header">
+                <tr>
+                  <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
+                  <th pSortableColumn="cls">Class <p-sortIcon field="cls" /></th>
+                  @for (e of rv.acaExamTypes(); track e) { <th class="num">{{ e }}</th> }
+                  <th class="num acis-sep" pSortableColumn="total">All Exams <p-sortIcon field="total" /></th>
+                  <th class="num" pSortableColumn="total">Students Assessed <p-sortIcon field="total" /></th>
+                </tr>
+              </ng-template>
+              <ng-template pTemplate="body" let-r>
+                <tr class="rv-row" [class.aca-on]="rv.acaScopeClass() === r.cls"
+                    (click)="rv.selectAcaScopeClass(r.cls)" title="Subject-wise breakdown">
+                  <td class="num acis-sno">{{ r.sno }}</td>
+                  <td class="acis-unit">{{ r.label }}
+                    @if (r.board) { <span class="aca-board">Board</span> }
+                    <i class="fa-solid fa-chevron-down"></i>
+                  </td>
+                  @for (e of rv.acaExamTypes(); track e) {
+                    <td class="num">
+                      @if (rv.acaCell(r.cells, e) !== null) {
+                        <span class="acis-pill" [class]="'acis-pill p-' + rv.acaTone(rv.acaCell(r.cells, e))">{{ rv.acaCell(r.cells, e) }}{{ rv.acaMetricSuffix() }}</span>
+                      } @else { <span class="acis-dash">—</span> }
+                    </td>
+                  }
+                  <td class="num acis-sep acis-key">
+                    {{ rv.acaMatrixMetric() === 'pass' ? r.pass : rv.acaMatrixMetric() === 'entry' ? r.entry : r.avg }}{{ rv.acaMetricSuffix() }}
+                  </td>
+                  <td class="num">{{ fmt(r.total) }}</td>
+                </tr>
+              </ng-template>
+              <ng-template pTemplate="footer">
+                <tr class="rv-total">
+                  <td class="strong" colspan="2">Grand Total ({{ rv.acaClassMatrixTotals().count }} classes)</td>
+                  @for (e of rv.acaExamTypes(); track e) {
+                    <td class="num strong">
+                      @if (rv.acaCell(rv.acaClassMatrixTotals().cells, e) !== null) {
+                        {{ rv.acaCell(rv.acaClassMatrixTotals().cells, e) }}{{ rv.acaMetricSuffix() }}
+                      } @else { — }
+                    </td>
+                  }
+                  <td class="num strong acis-sep">
+                    {{ rv.acaMatrixMetric() === 'pass' ? rv.acaClassMatrixTotals().pass : rv.acaMatrixMetric() === 'entry' ? rv.acaClassMatrixTotals().entry : rv.acaClassMatrixTotals().avg }}{{ rv.acaMetricSuffix() }}
+                  </td>
+                  <td class="num strong">{{ fmt(rv.acaClassMatrixTotals().total) }}</td>
+                </tr>
+              </ng-template>
+            </p-table>
+
+            @if (rv.acaScopeClass() !== null) {
+              <div class="palli-subbar">
+                <button class="dr-back ghost" (click)="rv.selectAcaScopeClass(null)">
+                  <i class="fa-solid fa-xmark"></i> Close subjects
+                </button>
+                <b>{{ rv.acaScopeClassLabel() }} &middot; subject-wise {{ rv.acaMatrixMetric() === 'pass' ? 'pass %' : 'average mark' }} &middot; {{ ds.scopeLabel() }}</b>
+              </div>
+              @if (!rv.acaScopeSubjectRows().length) {
+                <div class="no-data"><i class="fa-solid fa-circle-info"></i> No subject-wise data for {{ rv.acaScopeClassLabel() }} in this scope.</div>
+              } @else {
+              <p-table [value]="rv.acaScopeSubjectRows()" styleClass="p-datatable-sm acis-grid aca-grid"
+                       [paginator]="false" sortMode="single">
+                <ng-template pTemplate="header">
+                  <tr>
+                    <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
+                    <th pSortableColumn="subject">Subject <p-sortIcon field="subject" /></th>
+                    @for (e of rv.acaExamTypes(); track e) { <th class="num">{{ e }}</th> }
+                    <th class="num acis-sep" pSortableColumn="avg">All Exams <p-sortIcon field="avg" /></th>
+                  </tr>
+                </ng-template>
+                <ng-template pTemplate="body" let-s>
+                  <tr>
+                    <td class="num acis-sno">{{ s.sno }}</td>
+                    <td class="acis-key">{{ s.subject }}</td>
+                    @for (e of rv.acaExamTypes(); track e) {
+                      <td class="num">
+                        @if (rv.acaSubjectCell(s.cells, e) !== null) {
+                          <span class="acis-pill" [class]="'acis-pill p-' + rv.acaTone(rv.acaSubjectCell(s.cells, e))">{{ rv.acaSubjectCell(s.cells, e) }}{{ rv.acaMatrixMetric() === 'pass' ? '%' : '' }}</span>
+                        } @else { <span class="acis-dash">—</span> }
+                      </td>
+                    }
+                    <td class="num acis-sep acis-key">
+                      {{ rv.acaMatrixMetric() === 'pass' ? s.pass : s.avg }}{{ rv.acaMatrixMetric() === 'pass' ? '%' : '' }}
+                    </td>
+                  </tr>
+                </ng-template>
+              </p-table>
+              }
+            }
+            }
+          </div>
+        }
 
         @if (selectedDomain() === 'scholarship') {
           <!-- ===== Scheme-wise counts (REAL scheme totals; SAMPLE block / school split) ===== -->
@@ -5957,87 +6426,6 @@
                     <td class="num acis-key">{{ fmt(r.dropouts) }}</td>
                     <td class="num"><span class="acis-pill" [class.p-bad]="r.rate >= 3" [class.p-warn]="r.rate >= 1.5 && r.rate < 3" [class.p-good]="r.rate < 1.5">{{ r.rate }}%</span></td>
                     @for (g of rv.ACIS_DROP_REASONS; track g) { <td class="num" [class.acis-sep]="$first">{{ fmt(r.reasons[g]) }}</td> }
-                  </tr>
-                </ng-template>
-              </p-table>
-            }
-
-            <!-- ===== Potential dropout reasons (REAL) ===== -->
-            @case ('pdreason') {
-              <p-table [value]="rv.acisPdReasonRows()" styleClass="p-datatable-sm acis-grid" [scrollable]="true"
-                       [rows]="20" [rowsPerPageOptions]="[10,20,50]"
-                       [paginator]="rv.acisPdReasonRows().length > 0" [rowHover]="true" sortMode="single">
-                <ng-template pTemplate="header">
-                  <tr>
-                    <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
-                    <th pSortableColumn="category">Reason Category <p-sortIcon field="category" /></th>
-                    <th pSortableColumn="reason">Reason <p-sortIcon field="reason" /></th>
-                    <th class="num" pSortableColumn="pd">Potential Dropouts <p-sortIcon field="pd" /></th>
-                    <th class="num" pSortableColumn="share">Share % <p-sortIcon field="share" /></th>
-                    <th class="num" pSortableColumn="repeaters">Repeaters <p-sortIcon field="repeaters" /></th>
-                    <th class="num" pSortableColumn="boys">Boys <p-sortIcon field="boys" /></th>
-                    <th class="num" pSortableColumn="girls">Girls <p-sortIcon field="girls" /></th>
-                  </tr>
-                </ng-template>
-                <ng-template pTemplate="body" let-r>
-                  <tr>
-                    <td class="num">{{ r.sno }}</td>
-                    <td>{{ r.category }}</td>
-                    <td class="strong">{{ r.reason }}</td>
-                    <td class="num strong">{{ fmt(r.pd) }}</td>
-                    <td class="num">{{ r.share }}%</td>
-                    <td class="num" [class.bad]="r.repeaters > 0">{{ fmt(r.repeaters) }}</td>
-                    <td class="num">{{ fmt(r.boys) }}</td>
-                    <td class="num">{{ fmt(r.girls) }}</td>
-                  </tr>
-                </ng-template>
-                <ng-template pTemplate="footer">
-                  <tr class="rv-total">
-                    <td class="strong" colspan="3">Grand Total ({{ fmt(rv.acisPdReasonTotals().count) }} reasons)</td>
-                    <td class="num strong">{{ fmt(rv.acisPdReasonTotals().pd) }}</td>
-                    <td class="num strong">100%</td>
-                    <td class="num strong">{{ fmt(rv.acisPdReasonTotals().repeaters) }}</td>
-                    <td class="num strong">{{ fmt(rv.acisPdReasonTotals().boys) }}</td>
-                    <td class="num strong">{{ fmt(rv.acisPdReasonTotals().girls) }}</td>
-                  </tr>
-                </ng-template>
-              </p-table>
-            }
-
-            <!-- ===== Potential dropouts grade-wise by reason category (REAL) ===== -->
-            @case ('pdgrade') {
-              <p-table [value]="rv.acisPdGradeRows()" styleClass="p-datatable-sm acis-grid" [scrollable]="true"
-                       [paginator]="false" [rowHover]="true" sortMode="single">
-                <ng-template pTemplate="header">
-                  <tr>
-                    <th class="num" pSortableColumn="sno">S. No <p-sortIcon field="sno" /></th>
-                    <th pSortableColumn="cls">Class <p-sortIcon field="cls" /></th>
-                    <th class="num" pSortableColumn="pd">Potential Dropouts <p-sortIcon field="pd" /></th>
-                    <th class="num" pSortableColumn="boys">Boys <p-sortIcon field="boys" /></th>
-                    <th class="num" pSortableColumn="girls">Girls <p-sortIcon field="girls" /></th>
-                    <th class="num" pSortableColumn="repeaters">Repeaters <p-sortIcon field="repeaters" /></th>
-                    @for (c of rv.acisPdCategories(); track c) { <th class="num">{{ c }}</th> }
-                  </tr>
-                </ng-template>
-                <ng-template pTemplate="body" let-r>
-                  <tr>
-                    <td class="num">{{ r.sno }}</td>
-                    <td class="strong">{{ r.cls }}</td>
-                    <td class="num strong">{{ fmt(r.pd) }}</td>
-                    <td class="num">{{ fmt(r.boys) }}</td>
-                    <td class="num">{{ fmt(r.girls) }}</td>
-                    <td class="num" [class.bad]="r.repeaters > 0">{{ fmt(r.repeaters) }}</td>
-                    @for (c of rv.acisPdCategories(); track c) { <td class="num">{{ fmt(r.cats[c] || 0) }}</td> }
-                  </tr>
-                </ng-template>
-                <ng-template pTemplate="footer">
-                  <tr class="rv-total">
-                    <td class="strong" colspan="2">Grand Total ({{ fmt(rv.acisPdGradeTotals().count) }} classes)</td>
-                    <td class="num strong">{{ fmt(rv.acisPdGradeTotals().pd) }}</td>
-                    <td class="num strong">{{ fmt(rv.acisPdGradeTotals().boys) }}</td>
-                    <td class="num strong">{{ fmt(rv.acisPdGradeTotals().girls) }}</td>
-                    <td class="num strong">{{ fmt(rv.acisPdGradeTotals().repeaters) }}</td>
-                    @for (c of rv.acisPdCategories(); track c) { <td class="num strong">{{ fmt(rv.acisPdGradeTotals().cats[c] || 0) }}</td> }
                   </tr>
                 </ng-template>
               </p-table>

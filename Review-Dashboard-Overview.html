@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>State Monitoring &amp; Review — Overview</title>
+<style>
+/* ===== Theme: Seline Analytics (warm stone canvas + single cyan accent) =====
+   Decorative color is restrained to one cyan accent per the source theme.
+   Status colors (critical/watch/good) are a deliberate, muted exception —
+   this dashboard depends on them to flag real problems; see AI_CONTEXT.md. */
+:root{
+  --bg:#fafaf9;--card:#ffffff;--tx:#0c0a09;--mu:#78716c;--mu2:#a8a29e;--bd:#e8e6e5;--bd2:#eeeae7;
+  --ok:#3f7a5c;--ok-bg:#eaf3ee;--wa:#a66a1e;--wa-bg:#f7ecd9;--cr:#b1453c;--cr-bg:#f7e8e5;
+  --accent:#3ba6f1;--accent-edge:#3398e1;--sky-wash:#c1e1f7;--soot:#1c1917;
+  --shadow-subtle:0 1px 2px rgba(0,0,0,.05);--shadow-md:0 4px 16px rgba(0,0,0,.05);
+  --r-card:10px;--r-sm:6px;--r-pill:9999px;
+  box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--tx);
+  font:14px/1.64 Inter,"Segoe UI",-apple-system,BlinkMacSystemFont,Roboto,sans-serif;
+  letter-spacing:.003em;font-feature-settings:"tnum" 1;-webkit-font-smoothing:antialiased}
+.app{display:grid;grid-template-columns:246px 1fr;min-height:100vh}
+
+/* ---------- sidebar (vertical navigation, the one "inverted section") ---------- */
+nav{background:var(--soot);color:rgba(255,255,255,.72);padding:16px 10px 24px;
+  position:sticky;top:0;align-self:start;height:100vh;overflow-y:auto}
+nav::-webkit-scrollbar{width:6px}nav::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:99px}
+.br{display:flex;align-items:center;gap:10px;padding:6px 10px 18px;border-bottom:1px solid rgba(255,255,255,.1);margin-bottom:14px}
+.br .logo{width:30px;height:30px;border-radius:8px;background:var(--accent);
+  display:flex;align-items:center;justify-content:center;font-weight:500;color:#fff;font-size:13px;flex:none}
+.br .bx{min-width:0}.br small{font-size:10px;color:rgba(255,255,255,.45);letter-spacing:.02em;display:block}
+.br b{display:block;font-size:14px;color:#fff;margin-top:1px;font-weight:500;letter-spacing:-.005em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+nav h2{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:rgba(255,255,255,.4);margin:16px 10px 8px;font-weight:600}
+.ni{display:flex;justify-content:space-between;align-items:center;gap:8px;width:100%;text-align:left;border:0;border-left:2px solid transparent;
+  background:none;color:inherit;font:inherit;border-radius:0 var(--r-sm) var(--r-sm) 0;padding:8px 10px;margin-bottom:1px;cursor:pointer;
+  transition:background .15s,color .15s,border-color .15s}
+.ni .nl{display:flex;align-items:center;gap:9px;min-width:0;overflow:hidden}
+.ni span.lb{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px;font-weight:400}
+.av{width:21px;height:21px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-size:10px;font-weight:600;flex:none;background:rgba(120,113,108,.18);color:inherit}
+.av.avlg{width:32px;height:32px;font-size:13px}
+.ni:hover{background:rgba(255,255,255,.05);color:#fff}
+.ni.on{background:var(--sky-wash);color:var(--soot);font-weight:500;border-left-color:var(--accent)}
+.ni.on .av{background:rgba(255,255,255,.55)}
+.bd{font-size:9.5px;font-weight:600;padding:2px 7px;border-radius:var(--r-pill);white-space:nowrap;letter-spacing:.01em}
+.bd.g{background:var(--ok-bg);color:var(--ok)}.bd.r{background:var(--cr-bg);color:var(--cr)}.bd.n{background:rgba(255,255,255,.1);color:rgba(255,255,255,.55)}
+.ni.on .bd.n{background:rgba(28,25,23,.08);color:var(--mu)}
+
+/* ---------- main ---------- */
+main{min-width:0;padding:0 28px 48px}
+.top{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--bg) 90%,transparent);
+  backdrop-filter:blur(8px);display:flex;justify-content:space-between;align-items:flex-end;gap:14px;flex-wrap:wrap;
+  margin:0 -28px 22px;padding:22px 28px 18px;border-bottom:1px solid var(--bd)}
+h1{font-size:clamp(19px,1vw + 15px,24px);margin:0;font-weight:400;letter-spacing:-.015em}
+.mhead{display:flex;align-items:center;gap:11px}
+.sm{font-size:13px;color:var(--mu);line-height:1.64}
+.bt{font:inherit;font-size:13px;font-weight:500;background:var(--accent);color:#fff;
+  border:1px solid var(--accent-edge);border-radius:var(--r-pill);padding:8px 16px;cursor:pointer;box-shadow:var(--shadow-subtle);
+  transition:transform .15s,box-shadow .15s;flex:none}
+.bt:hover{transform:translateY(-1px);box-shadow:var(--shadow-md)}
+.backbtn{display:inline-flex;align-items:center;gap:6px;background:none;border:1px solid var(--bd);color:var(--tx);
+  font:inherit;font-size:13px;font-weight:400;border-radius:var(--r-pill);padding:7px 14px;cursor:pointer;margin-bottom:10px;
+  transition:border-color .15s,color .15s}
+.backbtn:hover{border-color:var(--accent-edge);color:var(--accent-edge)}
+.mk{display:inline-flex;align-items:center;background:var(--sky-wash);color:var(--accent-edge);font-size:10px;font-weight:500;
+  letter-spacing:.03em;padding:3px 10px;border-radius:var(--r-pill);margin-right:9px;vertical-align:middle}
+
+.g{display:grid;gap:14px;margin-bottom:16px}
+.k6{grid-template-columns:repeat(auto-fit,minmax(168px,1fr))}
+.g3{grid-template-columns:repeat(auto-fit,minmax(340px,1fr))}
+
+.c{background:var(--card);border:1px solid var(--bd);border-radius:var(--r-card);padding:20px;
+  box-shadow:var(--shadow-subtle);transition:box-shadow .2s}
+.c:hover{box-shadow:var(--shadow-md)}
+.c h3{margin:0 0 14px;font-size:14px;font-weight:600;letter-spacing:-.005em;display:flex;align-items:center;gap:7px;color:var(--tx)}
+.c h3::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--accent);flex:none}
+
+/* kpi strip */
+.kpi{position:relative;overflow:hidden}
+.kpi::after{content:"";position:absolute;inset:0 0 auto 0;height:2px;background:var(--accent)}
+.kpi:has(.dl.a)::after{background:var(--wa)}.kpi:has(.dl.r)::after{background:var(--cr)}
+.kl{font-size:10.5px;color:var(--mu);text-transform:uppercase;letter-spacing:.07em;font-weight:500}
+.kv{font-size:26px;font-weight:500;margin:7px 0 7px;letter-spacing:-.02em;line-height:1}
+.dl{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:500;padding:3px 9px;border-radius:var(--r-pill);
+  background:var(--ok-bg);color:var(--ok)}
+.dl.r{background:var(--cr-bg);color:var(--cr)}.dl.a{background:var(--wa-bg);color:var(--wa)}.dl.n{background:var(--bd2);color:var(--mu)}
+.kpi .sm{display:block;margin:7px 0 0}
+
+/* bars */
+.mb{position:relative;height:8px;border-radius:var(--r-pill);background:var(--bd2);margin:8px 0;overflow:hidden}
+.mb i{display:block;height:100%;border-radius:var(--r-pill);transform-origin:left;animation:grow .9s cubic-bezier(.16,1,.3,1) both}
+@keyframes grow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+.hb{display:grid;grid-template-columns:minmax(120px,42%) 1fr 54px;gap:12px;align-items:center;font-size:13px;margin-bottom:11px}
+.hb:last-child{margin-bottom:0}
+.hb span{color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hb .mb{margin:0}.hb b{text-align:right;font-weight:500;font-size:13px;font-variant-numeric:tabular-nums}
+.lg{display:flex;gap:16px;font-size:12px;color:var(--mu);margin-bottom:10px;font-weight:500}
+.lg span{display:inline-flex;align-items:center;gap:6px}
+.lg i{display:inline-block;width:11px;height:3px;border-radius:var(--r-pill)}
+svg text{font-family:inherit}
+svg polyline.ln{stroke-dasharray:1400;stroke-dashoffset:1400;animation:draw 1.1s ease forwards}
+@keyframes draw{to{stroke-dashoffset:0}}
+
+/* big per-component visuals */
+.vzc{display:flex;justify-content:center;padding:4px 0}
+.ringrow{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.ringitem{display:flex;flex-direction:column;align-items:center;gap:8px;font-size:12px;color:var(--mu);font-weight:500;text-align:center;max-width:120px}
+.ringitem svg text{font-variant-numeric:tabular-nums}
+.d2wrap{display:flex;align-items:center;gap:18px}
+.d2leg{display:flex;flex-direction:column;gap:8px;font-size:12.5px;color:var(--mu);font-weight:500}
+.d2leg i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:7px;flex:none}
+.d2leg b{color:var(--tx);font-weight:500;font-size:13px;font-variant-numeric:tabular-nums}
+.funnel{display:flex;flex-direction:column;gap:10px;min-width:260px}
+.fstep{display:flex;flex-direction:column;align-items:center;gap:4px}
+.fbar{height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:500;
+  min-width:64px;transition:width .7s cubic-bezier(.16,1,.3,1);font-variant-numeric:tabular-nums}
+.fstep span{font-size:11.5px;color:var(--mu);font-weight:500}
+.vzcap{font-size:12px;color:var(--mu);font-weight:500;text-align:center;margin-top:8px}
+.vzcap i{display:block;font-size:10.5px;color:var(--mu2);font-style:italic;font-weight:400;margin-top:3px}
+
+.notes{margin-top:4px}
+.notes ul{margin:0;padding:0;list-style:none;display:grid;gap:9px}
+.notes li{display:flex;gap:9px;font-size:12.5px;color:var(--mu);line-height:1.64}
+.notes li::before{content:"";width:4px;height:4px;border-radius:50%;background:var(--mu2);margin-top:8px;flex:none}
+
+@media(max-width:860px){
+  .app{grid-template-columns:1fr}
+  nav{position:static;height:auto;display:flex;align-items:center;gap:6px;overflow-x:auto;padding:10px}
+  .br,nav h2{display:none}
+  .ni{min-width:170px;margin:0;border-left:0;border-radius:var(--r-sm)}
+  main{padding:0 14px 30px}
+  .top{margin:0 -14px 16px;padding:16px 14px}
+}
+@media print{
+  nav,.bt,.backbtn{display:none}
+  .app{display:block}
+  .top{position:static;backdrop-filter:none}
+  .c{box-shadow:none;break-inside:avoid}
+}
+</style></head><body><div class="app"><nav id="nav"></nav><main id="main"></main></div>
+<script>
+/* Generated from the Review Dashboard's own assets. One dedicated page per
+   component, reached from the vertical menu on the left — kept deliberately
+   minimal (a short header + its chart), per request. Figures are real EMIS
+   data unless a chart/label says otherwise (see DATA.meta.notes). Theme:
+   Seline Analytics (warm stone canvas, single cyan accent); status colors
+   (critical/watch/good) are a deliberate muted exception to the "one accent"
+   rule — see AI_CONTEXT.md. */
+const DATA={"meta":{"line":"Attendance to 2026-09-24 · SMC to 2026-10-01 · Palli Paarvai Oct 2026 · generated 12 Nov 2026 from the Review Dashboard assets","notes":["Percentage KPIs are banded (good / watch / critical) with the same ranges the Review Dashboard catalog uses; plain counts carry no band.","This dashboard shows \"Collector: Yes\" components only — genuinely collected figures with a real data source. Synthetic (\"demo\") and source-less (\"assumed\") figures are excluded entirely, which is why Scholarship does not appear here (every scholarship figure is demo).","\"landing\" tag = real figures read from the Review Dashboard's own landing page (academic exam results, schools-not-marked-attendance %), because they depend on a selected exam period or attendance window rather than a single fixed export.","SMC covers government-managed schools only. Member attendance = present ÷ (present + absent + vacant). Resolution completion = resolved ÷ (resolved + unresolved), withdrawn excluded.","Attendance figures are a 30-day window; the dashboard also offers 3, 5, 7 and 15-day windows.","Each component's chart uses its own figures. One exception: the Academic Performance 5-year trend is illustrative — only its last point (86.7%) is a real dashboard value, the 4 earlier points are stepped back by the real Year-on-Year figure to show a plausible trend shape."]},"kpis":[{"l":"Students enrolled","v":"1.22 Cr","d":"","c":"","n":"all managements"},{"l":"Schools","v":"59,312","d":"","c":"","n":"37,615 government (SMC-covered)"},{"l":"Student attendance","v":"88.7%","d":"watch","c":"a","n":"30 days to 2026-09-24"},{"l":"Teacher attendance","v":"93.2%","d":"critical","c":"r","n":"below 91–99% band"},{"l":"Potential dropouts","v":"1,87,162","d":"15+ days absent","c":"a","n":"attendance app"},{"l":"Critical infra gap","v":"21,122","d":"56.2% of reporting","c":"r","n":"schools"}],"modules":[{"title":"Enrollment","color":"#0f766e","src":"Enrolment roll, 2026-27 (UDISE)","rows":[{"l":"Zero enrolment schools","v":"1,509","b":"none"},{"l":"Zero teacher schools","v":"410","b":"none"},{"l":"Single teacher schools","v":"4,598","b":"none"},{"l":"Under 10 students schools","v":"3,169","b":"none"},{"l":"PTR over 60 schools","v":"478","b":"none"},{"l":"Enrollment increase schools","v":"16,505","b":"none"},{"l":"Schools with declined enrollment","v":"37,980","b":"none"},{"l":"Transition rate — % schools not meeting 100%","v":"64%","b":"bad"}],"chart":[{"kind":"bars","label":"Flagged schools, % of total","mode":"pct","rows":[["Zero enrolment",2.5],["Zero teacher",0.7],["Single teacher",7.8],["Under 10 students",5.3],["PTR over 60",0.8]],"color":"#0f766e"},{"kind":"bars","label":"Enrolment share by management, % of 1.22 Cr students","mode":"pct","rows":[["Unaided (Private)",51.3],["School Education Dept.",29.7],["Fully Aided",10.3],["Partly Aided",4.1],["Corporation",1.3],["Municipal",1.1]],"color":"var(--accent)"}]},{"title":"Attendance","color":"#b45309","src":"TNSED attendance app · 30 days to 2026-09-24","rows":[{"l":"Student attendance %","v":"88.7%","b":"warn"},{"l":"Teacher attendance %","v":"93.2%","b":"bad"},{"l":"Schools not marked attendance %","v":"17.1%","b":"bad","t":"landing"},{"l":"Potential dropout (15 days absent)","v":"1,87,162","b":"none"}],"chart":[{"kind":"rings","label":"Attendance, last 30 days","items":[{"label":"Student attendance","value":88.7,"color":"#b45309"},{"label":"Teacher attendance","value":93.2,"color":"#0891b2"}]},{"kind":"linechart","label":"Daily attendance trend, last 30 school days","mn":84,"mx":96,"labels":["21 Aug","","","","","","28 Aug","","","","","","04 Sept","","","","","","11 Sept","","","","","","18 Sept","","","","","24 Sept"],"series":[{"label":"Student","color":"#b45309","data":[88.9,89,88.8,88.9,88.8,88.7,88.8,88.8,88.7,88.8,88.7,88.8,88.7,88.7,88.7,88.7,88.7,88.6,88.6,88.6,88.6,88.6,88.5,88.5,88.5,88.6,88.5,88.5,88.5,88.5]},{"label":"Teacher","color":"#0891b2","data":[93.3,93.2,93.2,93.2,93.3,93.2,93.2,93.3,93.2,93.3,93.2,93.2,93.3,93.2,93.2,93.2,93.2,93.2,93.2,93.3,93.2,93.3,93.2,93.2,93.2,93.2,93.2,93.2,93.3,93.3]}]}]},{"title":"Infrastructure","color":"#7c3aed","src":"Infrastructure return · 37,566 schools reporting","rows":[{"l":"School with critical gap","v":"21,122","b":"none"},{"l":"Zero toilet school","v":"5,154","b":"none"},{"l":"No drinking water school","v":"9,094","b":"none"},{"l":"Building to be demolished","v":"2,276","b":"none"},{"l":"No kitchen shed","v":"2,366","b":"none"}],"chart":[{"kind":"bars","label":"Gap categories, % of reporting schools (lower is better)","mode":"pct","rows":[["No ramp",55.6],["No playground",34.3],["Classroom repair needed",28.2],["No fire safety",28.1],["No drinking water",24.2],["No toilet",13.7]],"color":"#7c3aed"}]},{"title":"Academic Performance","color":"#be123c","src":"Exam marks · values as shown on the Review Dashboard landing page","rows":[{"l":"Pass Percentage %","v":"86.7%","b":"good","t":"landing"},{"l":"Average Mark","v":"32%","b":"bad","t":"landing"},{"l":"Year-on-Year Improvement %","v":"3.8%","b":"warn","t":"landing"},{"l":"Exam-to-Exam Improvement (PP)","v":"3.8%","b":"warn","t":"landing"},{"l":"Assessment Coverage %","v":"86.5%","b":"good","t":"landing"},{"l":"Mark Entry Completion %","v":"2.4%","b":"bad","t":"landing"}],"chart":[{"kind":"trend","label":"Pass % trend, last 5 years","series":[71.5,75.3,79.1,82.9,86.7],"color":"#be123c","note":"Illustrative — only the latest value (86.7%) is from the dashboard"},{"kind":"rings","label":"Assessment & mark entry","items":[{"label":"Assessment coverage","value":86.5,"color":"#9f1239"},{"label":"Mark entry completion","value":2.4,"color":"#be123c"}]}]},{"title":"THIRAN","color":"#4d7c0f","src":"THIRAN compliance + endline export","rows":[{"l":"THIRAN students identified","v":"7,43,927","b":"none"},{"l":"Schools covered","v":"13,229","b":"none"},{"l":"% of enrolment","v":"46.4%","b":"warn"},{"l":"BLO attainment %","v":"93.7%","b":"good"},{"l":"Baseline update %","v":"52.2%","b":"bad"},{"l":"Students not tagged","v":"5,37,783","b":"none"}],"chart":[{"kind":"rings","label":"Coverage & compliance","items":[{"label":"% of enrolment","value":46.4,"color":"#4d7c0f"},{"label":"BLO attainment","value":93.7,"color":"#65a30d"},{"label":"Baseline update","value":52.2,"color":"#3f6212"}]}]},{"title":"Digital Infrastructure (Middle/High/Hr.Sec)","color":"#0e7490","src":"Digital infrastructure return","rows":[{"l":"Schools with ICT facilities","v":"13,217","b":"none"},{"l":"ICT schools with internet","v":"11,452","b":"none"},{"l":"ICT schools without internet","v":"1,765","b":"none"},{"l":"ICT functional %","v":"67.7%","b":"warn"},{"l":"ICT internet %","v":"86.6%","b":"good"},{"l":"ICT not functional","v":"2,164","b":"none"}],"chart":[{"kind":"rings","label":"ICT coverage","items":[{"label":"ICT functional","value":67.7,"color":"#0e7490"},{"label":"ICT with internet","value":86.6,"color":"#0891b2"}]},{"kind":"donut2","label":"ICT functional split","a":{"label":"Functional","value":8944,"color":"#0e7490"},"b":{"label":"Not functional","value":2164,"color":"#bae6fd"}}]},{"title":"SMC","color":"#9a3412","src":"Government schools only · full export, Jul 2025 – 2026-10","rows":[{"l":"Schools where meetings were held","v":"17,499","b":"none"},{"l":"Schools where meetings NOT held","v":"20,116","b":"none"},{"l":"Meeting attendance %","v":"75.6%","b":"warn"},{"l":"SMC resolutions raised","v":"1,44,715","b":"none"},{"l":"Pending resolutions","v":"88,229","b":"none"},{"l":"Closure rate %","v":"39%","b":"warn"},{"l":"Emergency resolutions completion %","v":"26.7%","b":"bad"},{"l":"Other resolutions completion %","v":"41.2%","b":"warn"}],"chart":[{"kind":"donut2","label":"Meetings held vs not held","a":{"label":"Meetings held","value":17499,"color":"#9a3412"},"b":{"label":"Not held","value":20116,"color":"#fed7aa"}},{"kind":"bargroup","label":"Resolution completion %, full export vs last 12 months","lb":["Emergency","Other","All"],"a":[26.7,41.2,38.5],"b":[24.8,43.8,40.7],"labelA":"Full export","labelB":"Last 12 months","max":60}]},{"title":"Palli Paarvai","color":"#1d4ed8","src":"Palli Paarvai observation exports","rows":[{"l":"Observations, Oct 2026","v":"1,05,127","b":"none"},{"l":"Observers, Oct 2026","v":"7,948","b":"none"},{"l":"Observations, term to date","v":"7,22,518","b":"none"},{"l":"Schools visited, term to date","v":"43,568","b":"none"},{"l":"Officials who observed, term to date","v":"9,968","b":"none"}],"chart":[{"kind":"funnel","label":"Observation activity, term to date","steps":[["Officials who observed",9968],["Schools visited",43568],["Observations, term to date",722518]],"color":"#1d4ed8"}]},{"title":"Recognition Order - DPS","color":"#7e22ce","src":"Pending Recognition Certificate applications","rows":[{"l":"Total pending applications","v":"745","b":"none"},{"l":"District pending","v":"453","b":"none"},{"l":"State pending","v":"292","b":"none"},{"l":"Pending \u003c 15 days","v":"725","b":"none"},{"l":"Pending 15–30 days","v":"9","b":"none"},{"l":"Pending > 30 days","v":"11","b":"none"}],"chart":[{"kind":"donut2","label":"District vs state pending","a":{"label":"District","value":453,"color":"#7e22ce"},"b":{"label":"State","value":292,"color":"#e9d5ff"}},{"kind":"bars","label":"Ageing, % of total pending","mode":"pct","rows":[["\u003c 15 days",97.3],["15–30 days",1.2],["> 30 days",1.5]],"color":"#7e22ce"}]},{"title":"All Children in School","color":"#047857","src":"ACiS common pool · survey and admission","rows":[{"l":"Students in Common Pool","v":"2,91,194","b":"none"},{"l":"Students surveyed","v":"2,68,267","b":"none"},{"l":"Pending to be surveyed","v":"22,927","b":"none"},{"l":"Survey completion %","v":"92.1%","b":"good"},{"l":"Students admitted to schools","v":"45,042","b":"none"},{"l":"Students to be admitted","v":"61,333","b":"none"},{"l":"Dropouts with reason recorded","v":"2,68,260","b":"none"},{"l":"Dept. action taken","v":"52,345","b":"none"},{"l":"Dept. action to be taken","v":"2,15,922","b":"none"}],"chart":[{"kind":"funnel","label":"Out-of-school pipeline","steps":[["Common Pool",291194],["Surveyed",268267],["Admitted to schools",45042],["Dept. action taken",52345]],"color":"#047857"}]},{"title":"Potential Dropout","color":"#c2410c","src":"EMIS Potential Dropout report · absent 15+ of last 30 days","rows":[{"l":"Potential dropouts (15+ days absent)","v":"29,075","b":"none"},{"l":"Potential dropout repeaters","v":"7,809","b":"none"},{"l":"Reason recorded","v":"14,968","b":"none"}],"chart":[{"kind":"donut2","label":"Repeaters vs not","a":{"label":"Repeaters","value":7809,"color":"#c2410c"},"b":{"label":"Not repeaters","value":21266,"color":"#fed7aa"}},{"kind":"bars","label":"Reason recorded, % of potential dropouts","mode":"pct","rows":[["Reason recorded",51.5]],"color":"#c2410c"}]}]};
+const $=s=>document.querySelector(s),esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const av=(title,cls)=>`<span class="av${cls?' '+cls:''}">${esc((title||'?')[0])}</span>`;
+let gid=0;
+function lc(ser,lb,mn,mx,h=190){gid++;const x=i=>30+i*(260/(lb.length-1)),y=v=>h-20-(v-mn)/(mx-mn)*(h-32);
+  const grid=[0,.5,1].map(t=>{const v=mn+(mx-mn)*t;return `<line x1="30" x2="292" y1="${y(v)}" y2="${y(v)}" stroke="var(--bd2)"/><text x="26" y="${y(v)+3}" font-size="8" text-anchor="end" fill="var(--mu2)">${Math.round(v)}</text>`}).join('');
+  const lbls=lb.map((l,i)=>l?`<text x="${x(i)}" y="${h-5}" font-size="8" text-anchor="middle" fill="var(--mu2)">${l}</text>`:'').join('');
+  const area=ser[0]?`<linearGradient id="g${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${ser[0].c}" stop-opacity=".18"/><stop offset="100%" stop-color="${ser[0].c}" stop-opacity="0"/></linearGradient><polygon fill="url(#g${gid})" points="${x(0)},${y(mn)} ${ser[0].d.map((v,i)=>x(i)+','+y(v)).join(' ')} ${x(ser[0].d.length-1)},${y(mn)}"/>`:'';
+  const lines=ser.map(s=>`<polyline class="ln" fill="none" stroke="${s.c}" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" points="${s.d.map((v,i)=>x(i)+','+y(v)).join(' ')}"/><circle cx="${x(s.d.length-1)}" cy="${y(s.d.at(-1))}" r="3" fill="${s.c}"/>`).join('');
+  return `<svg viewBox="0 0 300 ${h}" width="100%">${grid}${lbls}${area}${lines}</svg>`}
+function gb(lb,A,B,mn,mx,h=190){gid++;const y=v=>h-20-(v-mn)/(mx-mn)*(h-32);
+  const grid=[0,.5,1].map(t=>{const v=mn+(mx-mn)*t;return `<line x1="30" x2="292" y1="${y(v)}" y2="${y(v)}" stroke="var(--bd2)"/><text x="26" y="${y(v)+3}" font-size="8" text-anchor="end" fill="var(--mu2)">${Math.round(v)}</text>`}).join('');
+  const bars=lb.map((l,i)=>{const g=52+i*80;return `<rect x="${g}" y="${y(A[i])}" width="22" height="${Math.max(0,h-20-y(A[i]))}" rx="4" fill="var(--mu2)" opacity=".45"/><rect x="${g+25}" y="${y(B[i])}" width="22" height="${Math.max(0,h-20-y(B[i]))}" rx="4" fill="var(--accent)"/><text x="${g+24}" y="${h-6}" font-size="8" text-anchor="middle" fill="var(--mu2)">${l}</text><text x="${g+11}" y="${y(A[i])-4}" font-size="8" text-anchor="middle" fill="currentColor">${A[i]}</text><text x="${g+36}" y="${y(B[i])-4}" font-size="8" text-anchor="middle" fill="currentColor">${B[i]}</text>`}).join('');
+  return `<svg viewBox="0 0 300 ${h}" width="100%">${grid}${bars}</svg>`}
+const hb=(n,v,max,c)=>`<div class="hb"><span>${esc(n)}</span><div class="mb"><i style="width:${Math.min(100,v/max*100)}%;background:${c}"></i></div><b>${v}%</b></div>`;
+const hbN=(lbl,v,max,c)=>`<div class="hb"><span>${esc(lbl)}</span><div class="mb"><i style="width:${Math.min(100,v/max*100)}%;background:${c}"></i></div><b>${v.toLocaleString('en-IN')}</b></div>`;
+const kp=(l,v,d,c='',n='')=>`<div class="c kpi"><div class="kl">${esc(l)}</div><div class="kv">${esc(v)}</div>${d?`<span class="dl ${c}">${esc(d)}</span>`:''}<span class="sm">${esc(n)}</span></div>`;
+function ring(pct,color,size=112){const r=size/2-9,c=2*Math.PI*r,v=Math.max(0,Math.min(100,pct)),off=c*(1-v/100);
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"><circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--bd2)" stroke-width="8"/><circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${color}" stroke-width="8" stroke-linecap="round" stroke-dasharray="${c}" stroke-dashoffset="${off}" transform="rotate(-90 ${size/2} ${size/2})"/><text x="${size/2}" y="${size/2+6}" text-anchor="middle" font-size="${Math.round(size*.2)}" font-weight="500" fill="currentColor">${v}%</text></svg>`}
+function ringRow(items){return `<div class="ringrow">${items.map(it=>`<div class="ringitem">${ring(it.value,it.color)}<span>${esc(it.label)}</span></div>`).join('')}</div>`}
+function donut2(a,b,size=136){const total=a.value+b.value||1,r=size/2-12,c=2*Math.PI*r,aLen=c*(a.value/total);
+  return `<div class="d2wrap"><svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"><circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${b.color}" stroke-width="12" transform="rotate(-90 ${size/2} ${size/2})"/><circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${a.color}" stroke-width="12" stroke-linecap="round" stroke-dasharray="${aLen} ${c-aLen}" transform="rotate(-90 ${size/2} ${size/2})"/><text x="${size/2}" y="${size/2+6}" text-anchor="middle" font-size="18" font-weight="500" fill="currentColor">${Math.round(a.value/total*100)}%</text></svg><div class="d2leg"><span><i style="background:${a.color}"></i>${esc(a.label)}<br><b>${a.value.toLocaleString('en-IN')}</b></span><span><i style="background:${b.color}"></i>${esc(b.label)}<br><b>${b.value.toLocaleString('en-IN')}</b></span></div></div>`}
+function funnel(steps,color){const max=Math.max(...steps.map(s=>s[1]))||1;
+  return `<div class="funnel">${steps.map(([l,v],i)=>{const w=Math.max(26,Math.round(v/max*100));return `<div class="fstep"><div class="fbar" style="width:${w}%;background:${color};opacity:${(1-i*0.14).toFixed(2)}"><b>${v.toLocaleString('en-IN')}</b></div><span>${esc(l)}</span></div>`}).join('')}</div>`}
+function spark(series,color,w=320,h=120){const mn=Math.min(...series),mx=Math.max(...series),pad=(mx-mn)*0.3||2;
+  const x=i=>10+i*((w-24)/(series.length-1)),y=v=>h-14-((v-(mn-pad))/((mx+pad)-(mn-pad)))*(h-28);
+  const pts=series.map((v,i)=>x(i)+','+y(v)).join(' ');
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="${x(series.length-1)}" cy="${y(series.at(-1))}" r="4" fill="${color}"/></svg>`}
+/* Theme enforcement: every chart's decorative colour collapses to one cyan
+   accent (the "current/primary" series) plus a muted neutral (ash) for any
+   secondary series — the module's own brand hex from DATA is intentionally
+   NOT used for colour here, only for the (now-neutral) avatar initial. */
+function vizBlock(b){
+  if(b.kind=='rings') return `<div class="vzc">${ringRow(b.items.map((it,i)=>({label:it.label,value:it.value,color:i==0?'var(--accent)':'var(--mu2)'})))}</div>`;
+  if(b.kind=='donut2') return `<div class="vzc">${donut2({label:b.a.label,value:b.a.value,color:'var(--accent)'},{label:b.b.label,value:b.b.value,color:'var(--mu2)'})}</div>`;
+  if(b.kind=='funnel') return `<div class="vzc">${funnel(b.steps,'var(--accent)')}</div>`;
+  if(b.kind=='trend') return `<div class="vzc" style="flex-direction:column">${spark(b.series,'var(--accent)')}${b.note?`<div class="vzcap"><i>${esc(b.note)}</i></div>`:''}</div>`;
+  if(b.kind=='bars'){const max=b.max??Math.max(...b.rows.map(r=>r[1]));return b.rows.map(r=>b.mode=='count'?hbN(r[0],r[1],max,'var(--accent)'):hb(r[0],r[1],max,'var(--accent)')).join('')}
+  if(b.kind=='linechart') return `<div class="lg">${b.series.map((s,i)=>`<span><i style="background:${i==0?'var(--accent)':'var(--mu2)'}"></i>${esc(s.label)}</span>`).join('')}</div>`+lc(b.series.map((s,i)=>({c:i==0?'var(--accent)':'var(--mu2)',d:s.data})),b.labels,b.mn,b.mx);
+  if(b.kind=='bargroup') return `<div class="lg"><span><i style="background:var(--mu2)"></i>${esc(b.labelA||'A')}</span><span><i style="background:var(--accent)"></i>${esc(b.labelB||'B')}</span></div>`+gb(b.lb,b.a,b.b,0,b.max||60);
+  return '';
+}
+const off=m=>m.rows.filter(r=>r.b=='bad').length;
+let view='overview';
+function go(v){view=v;render();window.scrollTo({top:0});}
+function nav(){
+$('#nav').innerHTML='<div class="br"><div class="logo">RD</div><div class="bx"><small>பள்ளிக் கல்வித் துறை · தமிழ்நாடு</small><b>State Monitoring &amp; Review</b></div></div><h2>Dashboard</h2>'+`<button class="ni ${view=='overview'?'on':''}" data-go="overview"><span class="nl"><span class="lb">Overview</span></span></button>`+'<h2>Components</h2>'+DATA.modules.map((m,i)=>{const o=off(m),h=m.rows.some(r=>r.b!='none');return `<button class="ni ${view=='m'+i?'on':''}" data-go="m${i}"><span class="nl">${av(m.title)}<span class="lb">${esc(m.title)}</span></span>${o?`<span class="bd r">${o} critical</span>`:h?'<span class="bd g">OK</span>':'<span class="bd n">counts</span>'}</button>`}).join('')}
+function overviewPage(){const K=DATA.kpis;
+$('#main').innerHTML=`<div class="top"><div><h1>State Monitoring &amp; Review — Overview</h1><div class="sm"><span class="mk">Real EMIS data</span>${esc(DATA.meta.line)}</div></div><button class="bt" onclick="print()">Export brief</button></div>
+<div class="g k6">${K.map(k=>kp(k.l,k.v,k.d,k.c,k.n)).join('')}</div>
+<div class="sm" style="margin:2px 0 20px">Pick a component on the left to see its chart.</div>
+<div class="c notes"><h3>Notes &amp; definitions</h3><ul>${DATA.meta.notes.map(n=>'<li>'+esc(n)+'</li>').join('')}</ul></div>`}
+function modulePage(i){const m=DATA.modules[i],o=off(m);
+const badge=o?`<span style="background:var(--cr-bg);color:var(--cr);padding:3px 9px;border-radius:9999px;font-size:10px;font-weight:600">${o} critical</span>`:m.rows.some(r=>r.b!='none')?'<span style="background:var(--ok-bg);color:var(--ok);padding:3px 9px;border-radius:9999px;font-size:10px;font-weight:600">No critical</span>':'<span style="background:var(--bd2);color:var(--mu);padding:3px 9px;border-radius:9999px;font-size:10px;font-weight:600">Counts</span>';
+$('#main').innerHTML=`<div class="top"><div><button class="backbtn" data-go="overview">&larr; Overview</button><h1 class="mhead">${av(m.title,'avlg')}${esc(m.title)}</h1><div class="sm">${badge}&nbsp;&nbsp;${esc(m.src)}</div></div><button class="bt" onclick="print()">Export brief</button></div>
+<div class="g g3">${(m.chart||[]).map(b=>`<div class="c"><h3>${esc(b.label||m.title)}</h3>${vizBlock(b)}</div>`).join('')||'<div class="c sm">No chart for this component.</div>'}</div>`}
+function render(){nav();if(view=='overview')overviewPage();else modulePage(+view.slice(1));}
+document.addEventListener('click',e=>{const x=e.target.closest('[data-go]');if(!x)return;go(x.dataset.go);});
+render();
+</script></body></html>

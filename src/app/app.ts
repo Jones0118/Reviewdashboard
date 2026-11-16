@@ -11,6 +11,7 @@ import {
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
+import { ActivatedRoute, Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { NgxEchartsDirective } from 'ngx-echarts';
 import type { ECharts } from 'echarts/core';
@@ -31,6 +32,7 @@ import { AttendanceService } from './services/attendance.service';
 import { InfraService } from './services/infra.service';
 import { Class1MonitorService } from './services/class1-monitor.service';
 import { ReviewService, DrillRow } from './services/review.service';
+import { KpiValuesService } from './services/kpi-values.service';
 import { KPI_MODULES, KpiDef } from './models/kpi-catalog.model';
 import { ExportColumn, ExportService } from './services/export.service';
 import { DONUT_DIMENSIONS, DonutDimension, MAP_METRICS, MapMetric } from './models/enrollment.model';
@@ -45,7 +47,7 @@ import { inr, inrShort } from './utils/format';
 export type ReviewStyle = 'cards' | 'compact' | 'grid' | 'table' | 'accordion' | 'kanban' | 'heatmap';
 
 @Component({
-  selector: 'app-root',
+  selector: 'app-dashboard',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
@@ -69,10 +71,13 @@ export class App implements OnInit {
   readonly inf = inject(InfraService);
   readonly c1 = inject(Class1MonitorService);
   readonly rv = inject(ReviewService);
+  private readonly kv = inject(KpiValuesService);
   readonly auth = inject(AuthService);
   private readonly ex = inject(ExportService);
   private readonly cs = inject(ChartService);
   private readonly http = inject(HttpClient);
+  private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
 
   // ================= SIGN IN =================
   loginUser = signal('');
@@ -128,6 +133,8 @@ export class App implements OnInit {
    */
   readonly tabs: { label: string; url?: string }[] = [
     { label: 'Review Dashboard' },
+    // Standalone executive page (own route); opens in a new browser tab like SMC.
+    { label: 'At a glance', url: 'glance' },
     { label: 'School Dashboard' },
     { label: 'Infrastructure' },
     { label: 'Academic Scores' },
@@ -460,154 +467,12 @@ export class App implements OnInit {
   );
 
   /**
-   * Aggregate the current drill scope into a single value map by combining the
-   * child rows (drillRows). Percentages are student-weighted; counts are summed.
-   * This gives a scope-level value for every KPI field at State/District/Block.
+   * Scope-level KPI values and the band / format rules live in
+   * KpiValuesService (shared with the standalone "At a glance" page).
    */
-  private readonly scopeValues = computed<Record<string, number | null>>(() => {
-    const rows = this.rv.drillRows();
-    if (!rows.length) return {};
-    const totalStudents = rows.reduce((s, r) => s + (r.n || 0), 0) || 1;
-    const out: Record<string, number | null> = {};
-    // percentage fields are weighted by students; everything else is summed
-    const PCT = new Set(['att', 'teacherAtt', 'compliance', 'academicAvg', 'academicChange',
-      'sch', 'tnSparkPct', 'breakfastPct', 'h14417ResPct', 'scholarEligibilityPct',
-      'smcClosureRate', 'palliCompletionPct', 'chg', 'girlsPct', 'dropRate', 'thiranSharePct',
-      'palliClassObsPct', 'palliSchoolsNotObsPct', 'palliOfficialsNotObsPct', 'palliSchools3PlusPct',
-      // real-data percentages
-      'acaLanguageAvg', 'acaEnglishAvg', 'acaMathsAvg', 'acaScienceAvg', 'acaSocialAvg',
-      'acaCompletionPct', 'acaPassPct', 'acaExamToExam', 'acaCoveragePct',
-      'thiranBaselinePct', 'thiranBloPct', 'ictFunctionalPct',
-      'ictInternetPct', 'infGapPct', 'scholarPaySuccessPct', 'cwsnPct', 'slasPct',
-      // new enrollment/attendance percentages
-      'schoolsNotMarkedPct', 'ptr', 'transitionPendingPct',
-      // All Children in School
-      'acisSurveyPct',
-      // SMC meetings / emergency / other / grants
-      'smcMeetAttendPct', 'smcEmergencyClosureRate', 'smcOtherClosureRate']);
-    const keys: (keyof DrillRow)[] = ['ns', 'n', 'teaching', 'att', 'teacherAtt', 'compliance',
-      'drop', 'tl', 'gaps', 'academicAvg', 'academicChange', 'sch', 'cases', 'tnSparkPct',
-      'breakfastPct', 'cmOpen', 'h14417Open', 'h14417Critical', 'h14417ResPct', 'girlsPct',
-      'dropRate', 'thiranStudents', 'thiranSchools', 'scholarEligibilityPct', 'scholarAadhaar',
-      'scholarPayPending', 'smcRaised', 'smcClosed', 'smcPending', 'smcClosureRate',
-      'palliTarget', 'palliVisited', 'palliNotVisited', 'palliCompletionPct',
-      // ---- real-data counts ----
-      'palliObservations', 'palliOfficials', 'palliBrte', 'palliBeo',
-      'thiranAttainBLO', 'thiranNotTagged',
-      'ictSchools', 'ictInternet', 'ictNoInternet', 'ictFunctional', 'ictNotFunctional',
-      'smcEmergency', 'smcEmergencyOpen',
-      'infNoToilet', 'infNoWater', 'infNoCwsnToilet', 'infNoKitchen', 'infDemolish', 'infRepair',
-      'infNoPlayground', 'infNoFirstAid', 'infNoFire', 'infNoRamp', 'infClassShortage',
-      // ---- percentages (also listed in PCT above) ----
-      'acaLanguageAvg', 'acaEnglishAvg', 'acaMathsAvg', 'acaScienceAvg', 'acaSocialAvg',
-      'acaCompletionPct', 'thiranBaselinePct', 'thiranBloPct', 'thiranSharePct', 'ictFunctionalPct',
-      'ictInternetPct', 'infGapPct', 'scholarPaySuccessPct', 'cwsnPct', 'slasPct',
-      'acaPassPct', 'acaExamToExam', 'acaCoveragePct',
-      // ---- synthetic counts still referenced by catalog KPIs ----
-      'declSchools', 'attPending', 'breakfastExcept', 'cmCritical',
-      'scholarPayFailed', 'scholarNpciInactive', 'acaUp', 'acaDown',
-      // ---- new Enrollment school-count + Attendance fields ----
-      'zeroEnrol', 'zeroTeacher', 'singleTeacher', 'under10', 'ptrOver60',
-      'enrolIncreaseSchools', 'enrolDeclinedSchools', 'notMoved',
-      'boys', 'girls', 'ptr', 'schoolsNotMarkedPct', 'transitionPendingPct',
-      'boysAbsent', 'girlsAbsent', 'teacherAbsent', 'teacherLong30',
-      'attStudentBelow60', 'attTeacherBelow60',
-      // ---- Palli Parvai KPIs ----
-      'palliClassObsPct', 'palliSchoolsNotObsPct', 'palliOfficialsNotObsPct',
-      'palliSchools3PlusPct', 'palliLowPerformers', 'palliTopPerformers',
-      // ---- Recognition Order (DPS) pending RC applications ----
-      'dpsTotal', 'dpsDistrictPending', 'dpsStatePending',
-      'dpsLt15', 'dpsD15to30', 'dpsGt30',
-      // ---- All Children in School (ACiS) common pool ----
-      'acisPool', 'acisSurveyed', 'acisPendingSurvey', 'acisSurveyPct',
-      'acisAdmitted', 'acisBridged', 'acisToBeAdmitted', 'acisToBeValidated',
-      'acisWithReason', 'acisDeptTaken', 'acisDeptPending', 'acisCwsn', 'acisUmis',
-      'acisPdRepeat', 'acisPd', 'acisPdWithReason', 'acisPdBase', 'acisDropOut', 'acisEnrolI12',
-      // ---- SMC meetings, emergency/other split, grants ----
-      'smcMeetings', 'smcSchoolsHeld', 'smcSchoolsNotHeld', 'smcEligibleSchools',
-      'smcPresent', 'smcAbsent', 'smcVacant', 'smcMeetAttendPct',
-      'smcEmergencyRaised', 'smcEmergencyResolved', 'smcEmergencyClosureRate',
-      'smcOtherRaised', 'smcOtherResolved', 'smcOtherOpen', 'smcOtherClosureRate',
-      'smcGrantAllocated', 'smcGrantUtilised'];
-    for (const k of keys) {
-      const kk = k as string;
-      if (PCT.has(kk)) {
-        out[kk] = Math.round((rows.reduce((s, r) => s + ((r[k] as number) || 0) * (r.n || 0), 0) / totalStudents) * 10) / 10;
-      } else {
-        out[kk] = rows.reduce((s, r) => s + ((r[k] as number) || 0), 0);
-      }
-    }
-    // Averages that must be weighted by their own base rather than by enrolment
-    // (summing per-district means, or weighting them by school roll, would both
-    // be wrong). field -> the count each unit's mean is an average over.
-    // Averages that must be weighted by their own base rather than by enrolment
-    // (summing per-district means, or weighting them by school roll, would both
-    // be wrong). field -> the count each unit's mean is an average over.
-    const WAVG: Record<string, keyof DrillRow> = {
-      acisBridgeDays: 'acisBridged',
-    };
-    for (const [field, wField] of Object.entries(WAVG)) {
-      const w = rows.reduce((s, r) => s + ((r[wField] as number) || 0), 0);
-      out[field] = w
-        ? Math.round((rows.reduce(
-          (s, r) => s + ((r[field as keyof DrillRow] as number) || 0) * ((r[wField] as number) || 0), 0,
-        ) / w) * 10) / 10
-        : null;
-    }
-    // Ratios are recomputed from their own summed numerator and denominator —
-    // exact, rather than a student-weighted average of per-unit percentages.
-    // field -> [numerator, denominator parts (summed)].
-    const RATIO: Record<string, [keyof DrillRow, (keyof DrillRow)[]]> = {
-      smcClosureRate: ['smcClosed', ['smcRaised']],
-      smcMeetAttendPct: ['smcPresent', ['smcPresent', 'smcAbsent']],
-      smcEmergencyClosureRate: ['smcEmergencyResolved', ['smcEmergencyResolved', 'smcEmergency']],
-      smcOtherClosureRate: ['smcOtherResolved', ['smcOtherResolved', 'smcOtherOpen']],
-      smcGrantUtilPct: ['smcGrantUtilised', ['smcGrantAllocated']],
-      acisSurveyPct: ['acisSurveyed', ['acisPool']],
-    };
-    for (const [field, [numKey, denKeys]] of Object.entries(RATIO)) {
-      const num = rows.reduce((s, r) => s + ((r[numKey] as number) || 0), 0);
-      const den = denKeys.reduce(
-        (t, k) => t + rows.reduce((s, r) => s + ((r[k] as number) || 0), 0), 0,
-      );
-      out[field] = den ? Math.round((num / den) * 1000) / 10 : null;
-    }
-    // PD % is small (well under 1%), so it keeps two decimals rather than one.
-    const pdBase = rows.reduce((s, r) => s + (r.acisPdBase || 0), 0);
-    const pdNum = rows.reduce((s, r) => s + (r.acisPd || 0), 0);
-    out['acisPdPct'] = pdBase ? Math.round((pdNum / pdBase) * 10000) / 100 : null;
-    // Dropout rate: not-re-enrolled common-pool children ÷ enrolment in classes I–XII
-    const drBase = rows.reduce((s, r) => s + (r.acisEnrolI12 || 0), 0);
-    const drNum = rows.reduce((s, r) => s + (r.acisDropOut || 0), 0);
-    out['acisDropRate'] = drBase ? Math.round((drNum / drBase) * 10000) / 100 : null;
-    return out;
-  });
-
-  /** RAG band for a KPI at a given value, using its catalog range/direction. */
-  private kpiBand(def: KpiDef, v: number | null): 'good' | 'warn' | 'bad' | 'none' {
-    if (v == null || def.dir === 0) return 'none';
-    if (def.fmt === 'pct' && def.lo != null && def.hi != null) {
-      let s = (v - def.lo) / (def.hi - def.lo || 1);
-      if (def.dir < 0) s = 1 - s;
-      s = Math.max(0, Math.min(1, s));
-      return s > 0.66 ? 'good' : s > 0.33 ? 'warn' : 'bad';
-    }
-    // counts / flags: neutral unless direction known — leave as none (no fabricated cutoff)
-    return 'none';
-  }
-
-  /** Format a KPI value for display; null -> "–". */
-  private kpiFormat(def: KpiDef, v: number | null): string {
-    if (v == null || isNaN(v as number)) return '–';
-    if (def.fmt === 'pct') {
-      // sub-1% rates (e.g. potential dropout %) need two decimals to be readable
-      const dp = Math.abs(v as number) < 1 ? 2 : 1;
-      // rates, not changes — no sign prefix
-      const sign = def.dir < 0 && v > 0 && def.id !== 'ac_pdp' && def.id !== 'ac_dr' ? '+' : '';
-      return `${sign}${(v as number).toFixed(dp)}%`;
-    }
-    return Math.round(v as number).toLocaleString('en-IN');
-  }
+  private readonly scopeValues = this.kv.scopeValues;
+  private kpiBand(def: KpiDef, v: number | null): 'good' | 'warn' | 'bad' | 'none' { return this.kv.band(def, v); }
+  private kpiFormat(def: KpiDef, v: number | null): string { return this.kv.format(def, v); }
 
   /**
    * The 12-module tile grid at the current scope. Every KPI resolves its value
@@ -720,6 +585,8 @@ export class App implements OnInit {
     if (t === 'dps') this.rv.openDpsDrill('dp_tot'); else this.rv.closeDpsDrill();
     // All Children in School drills on the child, not the school.
     if (t === 'acis') this.rv.openAcisDrill('ac_pool'); else this.rv.closeAcisDrill();
+    // Potential Dropout is its own component (EMIS PD report).
+    if (t === 'pd') this.rv.openPdDrill('ac_pd'); else this.rv.closePdDrill();
     // SMC drills on meetings / resolutions / grants.
     if (t === 'smc') this.rv.openSmcDrill('m_mh'); else this.rv.closeSmcDrill();
     setTimeout(() => {
@@ -741,50 +608,36 @@ export class App implements OnInit {
     this.selectedDomain.set(t);
     this.rv.setSelectedModule(moduleTitle ?? null);
     this.rv.setTopic(t as any);
-    // Palli Parvai KPIs use a dedicated designation (stakeholder) drill-down.
+    // Close every dedicated drill first, then open the one this KPI belongs to.
+    // (Closing up front keeps the branches from having to list each other.)
+    this.rv.closeKpiSchoolList();
+    this.rv.closePalliDrill();
+    this.rv.closeDpsDrill();
+    this.rv.closeAcisDrill();
+    this.rv.closePdDrill();
+    this.rv.closeSmcDrill();
     if (this.rv.hasPalliDrill(kpiId)) {
-      this.rv.closeKpiSchoolList();
-      this.rv.closeDpsDrill();
-      this.rv.closeAcisDrill();
-      this.rv.closeSmcDrill();
+      // Palli Parvai KPIs use a dedicated designation (stakeholder) drill-down.
       this.rv.openPalliDrill(kpiId);
     } else if (this.rv.hasDpsDrill(kpiId)) {
       // Recognition Order KPIs drill to the pending-application list.
-      this.rv.closeKpiSchoolList();
-      this.rv.closePalliDrill();
-      this.rv.closeAcisDrill();
-      this.rv.closeSmcDrill();
       this.rv.openDpsDrill(kpiId);
     } else if (this.rv.hasAcisDrill(kpiId)) {
       // ACiS KPIs drill to the common-pool child views.
-      this.rv.closeKpiSchoolList();
-      this.rv.closePalliDrill();
-      this.rv.closeDpsDrill();
-      this.rv.closeSmcDrill();
       this.rv.openAcisDrill(kpiId);
+    } else if (this.rv.hasPdDrill(kpiId)) {
+      // Potential Dropout KPIs drill to the PD report views.
+      this.rv.openPdDrill(kpiId);
     } else if (this.rv.hasSmcDrill(kpiId)) {
       // SMC KPIs drill to meetings / resolutions / grant views.
-      this.rv.closeKpiSchoolList();
-      this.rv.closePalliDrill();
-      this.rv.closeDpsDrill();
-      this.rv.closeAcisDrill();
       this.rv.openSmcDrill(kpiId);
     } else if (this.rv.hasKpiSchoolList(kpiId)) {
       // Flag KPIs that resolve to a per-school condition (e.g. zero enrolment,
       // single teacher, PTR>60) open a focused list of only the matching schools.
-      this.rv.closePalliDrill();
-      this.rv.closeDpsDrill();
-      this.rv.closeAcisDrill();
-      this.rv.closeSmcDrill();
       this.rv.openKpiSchoolList(kpiId);
-    } else {
-      this.rv.closePalliDrill();
-      this.rv.closeDpsDrill();
-      this.rv.closeAcisDrill();
-      this.rv.closeSmcDrill();
-      this.rv.closeKpiSchoolList();
+    } else if (def?.field && def.field !== 'DERIVED') {
       // otherwise, if the KPI maps to a real field, sort the drill table by it
-      if (def?.field && def.field !== 'DERIVED') this.rv.setSort(def.field);
+      this.rv.setSort(def.field);
     }
     setTimeout(() => {
       document.getElementById('rv-drilldown')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -806,6 +659,7 @@ export class App implements OnInit {
     if (topic === 'palli') this.rv.openPalliDrill('p_co'); else this.rv.closePalliDrill();
     if (topic === 'dps') this.rv.openDpsDrill('dp_tot'); else this.rv.closeDpsDrill();
     if (topic === 'acis') this.rv.openAcisDrill('ac_pool'); else this.rv.closeAcisDrill();
+    if (topic === 'pd') this.rv.openPdDrill('ac_pd'); else this.rv.closePdDrill();
     if (topic === 'smc') this.rv.openSmcDrill('m_mh'); else this.rv.closeSmcDrill();
     this.rv.setTopic(topic as any);
   }
@@ -836,6 +690,7 @@ export class App implements OnInit {
     this.rv.closeDpsDrill();
     this.rv.closeAcademicDrill();
     this.rv.closeAcisDrill();
+    this.rv.closePdDrill();
     this.rv.closeSmcDrill();
     this.ds.goToState();
   }
@@ -2318,7 +2173,20 @@ export class App implements OnInit {
     this.at.load().catch(() => { /* optional dataset */ });
     this.inf.load().catch(() => { /* optional dataset */ });
     this.c1.load().catch(() => { /* optional dataset */ });
-    this.rv.load().catch(() => { /* optional dataset */ });
+    const review = this.rv.load().catch(() => { /* optional dataset */ });
+
+    // Deep link from the standalone "At a glance" page (/glance): a KPI or
+    // module card there navigates to /?topic=…&kpi=…&module=… and lands on the
+    // same District Review drill the in-app tiles open.
+    const q = this.route.snapshot.queryParamMap;
+    const topic = q.get('topic');
+    if (topic) {
+      await review;
+      this.setTab('Review Dashboard');
+      const kpi = q.get('kpi'), mod = q.get('module') ?? undefined;
+      if (kpi) this.openKpi(kpi, topic, mod); else if (mod) this.openModule(topic, mod);
+      this.router.navigate([], { queryParams: {}, replaceUrl: true });
+    }
   }
 
   // ---- theming ----

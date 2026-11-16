@@ -1439,3 +1439,31 @@ th.acis-sorted { background: #e0f2fe !important; }
   color: var(--kc, #1f4e79); border-top: 1px solid var(--dr-line, #dfe5ec); background: #fafbfc;
 }
 .kpi-view:hover { background: var(--kc, #1f4e79); color: #fff; }
+
+/* ===== Academic: exam-type and class-wise × exam matrix (Review drill) =====
+   Reuses the .acis-grid table style; these rules only add the active-row
+   highlight, the Board tag and the metric selector placement. */
+.aca-active-note { font-size: 11.5px; color: #66738a; margin-left: auto; }
+.aca-active-note b { color: var(--gov-blue-dark); }
+.aca-metric-sel { margin-left: auto; display: inline-flex; align-items: center; }
+:host ::ng-deep .aca-grid {
+  tr.aca-on > td { background: #eef4ff !important; }
+  tr.aca-on > td.acis-unit { color: var(--gov-blue-dark); }
+  .aca-classlist { white-space: nowrap; font-size: 12.5px; }
+  .aca-tick { color: #15803d; font-size: 11px; margin-left: 6px; }
+  .aca-board {
+    display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px;
+    background: #fef3c7; color: #92400e; font-size: 10.5px; font-weight: 700;
+  }
+}
+
+/* Academic exam-type grid: per-board-class column bands + the empty-row look */
+:host ::ng-deep .aca-grid {
+  .acis-group-head th.aca-grp { background: #fdecef !important; color: #be123c !important; text-align: center !important; }
+  .acis-group-head th.aca-grp-all { background: #eef4ff !important; color: #1f4e79 !important; text-align: center !important; }
+  tr.aca-empty > td { opacity: .62; }
+  .aca-nodata {
+    display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 999px;
+    background: #f1f5f9; color: #64748b; font-size: 10.5px; font-weight: 600;
+  }
+}

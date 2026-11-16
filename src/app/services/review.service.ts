@@ -131,6 +131,8 @@ export class ReviewService {
       .then((a) => this._acisStudents.set(a))
       .catch(() => { this.acisStudentsRequested = false; });
   }
+  /** Read-only view of the common-pool student list (null until loadAcisStudents() resolves). */
+  readonly acisStudents = this._acisStudents.asReadonly();
 
   /**
    * Fetch the per-meeting / per-resolution SMC detail. Only the SMC drill needs
@@ -171,6 +173,8 @@ export class ReviewService {
   }
   /** Why the observation data could not be used ('' when fine). */
   readonly palliObsError = signal('');
+  /** Read-only view of the observation line list (null until loadPalliObs() resolves). */
+  readonly palliObs = this._palliObs.asReadonly();
 
   readonly currentYear = computed(
     () => this._schemes()?.currentYear ?? this.ds.data()?.currentYear ?? '',
@@ -745,6 +749,286 @@ export class ReviewService {
     });
   }
 
+  // ========= ACADEMIC: CLASS-WISE × EXAM-TYPE AT THE CURRENT SCOPE =========
+  /**
+   * The Academic component's drill table is one row per district / block /
+   * school. These two views cut the same scope the other way:
+   *   exam-type  one row per Quarterly / Half Yearly / Annual sitting, with
+   *              Average Mark and Pass % per board class
+   *   class-wise one row per class, one column per exam type
+   *
+   * Both are restricted to the **board classes (X and XII)** on request, read
+   * from `AcademicData.boardClasses`. Note that in the current export classes
+   * 10 and 12 carry an ANNUAL sitting only — every district, block and all
+   * 12,208 schools — so the Quarterly and Half Yearly rows are legitimately
+   * empty and render "—" instead of 0. They are kept so the grid fills in once
+   * board quarterly/half-yearly marks are exported.
+   */
+  private r1(v: number): number { return Math.round((v ?? 0) * 10) / 10; }
+
+  /** Board classes the Academic views report on (X and XII). */
+  readonly acaBoardClasses = computed<number[]>(
+    () => this.ac.data()?.boardClasses ?? [10, 12],
+  );
+  private readonly ROMAN: Record<number, string> = {
+    1: 'I', 2: 'II', 3: 'III', 4: 'IV', 5: 'V', 6: 'VI', 7: 'VII',
+    8: 'VIII', 9: 'IX', 10: 'X', 11: 'XI', 12: 'XII',
+  };
+  /** "X" / "XII" rather than "10" / "12", as the review sheet names them. */
+  acaClassLabel(cls: number): string { return this.ROMAN[cls] ?? String(cls); }
+
+  /** Which figure the class × exam matrix shows. */
+  readonly acaMatrixMetric = signal<'avg' | 'pass' | 'entry'>('avg');
+  setAcaMatrixMetric(m: 'avg' | 'pass' | 'entry'): void { this.acaMatrixMetric.set(m); }
+  readonly acaMetricOptions = [
+    { label: 'Average Mark', value: 'avg' },
+    { label: 'Pass %', value: 'pass' },
+    { label: 'Mark Entry %', value: 'entry' },
+  ];
+  readonly acaMetricLabel = computed(
+    () => this.acaMetricOptions.find((o) => o.value === this.acaMatrixMetric())?.label ?? 'Average Mark',
+  );
+  /** Average Mark is a mark out of 100, not a percentage. */
+  readonly acaMetricSuffix = computed(() => (this.acaMatrixMetric() === 'avg' ? '' : '%'));
+
+  /** Exam types present in the current scope, in the data's own order. */
+  readonly acaExamTypes = computed<string[]>(() => {
+    const node: any = this.ac.current();
+    const fromByExam = (node?.byExam ?? []).map((e: any) => e.name as string);
+    if (fromByExam.length) return fromByExam;
+    const fromSittings = [...new Set((node?.examClass ?? []).map((x: any) => x.exam as string))];
+    return fromSittings.length ? fromSittings : this.examPeriodOptions();
+  });
+
+  /** Board-class sittings (X and XII) for the current scope. */
+  private readonly acaBoardSittings = computed<any[]>(() => {
+    const board = this.acaBoardClasses();
+    return ((this.ac.current() as any)?.examClass ?? []).filter((x: any) => board.includes(x.cls));
+  });
+
+  /**
+   * One row per exam type, carrying Average Mark and Pass % for each board
+   * class plus the weighted figure across both. Clicking a row makes that exam
+   * the active assessment. `hasData` is false for an exam with no board
+   * sitting, so the row shows dashes rather than zeros.
+   */
+  readonly acaExamRows = computed(() => {
+    const sittings = this.acaBoardSittings();
+    const board = this.acaBoardClasses();
+    const rows = this.acaExamTypes().map((exam) => {
+      const mine = sittings.filter((x) => x.exam === exam);
+      const perClass: Record<number, { avg: number; pass: number; entry: number; total: number } | null> = {};
+      for (const c of board) {
+        const s = mine.find((x) => x.cls === c);
+        perClass[c] = s
+          ? { avg: this.r1(s.avg), pass: this.r1(s.pass), entry: this.r1(s.compliance), total: s.total ?? 0 }
+          : null;
+      }
+      const w = mine.reduce((t, x) => t + (x.total ?? 0), 0);
+      const wavg = (k: string) => (w ? this.r1(mine.reduce((t, x) => t + (x[k] ?? 0) * (x.total ?? 0), 0) / w) : 0);
+      return {
+        exam,
+        perClass,
+        classes: mine.length,
+        classList: mine.map((x) => this.acaClassLabel(x.cls)).join(', '),
+        avg: wavg('avg'), pass: wavg('pass'), entry: wavg('compliance'),
+        total: w, updated: mine.reduce((t, x) => t + (x.updated ?? 0), 0),
+        hasData: mine.length > 0,
+      };
+    });
+    // Change is measured against the previous exam that actually HAS board data.
+    let prev: { avg: number; pass: number } | null = null;
+    return rows.map((r, i) => {
+      const hasPrev = !!prev && r.hasData;
+      const out = {
+        sno: i + 1,
+        ...r,
+        improve: hasPrev ? this.r1(r.avg - prev!.avg) : 0,
+        passImprove: hasPrev ? this.r1(r.pass - prev!.pass) : 0,
+        hasPrev,
+        active: r.exam === this.examPeriod(),
+      };
+      if (r.hasData) prev = { avg: r.avg, pass: r.pass };
+      return out;
+    });
+  });
+
+  /** Grand total for the exam-type grid — everything weighted by students assessed. */
+  readonly acaExamTotals = computed(() => {
+    const rows = this.acaExamRows().filter((r) => r.hasData);
+    const board = this.acaBoardClasses();
+    const w = rows.reduce((t, r) => t + r.total, 0);
+    const wavg = (f: (r: typeof rows[number]) => number) =>
+      w ? this.r1(rows.reduce((t, r) => t + f(r) * r.total, 0) / w) : 0;
+    const perClass: Record<number, { avg: number; pass: number; total: number } | null> = {};
+    for (const c of board) {
+      let cw = 0, avg = 0, pass = 0;
+      for (const r of rows) {
+        const cell = r.perClass[c];
+        if (!cell || !cell.total) continue;
+        cw += cell.total; avg += cell.avg * cell.total; pass += cell.pass * cell.total;
+      }
+      perClass[c] = cw ? { avg: this.r1(avg / cw), pass: this.r1(pass / cw), total: cw } : null;
+    }
+    return {
+      count: rows.length,
+      perClass,
+      avg: wavg((r) => r.avg),
+      pass: wavg((r) => r.pass),
+      entry: wavg((r) => r.entry),
+      total: w,
+      updated: rows.reduce((t, r) => t + r.updated, 0),
+    };
+  });
+
+  /** Per-class cell in the exam-type grid; null when that class has no sitting. */
+  acaBoardCell(
+    perClass: Record<number, { avg: number; pass: number } | null>,
+    cls: number, key: 'avg' | 'pass',
+  ): number | null {
+    const c = perClass?.[cls];
+    return c ? c[key] : null;
+  }
+
+  /**
+   * Class × exam matrix for the current scope, board classes only. Each row is
+   * a class; `cells` holds one entry per exam type, or null where that class
+   * has no sitting. The row's own avg / pass are weighted by students assessed
+   * across its sittings, so the row total is comparable with the column totals.
+   */
+  readonly acaClassMatrix = computed(() => {
+    const node: any = this.ac.current();
+    const exams = this.acaExamTypes();
+    const board = this.acaBoardClasses();
+    const sittings = this.acaBoardSittings();
+
+    if (!sittings.length) {
+      // No exam × class detail in this scope: fall back to the blended
+      // per-class breakdown, which carries no exam split.
+      return ((node?.byClass ?? []) as any[])
+        .filter((c) => board.includes(Number(c.name)))
+        .map((c, i) => ({
+          sno: i + 1,
+          cls: Number(c.name) || 0,
+          label: `Class ${this.acaClassLabel(Number(c.name))}`,
+          board: true,
+          cells: {} as Record<string, { avg: number; pass: number; entry: number; total: number } | null>,
+          avg: this.r1(c.avg), pass: this.r1(c.pass), entry: this.r1(c.compliance),
+          total: c.total ?? 0, updated: c.updated ?? 0, blended: true,
+        }));
+    }
+
+    const byCls = new Map<number, any[]>();
+    for (const x of sittings) {
+      const arr = byCls.get(x.cls);
+      if (arr) arr.push(x); else byCls.set(x.cls, [x]);
+    }
+    return [...byCls.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([cls, mine], i) => {
+        const cells: Record<string, { avg: number; pass: number; entry: number; total: number } | null> = {};
+        for (const e of exams) {
+          const sit = mine.find((x) => x.exam === e);
+          cells[e] = sit
+            ? { avg: this.r1(sit.avg), pass: this.r1(sit.pass), entry: this.r1(sit.compliance), total: sit.total ?? 0 }
+            : null;
+        }
+        const w = mine.reduce((t, x) => t + (x.total ?? 0), 0);
+        const wavg = (k: string) => (w ? this.r1(mine.reduce((t, x) => t + (x[k] ?? 0) * (x.total ?? 0), 0) / w) : 0);
+        return {
+          sno: i + 1,
+          cls,
+          label: `Class ${this.acaClassLabel(cls)}`,
+          board: mine.some((x) => x.board),
+          cells,
+          avg: wavg('avg'), pass: wavg('pass'), entry: wavg('compliance'),
+          total: w, updated: mine.reduce((t, x) => t + (x.updated ?? 0), 0),
+          blended: false,
+        };
+      });
+  });
+
+  /** Column totals for the class × exam matrix, weighted by students assessed. */
+  readonly acaClassMatrixTotals = computed(() => {
+    const rows = this.acaClassMatrix();
+    const cells: Record<string, { avg: number; pass: number; entry: number; total: number } | null> = {};
+    for (const e of this.acaExamTypes()) {
+      let w = 0, avg = 0, pass = 0, entry = 0;
+      for (const r of rows) {
+        const c = r.cells[e];
+        if (!c || !c.total) continue;
+        w += c.total; avg += c.avg * c.total; pass += c.pass * c.total; entry += c.entry * c.total;
+      }
+      cells[e] = w ? { avg: this.r1(avg / w), pass: this.r1(pass / w), entry: this.r1(entry / w), total: w } : null;
+    }
+    const w = rows.reduce((t, r) => t + r.total, 0);
+    const wavg = (f: (r: typeof rows[number]) => number) =>
+      w ? this.r1(rows.reduce((t, r) => t + f(r) * r.total, 0) / w) : 0;
+    return {
+      count: rows.length, cells,
+      avg: wavg((r) => r.avg), pass: wavg((r) => r.pass), entry: wavg((r) => r.entry),
+      total: w, updated: rows.reduce((t, r) => t + r.updated, 0),
+    };
+  });
+
+  /** Class opened in the scope-level matrix, for its subject breakdown. */
+  readonly acaScopeClass = signal<number | null>(null);
+  selectAcaScopeClass(cls: number | null): void {
+    this.acaScopeClass.set(cls === this.acaScopeClass() ? null : cls);
+  }
+  readonly acaScopeClassLabel = computed(() => {
+    const c = this.acaScopeClass();
+    return c == null ? '' : `Class ${this.acaClassLabel(c)}`;
+  });
+
+  /** Subject × exam matrix for the class opened in the scope-level matrix. */
+  readonly acaScopeSubjectRows = computed(() => {
+    const node: any = this.ac.current();
+    const cls = this.acaScopeClass();
+    if (cls == null) return [];
+    const exams = this.acaExamTypes();
+    const mine: any[] = (node?.examClass ?? []).filter((x: any) => x.cls === cls);
+    const names = [...new Set(mine.flatMap((x) => (x.subjects ?? []).map((s: any) => s.name as string)))];
+    return names.map((subject, i) => {
+      const cells: Record<string, { avg: number; pass: number } | null> = {};
+      for (const e of exams) {
+        const s = mine.find((x) => x.exam === e)?.subjects?.find((y: any) => y.name === subject);
+        cells[e] = s ? { avg: this.r1(s.avg), pass: this.r1(s.pass) } : null;
+      }
+      const vals = Object.values(cells).filter((c): c is { avg: number; pass: number } => !!c);
+      return {
+        sno: i + 1, subject, cells,
+        avg: vals.length ? this.r1(vals.reduce((t, c) => t + c.avg, 0) / vals.length) : 0,
+        pass: vals.length ? this.r1(vals.reduce((t, c) => t + c.pass, 0) / vals.length) : 0,
+      };
+    }).sort((a, b) => a.avg - b.avg).map((r, i) => ({ ...r, sno: i + 1 }));
+  });
+
+  /** Matrix cell for the active metric; null when that sitting does not exist. */
+  acaCell(cells: Record<string, { avg: number; pass: number; entry: number } | null>, exam: string): number | null {
+    const c = cells?.[exam];
+    if (!c) return null;
+    const m = this.acaMatrixMetric();
+    return m === 'pass' ? c.pass : m === 'entry' ? c.entry : c.avg;
+  }
+
+  /** Subject-matrix cell: average mark, or pass % when Pass % is the metric. */
+  acaSubjectCell(cells: Record<string, { avg: number; pass: number } | null>, exam: string): number | null {
+    const c = cells?.[exam];
+    if (!c) return null;
+    return this.acaMatrixMetric() === 'pass' ? c.pass : c.avg;
+  }
+
+  /** RAG tone for a matrix cell, banded per metric. */
+  acaTone(v: number | null): 'bad' | 'warn' | 'good' | '' {
+    if (v == null) return '';
+    switch (this.acaMatrixMetric()) {
+      case 'pass': return v < 50 ? 'bad' : v < 75 ? 'warn' : 'good';
+      case 'entry': return v < 50 ? 'bad' : v < 80 ? 'warn' : 'good';
+      default: return v < 50 ? 'bad' : v < 58 ? 'warn' : 'good';
+    }
+  }
+
   /**
    * The prototype's KPI cards, grouped into per-domain rows so each domain's
    * KPIs read as a single line. Thresholds follow the spec's RAG table.
@@ -978,6 +1262,7 @@ export class ReviewService {
     { id: 'palli', label: 'Palli Parvai', icon: 'fa-solid fa-clipboard-check' },
     { id: 'dps', label: 'Recognition Order', icon: 'fa-solid fa-file-circle-check' },
     { id: 'acis', label: 'All Children in School', icon: 'fa-solid fa-children' },
+    { id: 'pd', label: 'Potential Dropout', icon: 'fa-solid fa-user-clock' },
   ];
   readonly activeTopic = signal<DrillTopic>('att');
   setTopic(t: DrillTopic): void {
@@ -990,6 +1275,7 @@ export class ReviewService {
     this.acaDrillClass.set(null);
     this.dpsUnit.set(null);
     this.acisUnit.set(null);
+    this.pdUnit.set(null);
     this.smcUnit.set(null);
   }
 
@@ -1202,6 +1488,14 @@ export class ReviewService {
           { key: 'acisToBeAdmitted', label: 'To be admitted', fmt: 'num', tone: (v) => (v > 0 ? 'bad' : 'good') },
           { key: 'acisPd', label: 'Potential dropouts', fmt: 'num', tone: (v) => (v > 0 ? 'bad' : 'good') },
           { key: 'acisPdRepeat', label: 'PD repeaters', fmt: 'num', tone: (v) => (v > 0 ? 'bad' : 'good') },
+        ];
+      case 'pd':
+        return [
+          { key: 'acisPd', label: 'Potential dropouts (15+ days absent)', fmt: 'num', tone: (v) => (v > 0 ? 'bad' : 'good') },
+          { key: 'acisPdPct', label: 'Potential dropout %', fmt: 'pct', tone: (v) => (v > 3 ? 'bad' : v > 1 ? 'warn' : 'good') },
+          { key: 'acisPdRepeat', label: 'Potential dropout repeaters', fmt: 'num', tone: (v) => (v > 0 ? 'bad' : 'good') },
+          { key: 'acisPdWithReason', label: 'Reason recorded', fmt: 'num' },
+          { key: 'n', label: 'Students', fmt: 'num' },
         ];
       default:
         return [
@@ -4373,8 +4667,6 @@ export class ReviewService {
     { id: 'ac_dr', label: 'Dropout rate' },
     { id: 'ac_rsn', label: 'Dropout reasons' },
     { id: 'ac_dact', label: 'Department action' },
-    { id: 'ac_pdrs', label: 'PD reasons' },
-    { id: 'ac_pdg', label: 'PD grade-wise' },
   ];
   /**
    * Every ACiS KPI that routes into this drill. The ones that are columns of
@@ -4384,7 +4676,7 @@ export class ReviewService {
    */
   private readonly ACIS_KPI_IDS = new Set([
     'ac_pool', 'ac_surv', 'ac_pend', 'ac_sp', 'ac_adm', 'ac_tba', 'ac_rsn',
-    'ac_dact', 'ac_dpnd', 'ac_pd', 'ac_pdp', 'ac_pdr', 'ac_pdrs', 'ac_pdg', 'ac_dr', 'ac_drc',
+    'ac_dact', 'ac_dpnd', 'ac_dr', 'ac_drc',
   ]);
 
   /** Which tab is lit: summary-column KPIs all light "District summary". */
@@ -4485,13 +4777,20 @@ export class ReviewService {
   readonly acisShowPdStudents = computed(() => !!this.acisPdSchool() && !!this.ds.selectedBlock());
 
   /** Students of the opened PD school, with reason — most days absent first. */
-  readonly acisPdStudentRows = computed(() => {
+  readonly acisPdStudentRows = computed(() => this.pdStudentsFor(this.acisPdSchool()));
+
+  /**
+   * PD students of one school (UDISE), most days absent first. Shared by the
+   * ACiS drill and the Potential Dropout component so both lists stay
+   * identical; the scope + school-type / gender / class filters already apply
+   * through `pdScopeStudents()`.
+   */
+  private pdStudentsFor(udise: string | null) {
     const a = this._acisPd();
-    const u = this.acisPdSchool();
-    if (!a || !u) return [];
+    if (!a || !udise) return [];
     const C = AcisPdCol;
     return this.pdScopeStudents()
-      .filter((r) => a.schoolRefs[r[C.school] as number]?.u === u)
+      .filter((r) => a.schoolRefs[r[C.school] as number]?.u === udise)
       .map((r) => ({
         emis: String(r[C.emis] ?? ''),
         name: String(r[C.name] ?? ''),
@@ -4505,7 +4804,7 @@ export class ReviewService {
       }))
       .sort((x, y) => y.absentDays - x.absentDays || x.name.localeCompare(y.name))
       .map((r, i) => ({ sno: i + 1, ...r }));
-  });
+  }
   acisSelectReason(r: string | null): void { this.acisReason.set(r === this.acisReason() ? null : r); }
   acisResetFilters(): void {
     this.acisFSchoolType.set('all');
@@ -4530,19 +4829,22 @@ export class ReviewService {
   });
 
   /** Which table the active KPI renders. */
-  readonly acisView = computed<'summary' | 'reason' | 'dept' | 'pdreason' | 'pdgrade' | 'droprate'>(() => {
+  readonly acisView = computed<'summary' | 'reason' | 'dept' | 'droprate'>(() => {
     switch (this.acisKpiId()) {
       case 'ac_rsn': return 'reason';
       case 'ac_dact': return 'dept';
-      case 'ac_pdrs': return 'pdreason';
-      case 'ac_pdg': return 'pdgrade';
       case 'ac_dr': case 'ac_drc': return 'droprate';
       default: return 'summary';   // every summary-grid column KPI
     }
   });
 
-  /** Potential-dropout-only views (PD report; no CWSN / UMIS fields). */
-  readonly acisIsPdView = computed(() => ['pdreason', 'pdgrade'].includes(this.acisView()));
+  /**
+   * Potential-dropout-only views. The PD reason and grade-wise tables moved to
+   * the separate Potential Dropout component, so nothing here is PD-only any
+   * more; the flag is kept because the summary grid still carries PD columns
+   * sourced from the PD report (which has no CWSN / UMIS fields).
+   */
+  readonly acisIsPdView = computed(() => false);
   /** CWSN / UMIS filters can't apply: PD report and the enrolment roll lack them. */
   readonly acisHideCwsnUmis = computed(() => this.acisIsPdView() || this.acisView() === 'droprate');
   /** Report window of the potential-dropout export, for the caption. */
@@ -5479,6 +5781,199 @@ export class ReviewService {
     return { acisPdBase: n };
   }
 
+  // ================= POTENTIAL DROPOUT (own component) =================
+  /**
+   * Split out of "All Children in School" on request. It is a different
+   * population from a different source: the EMIS Potential Dropout report
+   * lists children who are STILL ENROLLED but absent 15+ of the last 30 days,
+   * whereas the common pool holds children who have already left. Keeping them
+   * in one component conflated two different interventions.
+   *
+   * `pdView()` picks the table from the active KPI:
+   *   summary  one row per district / block / school — PD, PD %, repeaters,
+   *            boys / girls, schools affected, days absent → school's students
+   *   reason   reason category × reason counts
+   *   grade    class-wise PD split by reason category
+   *
+   * Everything reads `acis-pd.json`, which is small and loaded eagerly, so this
+   * component never waits on the 6 MB common-pool roster. Nothing is assumed.
+   * One report window exists, so PD duration buckets, a monthly trend and
+   * "regularised" are still not built.
+   */
+  readonly pdKpiTabs: { id: string; label: string }[] = [
+    { id: 'ac_pd', label: 'District summary' },
+    { id: 'ac_pdrs', label: 'PD reasons' },
+    { id: 'ac_pdg', label: 'PD grade-wise' },
+  ];
+  /** Every Potential Dropout KPI id, mapped to the table it opens. */
+  private readonly PD_KPI_VIEW: Record<string, 'summary' | 'reason' | 'grade'> = {
+    ac_pd: 'summary', ac_pdp: 'summary', ac_pdr: 'summary',
+    ac_pdrs: 'reason', ac_pdg: 'grade',
+  };
+
+  readonly pdKpiId = signal<string | null>(null);
+  /** Unit drilled into (reserved for parity with the other drills). */
+  readonly pdUnit = signal<string | null>(null);
+  /** School (UDISE) whose PD student list is open. */
+  readonly pdSchool = signal<string | null>(null);
+
+  hasPdDrill(kpiId: string): boolean { return !!this.PD_KPI_VIEW[kpiId]; }
+  openPdDrill(kpiId: string): void {
+    this.pdKpiId.set(this.PD_KPI_VIEW[kpiId] ? kpiId : 'ac_pd');
+    this.pdUnit.set(null);
+    this.pdSchool.set(null);
+  }
+  closePdDrill(): void { this.pdKpiId.set(null); this.pdUnit.set(null); this.pdSchool.set(null); }
+  setPdKpi(id: string): void { this.pdKpiId.set(id); this.pdUnit.set(null); this.pdSchool.set(null); }
+
+  readonly pdView = computed(() => this.PD_KPI_VIEW[this.pdKpiId() ?? ''] ?? 'summary');
+  /** Which tab is lit — the three summary KPIs all light "District summary". */
+  readonly pdActiveTab = computed(() => {
+    const id = this.pdKpiId() ?? 'ac_pd';
+    if (this.pdKpiTabs.some((t) => t.id === id)) return id;
+    const view = this.pdView();
+    return this.pdKpiTabs.find((t) => this.PD_KPI_VIEW[t.id] === view)?.id ?? 'ac_pd';
+  });
+  readonly pdKpiLabel = computed(() => {
+    const id = this.pdKpiId();
+    if (!id) return '';
+    for (const m of KPI_MODULES) { const def = m.kpis.find((k) => k.id === id); if (def) return def.label; }
+    return '';
+  });
+  readonly pdUnitLabel = computed(() => (this.ds.selectedBlock() ? 'School'
+    : this.ds.selectedDistrict() ? 'Block' : 'District'));
+  /** A school's student list only makes sense inside a block. */
+  readonly pdShowStudents = computed(() => !!this.pdSchool() && !!this.ds.selectedBlock());
+  readonly pdSchoolName = computed(() => {
+    const u = this.pdSchool();
+    if (!u) return '';
+    return this._acisPd()?.schoolRefs.find((s) => s.u === u)?.s ?? u;
+  });
+  /** Students of the school opened in the PD grid. */
+  readonly pdStudentRows = computed(() => this.pdStudentsFor(this.pdSchool()));
+
+  /** Summary-grid column the active KPI sorts by (a tile click = sort by it). */
+  private pdSortKey(id: string | null) {
+    switch (id) {
+      case 'ac_pdp': return 'pdPct' as const;
+      case 'ac_pdr': return 'repeaters' as const;
+      default: return 'pd' as const;
+    }
+  }
+
+  /**
+   * PD summary — one row per district (state scope), block (district scope) or
+   * school (block scope). The PD % denominator is that unit's enrolment in the
+   * school types the PD report covers, the same rule the tile uses, so the
+   * grid and the tile agree.
+   */
+  readonly pdSummaryRows = computed(() => {
+    const a = this._acisPd();
+    if (!a) return [];
+    const C = AcisPdCol;
+    const dist = this.ds.selectedDistrict();
+    const blk = this.ds.selectedBlock();
+    type Bag = {
+      name: string; udise: string; pd: number; boys: number; girls: number;
+      repeaters: number; withReason: number; schools: Set<string>; days: number; maxDays: number;
+    };
+    const map = new Map<string, Bag>();
+    const unitOf = (s: { d: string; b: string; u: string; s: string }) => blk
+      ? { key: s.u || s.s.toUpperCase(), name: s.s, udise: s.u }
+      : dist
+        ? { key: s.b.toUpperCase(), name: this.ds.titleCase(s.b), udise: '' }
+        : { key: s.d.toUpperCase(), name: this.ds.titleCase(s.d), udise: '' };
+
+    for (const r of this.pdScopeStudents()) {
+      const ref = a.schoolRefs[r[C.school] as number];
+      if (!ref) continue;
+      const u = unitOf(ref);
+      let o = map.get(u.key);
+      if (!o) {
+        o = { name: u.name, udise: u.udise, pd: 0, boys: 0, girls: 0, repeaters: 0, withReason: 0, schools: new Set(), days: 0, maxDays: 0 };
+        map.set(u.key, o);
+      }
+      o.pd++;
+      if (r[C.gender] === 1) o.boys++; else if (r[C.gender] === 2) o.girls++;
+      if (r[C.repeater] === 1) o.repeaters++;
+      if (a.reasons[r[C.reason] as number]) o.withReason++;
+      if (ref.u) o.schools.add(ref.u);
+      const days = (r[C.absentDays] as number) || 0;
+      o.days += days;
+      if (days > o.maxDays) o.maxDays = days;
+    }
+
+    const rollFor = (key: string): SchoolRow[] => {
+      if (blk) return this.ds.schoolsForBlock().filter((s) => s.udise === key);
+      if (dist) { const b = this.canonicalBlock(key); return b ? this.ds.schoolRowsFor(dist, b) : []; }
+      const d = this.canonicalDistrict(key);
+      return d ? this.ds.schoolRowsFor(d) : [];
+    };
+
+    const metric = this.pdSortKey(this.pdKpiId());
+    return [...map.entries()]
+      .map(([key, o]) => {
+        const enrolled = this.pdEnrolled(rollFor(key));
+        return {
+          key,
+          unit: o.name,
+          udise: o.udise,
+          schools: o.schools.size,
+          pd: o.pd,
+          enrolled,
+          pdPct: enrolled ? Math.round((o.pd / enrolled) * 10000) / 100 : 0,
+          repeaters: o.repeaters,
+          withReason: o.withReason,
+          boys: o.boys,
+          girls: o.girls,
+          avgDays: o.pd ? Math.round((o.days / o.pd) * 10) / 10 : 0,
+          maxDays: o.maxDays,
+        };
+      })
+      .sort((x, y) => (y[metric] as number) - (x[metric] as number) || x.unit.localeCompare(y.unit))
+      .map((r, i) => ({ sno: i + 1, ...r }));
+  });
+
+  readonly pdSummaryTotals = computed(() => {
+    const rows = this.pdSummaryRows();
+    const s = (f: (r: typeof rows[number]) => number) => rows.reduce((t, r) => t + f(r), 0);
+    const pd = s((r) => r.pd);
+    const enrolled = s((r) => r.enrolled);
+    return {
+      count: rows.length,
+      schools: s((r) => r.schools),
+      pd,
+      enrolled,
+      pdPct: enrolled ? Math.round((pd / enrolled) * 10000) / 100 : 0,
+      repeaters: s((r) => r.repeaters),
+      withReason: s((r) => r.withReason),
+      boys: s((r) => r.boys),
+      girls: s((r) => r.girls),
+      avgDays: pd ? Math.round((rows.reduce((t, r) => t + r.avgDays * r.pd, 0) / pd) * 10) / 10 : 0,
+      maxDays: rows.reduce((t, r) => Math.max(t, r.maxDays), 0),
+    };
+  });
+
+  /**
+   * Walk the PD grid: district → block → school → that school's students.
+   * District and block clicks move the dashboard scope so the tiles, the
+   * breadcrumb and the grid all follow; the PD report spells names in its own
+   * casing, so they are resolved to the enrolment roll's canonical name.
+   */
+  pdDrillRow(row: { key: string; udise?: string }): void {
+    const level = this.ds.level();
+    if (level === 'state') {
+      const d = this.canonicalDistrict(row.key);
+      if (d) { this.pdSchool.set(null); this.ds.drillToDistrict(d); }
+    } else if (level === 'district') {
+      const b = this.canonicalBlock(row.key);
+      if (b) { this.pdSchool.set(null); this.ds.drillToBlock(b); }
+    } else {
+      this.pdSchool.set(row.udise || row.key);
+    }
+  }
+  pdCloseStudents(): void { this.pdSchool.set(null); }
+
   // ================= SMC (meetings, resolutions, grants) =================
   /**
    * The SMC component covers two units of analysis — the MEETING and the
@@ -6146,7 +6641,7 @@ export class ReviewService {
 
 /** Topic tabs for the drill-down table, matching the prototype's lenses. */
 export type DrillTopic = 'enr' | 'att' | 'inf' | 'dinf' | 'aca' | 'sch'
-  | 'thiran' | 'scholarship' | 'smc' | 'palli' | 'dps' | 'acis';
+  | 'thiran' | 'scholarship' | 'smc' | 'palli' | 'dps' | 'acis' | 'pd';
 
 /** A row of KPI cards for one domain, rendered on a single line. */
 export interface KpiSection {
