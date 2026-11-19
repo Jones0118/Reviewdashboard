@@ -429,6 +429,26 @@ export class GlancePage implements OnInit {
   });
 
   /**
+   * Inspection targets achieved: Palli Paarvai observations by CEO, DEO
+   * (Secondary/Elementary), BEO and BRTE against their monthly
+   * class-observation target model (Designation_wise_Target_Calculation
+   * sheet). The target model exists only state-wide, so this is real only at
+   * state scope; returns null everywhere else rather than fabricating a
+   * district/block %. Feeds the Learning Outcomes First pillar card.
+   */
+  private readonly inspectionTargetPct = computed(() => {
+    if (this.palliLoading() || this.rv.palliObsError() || this.ds.level() !== 'state') return null;
+    const rows = this.palliByDesig();
+    const obs = rows.reduce((s, r) => s + r.n, 0);
+    const monthsInScope = this.palliMonths().length - 1;           // minus "All months"
+    const months = this.palliMonth() === 'all' ? Math.max(1, monthsInScope) : 1;
+    const model = this.rv.palliTargetModel();
+    const target = this.PALLI_DESIGS.reduce((s, d) => s + (model.find((m) => m.official === d)?.classesPerMonth ?? 0), 0) * months;
+    if (!target) return null;
+    return { obs, target, pct: Math.round((obs / target) * 1000) / 10 };
+  });
+
+  /**
    * Key insights by pillar — one card per GLANCE_GROUPS pillar (Access and
    * Equity / Safe and Secure Schools / Learning Outcomes First / Social and
    * Emotional Wellbeing / Alumni and Community Mentorship), each with up to
@@ -451,43 +471,52 @@ export class GlancePage implements OnInit {
     const r1 = (v: number) => Math.round(v * 10) / 10;
     const vals = this.kv.scopeValues();
     const menu = this.glanceMenu();
+    // Progress bars use only the app's three RAG colours — no blue/teal/pink.
+    const GREEN = '#10B981', AMBER = '#F59E0B', RED = '#E11D48';
     const openIdFor = (gid: string) => {
       const g = menu.find((x) => x.id === gid);
       return g ? (g.items.find((i) => i.built)?.id ?? g.items[0]?.id ?? null) : null;
     };
     const out: Card[] = [];
 
-    // ---- 1. Access and Equity — student attendance, children out of school ----
+    // ---- 1. Access and Equity — potential dropouts %, dropout rate % ----
     {
       const metrics: Metric[] = [];
-      const aS = this.glanceKpi('Attendance', 'a_s');
-      if (aS?.raw != null) {
-        const present = r1(aS.raw), absent = r1(100 - aS.raw);
+      // Potential dropouts %: N = students absent 15+ of the last 30 days
+      // (acisPd, EMIS Potential Dropout report), D = enrolment in PD-covered
+      // school types (acisPdBase). Both real; ratio computed once in
+      // KpiValuesService.scopeValues(), not re-derived here.
+      const pdp = this.glanceKpi('Potential Dropout', 'ac_pdp');
+      const pdN = vals['acisPd'] ?? null, pdD = vals['acisPdBase'] ?? null;
+      if (pdp?.raw != null && pdN != null && pdD != null && pdD > 0) {
+        const flagPct = r1(pdp.raw as number), okPct = r1(100 - flagPct);
         metrics.push({
-          label: 'Average attendance', big: aS.value, suffix: '',
+          label: 'Potential dropouts', big: pdp.value, suffix: '',
           segs: [
-            { label: 'Present', value: `${present}%`, pct: present, color: '#10B981' },
-            { label: 'Absent', value: `${absent}%`, pct: absent, color: '#FDA4AF' },
+            { label: 'Absent 15+ days (flagged)', value: `${inr(pdN)} · ${flagPct}%`, pct: flagPct, color: RED },
+            { label: 'Not flagged', value: `${inr(pdD - pdN)} · ${okPct}%`, pct: okPct, color: GREEN },
           ],
         });
       }
-      const pool = this.glanceKpi('All Children in School', 'ac_pool');
-      const adm = this.glanceKpi('All Children in School', 'ac_adm');
-      const tba = this.glanceKpi('All Children in School', 'ac_tba');
-      if (pool?.raw != null && adm?.raw != null && tba?.raw != null) {
-        const total = (adm.raw as number) + (tba.raw as number) || 1;
-        const admPct = r1(((adm.raw as number) / total) * 100), tbaPct = r1(100 - admPct);
+      // Dropout rate %: N = common-pool children not re-admitted to any school
+      // (acisDropOut), D = enrolment in classes I–XII (acisEnrolI12) — the real
+      // equivalent of "dropped out and not re-enrolled ÷ enrolment at the
+      // start of the year"; both real, from the ACiS common-pool export.
+      const dr = this.glanceKpi('All Children in School', 'ac_dr');
+      const drN = vals['acisDropOut'] ?? null, drD = vals['acisEnrolI12'] ?? null;
+      if (dr?.raw != null && drN != null && drD != null && drD > 0) {
+        const outPct = r1(dr.raw as number), inPct = r1(100 - outPct);
         metrics.push({
-          label: 'Children out of school (Common Pool)', big: pool.value, suffix: 'flagged',
+          label: 'Dropout rate', big: dr.value, suffix: '',
           segs: [
-            { label: 'Admitted to schools', value: `${inr(adm.raw as number)} · ${admPct}%`, pct: admPct, color: '#10B981' },
-            { label: 'To be admitted', value: `${inr(tba.raw as number)} · ${tbaPct}%`, pct: tbaPct, color: '#F59E0B' },
+            { label: 'Dropped out, not re-enrolled', value: `${inr(drN)} · ${outPct}%`, pct: outPct, color: RED },
+            { label: 'Re-enrolled / continuing', value: `${inr(drD - drN)} · ${inPct}%`, pct: inPct, color: GREEN },
           ],
         });
       }
       out.push({
         id: 'g1', icon: 'fa-solid fa-scale-balanced', title: 'Access and Equity',
-        tileBg: '#EAF0FB', tileFg: '#2F62C4', pill: this.glancePill(aS?.band ?? 'none'),
+        tileBg: '#EAF0FB', tileFg: '#2F62C4', pill: this.glancePill(pdp?.band ?? dr?.band ?? 'none'),
         metrics, openId: openIdFor('g1'),
       });
     }
@@ -507,8 +536,8 @@ export class GlancePage implements OnInit {
         metrics.push({
           label: 'Schools with no critical infra gap', big: `${okPct}%`, suffix: '',
           segs: [
-            { label: 'No critical gap', value: `${inr(okCount)} · ${okPct}%`, pct: okPct, color: '#2F62C4' },
-            { label: 'Has gaps', value: `${inr(gap.raw as number)} · ${gapPct}%`, pct: gapPct, color: '#CBD5E1' },
+            { label: 'No critical gap', value: `${inr(okCount)} · ${okPct}%`, pct: okPct, color: GREEN },
+            { label: 'Has gaps', value: `${inr(gap.raw as number)} · ${gapPct}%`, pct: gapPct, color: AMBER },
           ],
         });
       }
@@ -520,8 +549,8 @@ export class GlancePage implements OnInit {
         metrics.push({
           label: 'Buildings needing attention', big: inr(total), suffix: 'identified',
           segs: [
-            { label: 'To be demolished', value: `${inr(demolish.raw as number)} · ${demPct}%`, pct: demPct, color: '#FDA4AF' },
-            { label: 'Needs repair', value: `${inr(repair)} · ${repPct}%`, pct: repPct, color: '#F59E0B' },
+            { label: 'To be demolished', value: `${inr(demolish.raw as number)} · ${demPct}%`, pct: demPct, color: RED },
+            { label: 'Needs repair', value: `${inr(repair)} · ${repPct}%`, pct: repPct, color: AMBER },
           ],
         });
       }
@@ -532,37 +561,84 @@ export class GlancePage implements OnInit {
       });
     }
 
-    // ---- 3. Learning Outcomes First — exam pass %, THIRAN basic-level catch-up ----
+    // ---- 3. Learning Outcomes First — attendance %, inspection targets, Board exam
+    //         avg marks (Class X & XII), THIRAN BLO attainment ----
     {
       const metrics: Metric[] = [];
-      const pass = this.glanceKpi('Academic Performance', 'a_pass');
-      if (pass?.raw != null) {
-        const passed = r1(pass.raw), notPassed = r1(100 - pass.raw);
+      // 1. Student attendance % — weighted: total present-days ÷ total school
+      // days for all students combined (Attendance/a_s, already computed that way).
+      const aS = this.glanceKpi('Attendance', 'a_s');
+      if (aS?.raw != null) {
+        const present = r1(aS.raw), absent = r1(100 - aS.raw);
         metrics.push({
-          label: 'Exam pass percentage', big: pass.value, suffix: '',
+          label: 'Student attendance %', big: aS.value, suffix: '',
           segs: [
-            { label: 'Passed', value: `${passed}%`, pct: passed, color: '#2F62C4' },
-            { label: 'Not passed', value: `${notPassed}%`, pct: notPassed, color: '#FDA4AF' },
+            { label: 'Present', value: `${present}%`, pct: present, color: GREEN },
+            { label: 'Absent', value: `${absent}%`, pct: absent, color: RED },
           ],
         });
       }
-      const tS = this.glanceKpi('THIRAN', 't_s');
+      // 2. Inspection targets achieved — Palli Paarvai observations by CEO,
+      // DEO (Sec/Ele), BEO and BRTE vs their monthly class-observation target
+      // model. Real only at state scope (the target model is state-wide);
+      // omitted elsewhere rather than showing a fabricated district/block %.
+      const insp = this.inspectionTargetPct();
+      if (insp) {
+        const remPct = r1(Math.max(0, 100 - insp.pct));
+        metrics.push({
+          label: 'Inspection targets achieved (Palli Paarvai)', big: `${insp.pct}%`, suffix: '',
+          segs: [
+            { label: 'Completed', value: `${inr(insp.obs)} · ${insp.pct}%`, pct: Math.min(100, insp.pct), color: GREEN },
+            { label: 'Target remaining', value: `${inr(Math.max(0, insp.target - insp.obs))} · ${remPct}%`, pct: remPct, color: AMBER },
+          ],
+        });
+      }
+      // 3 & 4. Board exam average mark, Class X and Class XII — the real
+      // Annual board sitting for each class (AcademicNode.examClass; `avg` is
+      // already total marks ÷ students who attended, from the source export).
+      const examClass = this.ac.current()?.examClass ?? [];
+      const x10 = examClass.find((r) => r.cls === 10 && r.board);
+      if (x10?.avg != null) {
+        metrics.push({
+          label: 'X Board Exam Results Average Mark', big: `${r1(x10.avg)}`, suffix: '/ 100',
+          segs: [
+            { label: 'Average mark', value: `${r1(x10.avg)}`, pct: Math.min(100, r1(x10.avg)), color: GREEN },
+            { label: 'Remaining', value: `${r1(100 - x10.avg)}`, pct: Math.max(0, r1(100 - x10.avg)), color: AMBER },
+          ],
+        });
+      }
+      const x12 = examClass.find((r) => r.cls === 12 && r.board);
+      if (x12?.avg != null) {
+        metrics.push({
+          label: 'XII Board Exam Results Average Mark', big: `${r1(x12.avg)}`, suffix: '/ 100',
+          segs: [
+            { label: 'Average mark', value: `${r1(x12.avg)}`, pct: Math.min(100, r1(x12.avg)), color: GREEN },
+            { label: 'Remaining', value: `${r1(100 - x12.avg)}`, pct: Math.max(0, r1(100 - x12.avg)), color: AMBER },
+          ],
+        });
+      }
+      // 5. % of students in THIRAN+ — BLO (Basic Level of Objectives) benchmark
+      // attainment in the THIRAN endline test (thiranAttainBLO ÷ students
+      // endline-tested, back-derived from the same two real figures that
+      // produce the catalog's own 'BLO attainment %'; the export has no count
+      // of all Grade 2-9 students, only those identified/endline-tested).
       const tBl = this.glanceKpi('THIRAN', 't_bl');
-      if (tS?.raw != null && tBl?.raw != null) {
-        const caughtUp = Math.round((tS.raw as number) * (tBl.raw as number) / 100);
-        const below = Math.max(0, (tS.raw as number) - caughtUp);
+      const attainBlo = vals['thiranAttainBLO'] ?? null;
+      if (tBl?.raw != null && attainBlo != null && (tBl.raw as number) > 0) {
+        const base = Math.round(attainBlo / ((tBl.raw as number) / 100));
+        const notAttain = Math.max(0, base - attainBlo);
         const upPct = r1(tBl.raw as number), belowPct = r1(100 - upPct);
         metrics.push({
-          label: 'THIRAN students', big: inrShort(tS.raw as number), suffix: 'identified',
+          label: 'THIRAN BLO attainment %', big: tBl.value, suffix: '',
           segs: [
-            { label: 'Caught up', value: `${inrShort(caughtUp)} · ${upPct}%`, pct: upPct, color: '#10B981' },
-            { label: 'Still below level', value: `${inrShort(below)} · ${belowPct}%`, pct: belowPct, color: '#F59E0B' },
+            { label: 'Attained BLO benchmark', value: `${inr(attainBlo)} · ${upPct}%`, pct: upPct, color: GREEN },
+            { label: 'Not yet attained', value: `${inr(notAttain)} · ${belowPct}%`, pct: belowPct, color: AMBER },
           ],
         });
       }
       out.push({
         id: 'g3', icon: 'fa-solid fa-book-open', title: 'Learning Outcomes First',
-        tileBg: '#E6F5EF', tileFg: '#2F8A66', pill: this.glancePill(pass?.band ?? 'none'),
+        tileBg: '#E6F5EF', tileFg: '#2F8A66', pill: this.glancePill(aS?.band ?? tBl?.band ?? 'none'),
         metrics, openId: openIdFor('g3'),
       });
     }
@@ -586,8 +662,8 @@ export class GlancePage implements OnInit {
         metrics.push({
           label: 'Schools holding SMC meetings', big: `${heldPct}%`, suffix: '',
           segs: [
-            { label: 'Held', value: `${inr(held)} · ${heldPct}%`, pct: heldPct, color: '#0f766e' },
-            { label: 'Not held', value: `${inr(notHeld)} · ${notHeldPct}%`, pct: notHeldPct, color: '#99f6e4' },
+            { label: 'Held', value: `${inr(held)} · ${heldPct}%`, pct: heldPct, color: GREEN },
+            { label: 'Not held', value: `${inr(notHeld)} · ${notHeldPct}%`, pct: notHeldPct, color: AMBER },
           ],
         });
       }
@@ -597,8 +673,8 @@ export class GlancePage implements OnInit {
         metrics.push({
           label: 'SMC resolutions', big: inr(raised), suffix: 'raised',
           segs: [
-            { label: 'Closed', value: `${inr(closed)} · ${closedPct}%`, pct: closedPct, color: '#10B981' },
-            { label: 'Open', value: `${inr(pending)} · ${pendingPct}%`, pct: pendingPct, color: '#F59E0B' },
+            { label: 'Closed', value: `${inr(closed)} · ${closedPct}%`, pct: closedPct, color: GREEN },
+            { label: 'Open', value: `${inr(pending)} · ${pendingPct}%`, pct: pendingPct, color: AMBER },
           ],
         });
       }
@@ -619,6 +695,12 @@ export class GlancePage implements OnInit {
   readonly navCollapsed = signal(false);
   toggleNav(): void { this.navCollapsed.update((v) => !v); }
   fmtN(v: number): string { return inr(v); }
+
+  /** Pillar cards expanded past their first two metrics (Key insights by pillar). */
+  readonly pillarExpanded = signal<Set<string>>(new Set());
+  togglePillar(id: string): void {
+    this.pillarExpanded.update((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  }
 
   readonly PALLI_DESIGS = ['CEO', 'DEO (Secondary)', 'DEO (Elementary)', 'BEO', 'BRTE'];
   readonly palliMonth = signal<string>('all');

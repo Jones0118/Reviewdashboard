@@ -56,10 +56,6 @@
     <div class="b1r">
       <span class="yr">Year <span class="inp">{{ rv.currentYear() }}</span></span>
       <span class="role"><i class="fa-regular fa-user"></i> {{ auth.user() || 'Signed in' }}</span>
-      <a class="gl-btn ghost" href="/" title="Open the full Review Dashboard"><i class="fa-solid fa-table-cells-large"></i> Review Dashboard</a>
-      <button type="button" class="gl-btn ghost" (click)="exportHtml()" [disabled]="exporting()" title="Save this page, as shown, as a standalone HTML file">
-        <i class="fa-solid" [class.fa-file-code]="!exporting()" [class.fa-spinner]="exporting()" [class.fa-spin]="exporting()"></i> {{ exporting() ? 'Saving…' : 'Download HTML' }}</button>
-      <button type="button" class="gl-btn" (click)="print()" title="Opens the print dialog; choose Save as PDF"><i class="fa-solid fa-print"></i> Print / Save as PDF</button>
     </div>
   </header>
   <!-- viewing bar: scope + filters on one line, all dropdowns -->
@@ -184,13 +180,15 @@
     <div class="gl-pgrid">
       @for (c of glancePillarInsights(); track c.id) {
         <section class="gl-c gl-pc">
-          <div class="pc-head">
-            <span class="ib" [style.background]="c.tileBg" [style.color]="c.tileFg"><i [class]="c.icon"></i></span>
-            <b>{{ c.title }}</b>
-            @if (c.pill) { <span class="pill" [class]="'pill ' + c.pill.cls">{{ c.pill.text }}</span> }
-          </div>
+          <button type="button" class="pc-head" (click)="c.openId && setGlanceView(c.openId)" [attr.aria-label]="'Open ' + c.title + ' pillar'">
+            <span class="pc-head-l">
+              <span class="ib" [style.background]="c.tileBg" [style.color]="c.tileFg"><i [class]="c.icon"></i></span>
+              <b>{{ c.title }}</b>
+            </span>
+            <span class="pc-head-r"><span class="pc-head-r-txt">Open pillar</span> <i class="fa-solid fa-arrow-right"></i></span>
+          </button>
           @if (c.metrics.length) {
-            @for (m of c.metrics; track m.label) {
+            @for (m of c.metrics.slice(0, 2); track m.label) {
               <div class="pc-metric">
                 <span class="pc-lbl">{{ m.label }}</span>
                 <div class="pc-big">{{ m.big }}@if (m.suffix) { <em>{{ m.suffix }}</em> }</div>
@@ -204,11 +202,33 @@
                 </div>
               </div>
             }
+            @if (c.metrics.length > 2) {
+              @if (pillarExpanded().has(c.id)) {
+                <div class="pc-extra" [id]="'pc-extra-' + c.id">
+                  @for (m of c.metrics.slice(2); track m.label) {
+                    <div class="pc-metric">
+                      <span class="pc-lbl">{{ m.label }}</span>
+                      <div class="pc-big">{{ m.big }}@if (m.suffix) { <em>{{ m.suffix }}</em> }</div>
+                      <div class="pc-bar">
+                        @for (s of m.segs; track s.label) { <i [style.width.%]="s.pct" [style.background]="s.color"></i> }
+                      </div>
+                      <div class="pc-legend">
+                        @for (s of m.segs; track s.label) {
+                          <span><i class="dot" [style.background]="s.color"></i>{{ s.label }} <b>{{ s.value }}</b></span>
+                        }
+                      </div>
+                    </div>
+                  }
+                </div>
+              }
+              <button type="button" class="pc-expander" (click)="togglePillar(c.id)"
+                      [attr.aria-expanded]="pillarExpanded().has(c.id)" [attr.aria-controls]="'pc-extra-' + c.id">
+                {{ pillarExpanded().has(c.id) ? 'Show fewer metrics' : 'Show more metrics' }}
+                <i class="fa-solid fa-chevron-down" [class.up]="pillarExpanded().has(c.id)"></i>
+              </button>
+            }
           } @else {
             <div class="pc-empty">No KPI data source exists yet for this pillar in the dashboard.</div>
-          }
-          @if (c.openId) {
-            <button type="button" class="gl-btn ghost pc-open" (click)="setGlanceView(c.openId)">Open pillar <i class="fa-solid fa-arrow-right"></i></button>
           }
         </section>
       }

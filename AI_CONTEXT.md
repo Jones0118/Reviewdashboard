@@ -699,6 +699,275 @@ with a Total row and Excel/CSV/PDF (`exportScholar` in app.ts).
 
 ## 10. Feature changelog (what was built, newest first)
 
+- **At a glance: reverted the metric-heading highlight (19-Nov-2026).** The
+  left-border tag treatment added to `.pc-lbl` in the previous turn (14px
+  600-weight ink text, `var(--pri-soft)` background, 3px `var(--pri-dk)`
+  left border, rounded right corners, padding) was removed on request;
+  `.pc-lbl` is back to its original plain styling (`font-size: 13px; color:
+  var(--tx2);`). Nothing else in the pillar cards changed. Verified live via
+  screenshot.
+
+- **At a glance: metric headings highlighted with a left-border tag style
+  (19-Nov-2026).** STEERING: each metric heading inside a pillar card (e.g.
+  "Student attendance %", "Inspection targets achieved (Palli Paarvai)")
+  now renders as a tag: `.pc-lbl` gained 14px/600-weight `var(--ink)` text,
+  `var(--pri-soft)` background, a 3px `var(--pri-dk)` left border,
+  `border-radius: 0 8px 8px 0`, `padding: 4px 12px 4px 10px`, and
+  `display: inline-block` (previously plain 13px muted text). Nothing else
+  in the card — big numbers, bars, legends, header, expander — was touched;
+  verified via screenshot that only the metric-heading styling changed.
+
+- **At a glance: "Open pillar" label hides at rest, reveals on hover/focus
+  (19-Nov-2026).** The header's "Open pillar" text (wrapped in a new
+  `.pc-head-r-txt` span so it can be animated independently of the arrow
+  icon) is hidden (`opacity: 0; transform: translateX(6px)`) and the arrow
+  dimmed to 50% opacity at rest, both only inside `@media (hover: hover)` so
+  touch devices always see both at full opacity. `.pc-head:hover` /
+  `.pc-head:focus-visible` reveal the text (`opacity: 1`, no shift) and the
+  icon (`opacity: 1`) over a 150ms transition. Opacity/transform are used
+  instead of `display: none` so the text keeps its layout space and the
+  header never shifts width. `aria-label="Open {title} pillar"` on the
+  button is unchanged, so screen readers still announce the action
+  regardless of visual state. Same 48px header button, same navigation
+  handler — only this label's visibility behaviour changed. Verified live:
+  `.pc-head-r-txt` computed opacity is `0` and the icon's is `0.5` at rest
+  under `matchMedia('(hover: hover)')` (true in headless Chrome), and the
+  button's `aria-label` is intact.
+
+- **At a glance: expander pinned to card bottom, height-only expand
+  (19-Nov-2026).**
+  - **"Show more/fewer metrics" button moved to always be the last element
+    in the card** — previously it sat right after the second metric with
+    any extra metrics rendering below it; now the extra metrics (when
+    expanded) render between the second metric and the button, so the
+    button itself stays pinned at the bottom of the card in both the
+    collapsed and expanded states (verified: `card.lastElementChild` is the
+    `.pc-expander` button both before and after clicking it).
+  - **Expanding a card changes only its height, never its width** — tried
+    `grid-column: 1 / -1` (full-width span) first per the initial ask to
+    "rearrange… for visibility", then reverted it immediately on a follow-up
+    correction ("increase only the height… don't increase the width").
+    With `.gl-pgrid`'s existing `align-items: start`, the taller card simply
+    grows in place within its own grid column; neighbouring cards in the
+    same row keep their own natural (shorter) height instead of stretching,
+    and the grid's next row flows down automatically to make room — no
+    extra CSS needed for that reflow beyond what `align-items: start`
+    already provided. Removed the short-lived `[class.pc-expanded]`
+    binding and its now-unused `.gl-pc.pc-expanded` rule along with it.
+  - Build-clean; verified live via headless Chrome: expanding "Learning
+    Outcomes First" from 2 to 5 metrics keeps its `getBoundingClientRect()`
+    width exactly unchanged (368.66px before and after) while its neighbours
+    (Access and Equity, Safe and Secure Schools) stay their own shorter
+    height and the next row (Social and Emotional Wellbeing, Alumni and
+    Community Mentorship) shifts down to sit below the now-taller row.
+
+- **At a glance: pillar card header merged into one clickable button; legend
+  reverted to plain text (19-Nov-2026).**
+  - **Header row is now a single `<button class="pc-head">`** wrapping the
+    icon + title (left) and "Open pillar" + arrow (right, `var(--pri-dk)`,
+    600 weight, 14px) via `justify-content: space-between`. The whole row is
+    one tap target calling `c.openId && setGlanceView(c.openId)` — same
+    handler/route as before, just reachable from anywhere in the row, not
+    only the small link. `min-height: 48px`; bleeds 8px past the card's own
+    padding on each side (`width: calc(100% + 16px); margin: -8px -8px 8px;
+    padding: 0 8px`) so the tap strip is wide while the icon/title/link text
+    stay visually aligned with the metrics below; `border-radius: 10px`;
+    `var(--pri-soft)` background on hover, `var(--pri-soft-bd)` on active,
+    `2px solid var(--pri-dk)` outline on focus-visible. `aria-label="Open
+    {title} pillar"`. The card itself (`<section class="gl-c gl-pc">`)
+    stays non-interactive — confirmed it's still a `<section>`, not a
+    button/link, so the header is genuinely the only route out.
+  - Fixed a self-introduced regression immediately after this change: the
+    title initially got `white-space: nowrap; overflow: hidden; text-overflow:
+    ellipsis`, which truncated longer pillar names ("Safe and Secure
+    Scho…", "Learning Outcomes Fi…") inside the single-line button — removed
+    so the title wraps across two lines exactly as it did before, with the
+    header growing past its 48px minimum to fit.
+  - **Legend items (Present/Absent/Completed/Target remaining/etc.) reverted
+    to plain `<span>`** — a prior turn had made them `<button>` elements with
+    a hover underline; two follow-up steering messages ("remaining are plain
+    text with no hidden tap targets") confirmed this should not have hidden
+    tap targets, so the buttons and their `.pc-legend-item` CSS rule were
+    removed and the original `.pc-legend span { … }` rule restored verbatim.
+  - **Expander** (`.pc-expander`, "Show more/fewer metrics") kept its
+    existing position/behaviour/aria attributes; only its hover/focus-visible
+    style gained a `var(--soft)` background + `var(--ink)` text colour (it
+    only changed text colour before), per this turn's explicit ask.
+  - **Grid**: `.gl-pgrid` gained `align-items: start` so expanding one card
+    (e.g. Learning Outcomes First to 5 metrics) no longer stretches its
+    neighbours' card backgrounds to match row height.
+  - No changes to metrics, numbers, bar colours/widths, fonts, other cards,
+    or any data/route/class used elsewhere. Build-clean; verified live via
+    headless Chrome: all 5 headers are real `<button>` elements with correct
+    `aria-label`s, legend items are confirmed plain `<span>` (zero `<button>`
+    inside `.pc-legend`), clicking anywhere on the Access and Equity header
+    (not just the "Open pillar" text) navigates to "… › 1. Access and Equity
+    › Scholarships and Entitlements", and titles wrap on two lines without
+    truncation.
+
+- **At a glance: pillar card controls restyled — Open pillar moved to header,
+  More replaced by a full-width expander row, status pill removed
+  (19-Nov-2026).**
+  - **"Open pillar"** moved out of the bottom-right footer into the card
+    header, top-right, as a borderless text link (`.pc-open-link`): no
+    border/background, `var(--pri-dk)` link colour, 600 weight, 14px,
+    44px min-height touch target, `var(--pri-soft)` background on
+    hover/focus-visible. Same `setGlanceView(c.openId)` handler, untouched.
+  - **"More"** removed from the footer; replaced by a full-width
+    `.pc-expander` row directly below the second (default-visible) metric,
+    with a 1px top border, centred muted text, 44px min-height, label
+    "Show more metrics" / "Show fewer metrics", trailing chevron that
+    rotates 180° over 200ms when expanded. `aria-expanded` and
+    `aria-controls="pc-extra-{id}"` added, pointing at the wrapper that
+    holds the metrics beyond the first two. Same `togglePillar(id)`/
+    `pillarExpanded` signal, untouched.
+  - **Footer removed entirely** (`.pc-foot`/`.pc-more`/`.pc-open` deleted
+    from both the template and `glance.scss`) — no dead space below the
+    last visible metric or expander row.
+  - **Legend items** (`Present`, `Absent`, `Completed`, `Target remaining`,
+    etc.) changed from plain `<span>` to `<button class="pc-legend-item">`
+    with pointer cursor and underline on hover; no click behaviour attached
+    (kept as no-ops, matching the pre-existing behaviour — there was nothing
+    to preserve).
+  - STEERING: **the "On track" / "Watch" / "Not built" status pill was
+    removed from every pillar card header** per a follow-up request — the
+    `@if (c.pill) { <span class="pill">… }` block was deleted from
+    `glance.html`; the `pill` field is still computed and carried on each
+    `Card` in `glance.ts` (harmless, unused by the template) since removing
+    the computed itself was not requested and several cards still rely on
+    its band calculation internally for nothing else — left in place to
+    avoid an unrequested deeper refactor.
+  - Metrics, numbers, bar colours/widths, fonts and spacing elsewhere were
+    not touched. Build-clean; verified live via headless Chrome: no
+    `.pill` element remains in any `.pc-head`, `.pc-open-link` renders in
+    the header of all five cards, no `.pc-foot` element exists anywhere,
+    and the expander's `aria-expanded`/`aria-controls` are correct and
+    toggle the metric count from 2 to 5 on Learning Outcomes First.
+
+- **At a glance: pillar cards — RAG-only bar colours, collapse to 2 metrics,
+  More/Open pillar footer (19-Nov-2026).**
+  - **Bar colours restricted to the app's three RAG colours only** — every
+    `Metric.segs` entry across all five pillar cards now uses exactly
+    `#10B981` (green), `#F59E0B` (amber) or `#E11D48` (red); the previous
+    blue/light-blue/pink/teal decorative colours are gone. Mapping: the
+    positive/resolved side of each split (Present, No critical gap, Not
+    flagged, Re-enrolled, Completed, Average mark, Attained, Held, Closed)
+    is green; genuinely adverse outcomes (Absent, Absent 15+ days flagged,
+    Dropped out not re-enrolled, To be demolished) are red; outstanding/
+    "not yet done" gaps that aren't acute failures (Has gaps, Needs repair,
+    Target remaining, Remaining-to-100, Not yet attained, Not held, Open)
+    are amber.
+  - **Cards show only their first two metrics by default**; a per-card
+    `pillarExpanded` signal (`togglePillar(id)` in `glance.ts`) tracks which
+    cards are expanded. A "More ⌄ " chevron button appears in the card
+    footer only when a card has more than two metrics (currently only
+    Learning Outcomes First, with 5) — clicking it reveals all of that
+    card's metrics and the button relabels to "Less" with the chevron
+    flipped 180°; cards with ≤2 metrics show no chevron.
+  - **Footer row moved to the card's lower-right**: the (conditional) More
+    chevron and the "Open pillar" button now sit together, right-aligned,
+    pinned to the bottom of the card (`.pc-foot`, `margin-top: auto` inside
+    the card's flex column) instead of "Open pillar" alone at lower-left.
+  - **"Open pillar" navigation re-confirmed, not changed**: it already calls
+    `setGlanceView(openId)` where `openId` is the pillar's first *built*
+    submenu item (or its first item's "not built" stub if nothing in the
+    pillar has data) — this lands inside that pillar's own domain, with the
+    breadcrumb reading e.g. "… › 1. Access and Equity › Scholarships and
+    Entitlements" and the matching sidebar group auto-expanded (`isGroupOpen`
+    already treats a group as open when one of its items is the active
+    view). Verified live: clicking "Open pillar" on Access and Equity lands
+    on "Scholarships and Entitlements" with the "1. Access and Equity"
+    breadcrumb and sidebar group expanded — the closest equivalent of "open
+    the domain" this app's navigation model supports, since there is no
+    single landing page for a pillar as a whole.
+  - Build-clean; verified live via headless Chrome: default 2-metric display
+    and RAG-only bar colours confirmed by reading computed `background`
+    styles (only `rgb(16,185,129)` / `rgb(245,158,11)` / `rgb(225,29,72)`
+    present), the More/Less toggle expanding Learning Outcomes First from 2
+    to 5 metrics and back, and the Open-pillar domain navigation above.
+
+- **At a glance: top bar cleanup — removed Review Dashboard / Download HTML / Print
+  buttons (19-Nov-2026).** Request: keep only the Year and logged-in user in the
+  top-right corner. Removed the three `.b1r` buttons/links from `glance.html`
+  (`<a>` "Review Dashboard", `(click)="exportHtml()"` "Download HTML",
+  `(click)="print()"` "Print / Save as PDF"), leaving just `Year {{ rv.currentYear() }}`
+  and the user badge. Left `exportHtml()`/`exporting()`/`print()` in `glance.ts`
+  untouched (no template reference to them remains, but the methods are harmless
+  dormant code, not deleted, since removing them was not requested). Note:
+  `scripts/snapshot-glance.mjs` automates pressing the "Download HTML" button by
+  its text — with the button gone, that script will now fail with "Download HTML
+  button not found" until/unless the button is restored or the script is updated
+  to call the export logic a different way. Verified live: the top-right bar now
+  renders only "Year 2026-27" and "Admin", zero buttons.
+
+- **At a glance: Learning Outcomes First pillar — swapped in the 5 requested
+  metrics (19-Nov-2026).** Replaced the pillar's two metrics (Exam pass
+  percentage, THIRAN students caught-up/below) with the five the user defined
+  by formula, each mapped to the closest real field:
+  - **Student attendance %** — `Attendance`/`a_s`, unchanged definition
+    (weighted present-days ÷ total school-days across all students).
+  - **Inspection targets achieved (Palli Paarvai)** — new private computed
+    `inspectionTargetPct` (re-created from the `palliTargetPct` logic deleted
+    in the previous pillar-grid change): Palli Paarvai observations by CEO,
+    DEO (Sec/Ele), BEO and BRTE against their monthly class-observation
+    target model. Real only at state scope (the target model is state-wide);
+    the metric is simply omitted at district/block/school scope rather than
+    showing a fabricated %.
+  - **X / XII Board Exam Results Average Mark** — read directly from
+    `AcademicService.current()?.examClass`, filtered to `cls === 10` /
+    `cls === 12` with `board === true` (the real Annual board sitting per
+    class; `avg` is already total marks ÷ students attended, from the source
+    export). Scope-reactive at state/district/block/school, unlike the
+    Board Exam Dashboard's own dedicated service which only covers
+    state + district + schools.
+  - **THIRAN BLO attainment %** — `THIRAN`/`t_bl` (`thiranBloPct`), labelled
+    with its own real name rather than the user's "% of students in THIRAN+"
+    wording: the export has no count of total Grade 2-9 enrolment, only
+    `thiranAttainBLO` (count attaining the benchmark) and `endlineThiran`
+    (count endline-tested) — `t_bl` is `attainBLO ÷ endlineThiran`, not
+    `attainBLO ÷ all students`, so it is presented under its established,
+    accurate catalog label. The "Not yet attained" legend count is
+    back-derived from the same two real numbers (`thiranAttainBLO` and the
+    `t_bl` percentage), not fabricated.
+  - Card pill now follows attendance's band (falls back to THIRAN's).
+    Build-clean; verified live (state scope): attendance 89.0%, inspection
+    targets 47.5% (49,339 of 103,804), Class X avg 70.1/100, Class XII avg
+    71/100, THIRAN BLO attainment 94.0%.
+
+- **At a glance: Access and Equity pillar — swapped in Potential dropouts % /
+  Dropout rate % (19-Nov-2026).** Request gave two formal metric definitions
+  (Potential Dropouts = students absent 15+ of the last 30 days ÷ total
+  enrolled; Dropout Rate = students who discontinued and were not
+  re-enrolled ÷ enrolment at the start of the year) and asked to remove the
+  existing two Access and Equity metrics (Average attendance, Children out
+  of school) in favour of these. Mapped both to the closest already-real
+  catalog KPIs rather than inventing new fields:
+  - **Potential dropouts %** = `Potential Dropout`/`ac_pdp` (`acisPdPct`),
+    which is computed in `KpiValuesService.scopeValues()` as exactly
+    `acisPd` (students absent 15+ of the last 30 days, EMIS PD report) ÷
+    `acisPdBase` (enrolment in PD-covered school types) × 100 — matches the
+    requested formula field-for-field. Legend splits the same real N/D into
+    "Absent 15+ days (flagged)" / "Not flagged".
+  - **Dropout rate %** = `All Children in School`/`ac_dr` (`acisDropRate`) =
+    `acisDropOut` (common-pool children not re-admitted to any school) ÷
+    `acisEnrolI12` (enrolment in classes I–XII) × 100. This is the closest
+    real equivalent to the requested formula (dropped out and not
+    re-enrolled ÷ starting enrolment) available in this dataset — it is NOT
+    split by Primary/Upper Primary/Secondary level (no such breakdown exists
+    anywhere in the ACiS or attendance assets) and uses "left school,
+    not re-admitted" rather than a literal 30-day-absence test, so it is
+    labelled with its real, already-established catalog name "Dropout rate"
+    rather than copying the requested level-wise wording verbatim. Legend
+    splits "Dropped out, not re-enrolled" / "Re-enrolled / continuing".
+  - Both ratios and their N/D counts are read directly off `kv.scopeValues()`
+    (`acisPd`, `acisPdBase`, `acisDropOut`, `acisEnrolI12` are summed raw
+    fields, not catalog tiles) rather than recomputed, so the percentages
+    shown always match the figures `KpiValuesService` already computes
+    elsewhere. Card status pill now follows `ac_pdp`'s band.
+  - Build-clean; verified live (state scope): Potential dropouts 0.72%
+    (29,075 of 40,37,000ish enrolled), Dropout rate 2.2% (2,46,152 of
+    1,11,06,881 enrolment I–XII).
+
 - **At a glance: "Key insights by pillar" replaces the old Key insights grid (19-Nov-2026).**
   Request: "replace with this — make this setup in overview page key insights", with reference
   screenshots of a 5-card pillar grid (Access and Equity / Safe and Secure Schools / Learning
