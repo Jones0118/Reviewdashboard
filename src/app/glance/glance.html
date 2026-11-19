@@ -54,15 +54,7 @@
       </span>
     </div>
     <div class="b1r">
-      <span class="yr">Year <span class="inp">{{ rv.currentYear() }}</span></span>
-      <span class="role"><i class="fa-regular fa-user"></i> {{ auth.user() || 'Signed in' }}</span>
-    </div>
-  </header>
-  <!-- viewing bar: scope + filters on one line, all dropdowns -->
-  <div class="gl-bar2" role="region" aria-label="Scope and filters">
-    <div class="row">
-      <span class="vas" id="gl-viewing-lbl">Viewing</span>
-      <nav class="crumbs" aria-labelledby="gl-viewing-lbl">
+      <nav class="crumbs" aria-label="Scope">
         <button type="button" (click)="ds.goToState()" [class.active]="ds.level() === 'state'"
                 [attr.aria-current]="ds.level() === 'state' ? 'page' : null"><i class="fa-solid fa-house"></i> Tamil Nadu</button>
         @if (ds.selectedDistrict()) {
@@ -75,6 +67,33 @@
           <span class="active static" aria-current="page">{{ ds.titleCase(ds.selectedBlock()!) }}</span>
         }
       </nav>
+      <span class="yr">Year <span class="inp">{{ rv.currentYear() }}</span></span>
+      <span class="role-wrap">
+        <button type="button" class="role" [class.on]="roleOpen()" (click)="toggleRole()"
+                [attr.aria-expanded]="roleOpen()" aria-haspopup="listbox" title="Switch displayed role">
+          <i class="fa-regular fa-user"></i> {{ auth.role().label }}
+          <span class="role-scope">{{ auth.role().scope }}</span>
+          <i class="fa-solid fa-chevron-down chev"></i>
+        </button>
+        @if (roleOpen()) {
+          <div class="role-pop" role="listbox" aria-label="Switch displayed role">
+            @for (r of auth.roles; track r.id) {
+              <button type="button" class="rp-item" [class.sel]="auth.role().id === r.id" role="option"
+                      [attr.aria-selected]="auth.role().id === r.id" (click)="selectRole(r.id)">
+                <span class="rp-label">{{ r.label }}</span>
+                <span class="rp-scope">{{ r.scope }}</span>
+                @if (auth.role().id === r.id) { <i class="fa-solid fa-check"></i> }
+              </button>
+            }
+          </div>
+        }
+      </span>
+    </div>
+  </header>
+  <!-- main filter area: district / block / management / category dropdowns -->
+  <div class="gl-bar2" role="region" aria-label="Scope and filters">
+    <div class="row">
+      <span class="vas">Filter</span>
       <div class="sel">
         <p-select [options]="districtOptions()" [ngModel]="ds.selectedDistrict()" (ngModelChange)="onDistrictChange($event)"
                   optionLabel="label" optionValue="value" placeholder="District: all" [showClear]="true"
@@ -112,7 +131,7 @@
     </button>
     <div id="gl-nav-items">
     <button type="button" class="gl-sni" [class.on]="glanceView() === 'overview'" (click)="setGlanceView('overview')" title="Overview"
-            [attr.aria-current]="glanceView() === 'overview' ? 'page' : null">
+            data-tip="Overview" [attr.aria-current]="glanceView() === 'overview' ? 'page' : null">
       <span class="ib"><i class="fa-solid fa-house"></i></span>
       <span class="t"><b>Overview</b><span>{{ ds.scopeLabel() }}</span></span>
     </button>
@@ -120,6 +139,7 @@
     <!-- menu (group) → submenu (items); a group stays open while one of its items is the page -->
     @for (g of glanceMenu(); track g.id) {
       <button type="button" class="gl-sni gl-grp" [class.open]="isGroupOpen(g.id)" (click)="toggleGroup(g.id)"
+              [attr.data-tip]="g.group"
               [attr.aria-expanded]="isGroupOpen(g.id)" [attr.aria-controls]="'gl-sub-' + g.id"
               [title]="g.group + (g.bad ? ' · ' + g.bad + ' KPI(s) off track' : '')">
         <span class="ib" [class.flag]="g.bad > 0"><i [class]="g.icon"></i></span>
@@ -175,62 +195,66 @@
     </div>
 
     <!-- key insights by pillar -->
-    <div class="gl-sechead"><h2>Key insights by pillar</h2>
+    <div class="gl-sechead"><h2>Key Insights by Pillar</h2>
       <span class="hint">Five pillars · {{ ds.scopeLabel() }}</span></div>
     <div class="gl-pgrid">
-      @for (c of glancePillarInsights(); track c.id) {
-        <section class="gl-c gl-pc">
-          <button type="button" class="pc-head" (click)="c.openId && setGlanceView(c.openId)" [attr.aria-label]="'Open ' + c.title + ' pillar'">
-            <span class="pc-head-l">
-              <span class="ib" [style.background]="c.tileBg" [style.color]="c.tileFg"><i [class]="c.icon"></i></span>
-              <b>{{ c.title }}</b>
-            </span>
-            <span class="pc-head-r"><span class="pc-head-r-txt">Open pillar</span> <i class="fa-solid fa-arrow-right"></i></span>
-          </button>
-          @if (c.metrics.length) {
-            @for (m of c.metrics.slice(0, 2); track m.label) {
-              <div class="pc-metric">
-                <span class="pc-lbl">{{ m.label }}</span>
-                <div class="pc-big">{{ m.big }}@if (m.suffix) { <em>{{ m.suffix }}</em> }</div>
-                <div class="pc-bar">
-                  @for (s of m.segs; track s.label) { <i [style.width.%]="s.pct" [style.background]="s.color"></i> }
-                </div>
-                <div class="pc-legend">
-                  @for (s of m.segs; track s.label) {
-                    <span><i class="dot" [style.background]="s.color"></i>{{ s.label }} <b>{{ s.value }}</b></span>
-                  }
-                </div>
-              </div>
-            }
-            @if (c.metrics.length > 2) {
-              @if (pillarExpanded().has(c.id)) {
-                <div class="pc-extra" [id]="'pc-extra-' + c.id">
-                  @for (m of c.metrics.slice(2); track m.label) {
-                    <div class="pc-metric">
-                      <span class="pc-lbl">{{ m.label }}</span>
-                      <div class="pc-big">{{ m.big }}@if (m.suffix) { <em>{{ m.suffix }}</em> }</div>
-                      <div class="pc-bar">
-                        @for (s of m.segs; track s.label) { <i [style.width.%]="s.pct" [style.background]="s.color"></i> }
-                      </div>
-                      <div class="pc-legend">
-                        @for (s of m.segs; track s.label) {
-                          <span><i class="dot" [style.background]="s.color"></i>{{ s.label }} <b>{{ s.value }}</b></span>
-                        }
-                      </div>
+      @for (col of pillarColumns(); track $index) {
+        <div class="pcol">
+          @for (c of col; track c.id) {
+            <section class="gl-c gl-pc" [style.--pc-accent]="c.tileFg">
+              <button type="button" class="pc-head" (click)="c.openId && setGlanceView(c.openId)" [attr.aria-label]="'Open ' + c.title + ' pillar'">
+                <span class="pc-head-l">
+                  <span class="ib" [style.background]="c.tileBg" [style.color]="c.tileFg"><i [class]="c.icon"></i></span>
+                  <b>{{ c.title }}</b>
+                </span>
+                <span class="pc-head-r"><span class="pc-head-r-txt">Open pillar</span> <i class="fa-solid fa-arrow-right"></i></span>
+              </button>
+              @if (c.metrics.length) {
+                @for (m of c.metrics.slice(0, 2); track m.label) {
+                  <div class="pc-metric">
+                    <span class="pc-lbl">{{ m.label }}</span>
+                    <div class="pc-big">{{ m.big }}@if (m.suffix) { <em>{{ m.suffix }}</em> }</div>
+                    <div class="pc-bar">
+                      @for (s of m.segs; track s.label) { <i [style.width.%]="s.pct" [style.background]="s.color"></i> }
+                    </div>
+                    <div class="pc-legend">
+                      @for (s of m.segs; track s.label) {
+                        <span><i class="dot" [style.background]="s.color"></i>{{ s.label }} <b>{{ s.value }}</b></span>
+                      }
+                    </div>
+                  </div>
+                }
+                @if (c.metrics.length > 2) {
+                  @if (pillarExpanded().has(c.id)) {
+                    <div class="pc-extra" [id]="'pc-extra-' + c.id">
+                      @for (m of c.metrics.slice(2); track m.label) {
+                        <div class="pc-metric">
+                          <span class="pc-lbl">{{ m.label }}</span>
+                          <div class="pc-big">{{ m.big }}@if (m.suffix) { <em>{{ m.suffix }}</em> }</div>
+                          <div class="pc-bar">
+                            @for (s of m.segs; track s.label) { <i [style.width.%]="s.pct" [style.background]="s.color"></i> }
+                          </div>
+                          <div class="pc-legend">
+                            @for (s of m.segs; track s.label) {
+                              <span><i class="dot" [style.background]="s.color"></i>{{ s.label }} <b>{{ s.value }}</b></span>
+                            }
+                          </div>
+                        </div>
+                      }
                     </div>
                   }
-                </div>
+                  <button type="button" class="pc-expander" (click)="togglePillar(c.id)"
+                          [attr.aria-expanded]="pillarExpanded().has(c.id)" [attr.aria-controls]="'pc-extra-' + c.id">
+                    {{ pillarExpanded().has(c.id) ? 'Show fewer metrics' : 'Show more metrics' }}
+                    <i class="fa-solid fa-chevron-down" [class.up]="pillarExpanded().has(c.id)"></i>
+                  </button>
+                }
+              } @else {
+                <div class="pc-empty">No KPI data source exists yet for this pillar in the dashboard.</div>
               }
-              <button type="button" class="pc-expander" (click)="togglePillar(c.id)"
-                      [attr.aria-expanded]="pillarExpanded().has(c.id)" [attr.aria-controls]="'pc-extra-' + c.id">
-                {{ pillarExpanded().has(c.id) ? 'Show fewer metrics' : 'Show more metrics' }}
-                <i class="fa-solid fa-chevron-down" [class.up]="pillarExpanded().has(c.id)"></i>
-              </button>
-            }
-          } @else {
-            <div class="pc-empty">No KPI data source exists yet for this pillar in the dashboard.</div>
+            </section>
           }
-        </section>
+        </div>
       }
     </div>
 
@@ -238,7 +262,7 @@
     <div class="gl-stack">
       <!-- needs attention -->
       <section class="gl-c" id="gl-attention">
-        <div class="ct"><b class="lg">Needs your attention</b>
+        <div class="ct"><b class="lg">Need Your Attention</b>
           <span class="s">KPIs outside their expected range at this scope, with the component that owns them</span></div>
         <div class="gl-acols">
           <div class="acol crit">

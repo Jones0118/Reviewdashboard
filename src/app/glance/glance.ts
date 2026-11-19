@@ -55,6 +55,11 @@ export class GlancePage implements OnInit {
     if (await this.auth.signIn(this.loginUser(), this.loginPass())) this.loginPass.set('');
   }
 
+  // ---- display-only role picker (top bar) ----
+  readonly roleOpen = signal(false);
+  toggleRole(): void { this.roleOpen.update((v) => !v); }
+  selectRole(id: string): void { this.auth.setRole(id); this.roleOpen.set(false); }
+
   async ngOnInit(): Promise<void> {
     // Same datasets the dashboard loads; every load() is idempotent, so landing
     // here directly or after the main page costs nothing extra.
@@ -72,21 +77,25 @@ export class GlancePage implements OnInit {
   readonly ready = computed(() => this.ds.loaded() && this.rv.loaded());
 
   // ---- sticky top (header + viewing/filter bar): expose its height so the
-  // side nav can stick just below it whatever the bar wraps to ----
+  // side nav can stick just below it whatever the bar wraps to; also tracks
+  // the main content's width for the pillar-grid masonry column count ----
   private readonly el = inject<ElementRef<HTMLElement>>(ElementRef);
+  readonly mainWidth = signal(0);
   constructor() {
     afterRenderEffect(() => {
       // re-measure after any render that can change the bar's height
       this.auth.isAuthenticated(); this.ready(); this.ds.level(); this.filterActive();
-      this.measureTop();
+      this.measureLayout();
     });
     afterNextRender(() => {
-      new ResizeObserver(() => this.measureTop()).observe(this.el.nativeElement);
+      new ResizeObserver(() => this.measureLayout()).observe(this.el.nativeElement);
     });
   }
-  private measureTop(): void {
+  private measureLayout(): void {
     const top = this.el.nativeElement.querySelector<HTMLElement>('.gl-top');
     this.el.nativeElement.style.setProperty('--gl-top-h', `${top?.offsetHeight ?? 0}px`);
+    const main = this.el.nativeElement.querySelector<HTMLElement>('.gl-main');
+    this.mainWidth.set(main?.clientWidth ?? 0);
   }
 
   // ---- filters (V3 chip filters), applied through the shared DataService ----
@@ -343,8 +352,16 @@ export class GlancePage implements OnInit {
   /** Expanded menu groups (submenus). The group holding the open item is kept open. */
   readonly openGroups = signal<Set<string>>(new Set());
   toggleGroup(id: string): void {
-    // in the icon rail a group has no visible submenu, so opening one expands the nav
-    if (this.navCollapsed()) { this.navCollapsed.set(false); this.openGroups.update((s) => new Set([...s, id])); return; }
+    // in the icon rail, clicking a pillar icon jumps straight into that
+    // pillar's domain (its first built item, or its first item's "not
+    // built yet" stub) — same as a pillar card's "Open pillar" — rather
+    // than re-expanding the whole sidebar.
+    if (this.navCollapsed()) {
+      const g = this.glanceMenu().find((x) => x.id === id);
+      const target = g?.items.find((i) => i.built)?.id ?? g?.items[0]?.id;
+      if (target) this.setGlanceView(target);
+      return;
+    }
     this.openGroups.update((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   }
   isGroupOpen(id: string): boolean {
@@ -688,6 +705,28 @@ export class GlancePage implements OnInit {
       });
     }
 
+    return out;
+  });
+
+  /**
+   * Masonry columns for the pillar grid: distributes `glancePillarInsights()`
+   * round-robin across N columns (N tracks the old CSS Grid's
+   * `repeat(auto-fit, minmax(300px,1fr))` breakpoint math against the main
+   * content's measured width) so each column packs tightly on its own —
+   * expanding one card only grows its own column, never pushes a shorter
+   * column's cards down with it.
+   */
+  readonly pillarCols = computed(() => {
+    const w = this.mainWidth();
+    const gap = 16, minCol = 300;
+    if (!w) return 3;
+    return Math.max(1, Math.floor((w + gap) / (minCol + gap)));
+  });
+  readonly pillarColumns = computed(() => {
+    const cards = this.glancePillarInsights();
+    const cols = Math.min(this.pillarCols(), cards.length || 1);
+    const out: (typeof cards)[] = Array.from({ length: cols }, () => []);
+    cards.forEach((c, i) => out[i % cols].push(c));
     return out;
   });
 

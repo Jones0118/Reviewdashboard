@@ -699,6 +699,150 @@ with a Total row and Excel/CSV/PDF (`exportScholar` in app.ts).
 
 ## 10. Feature changelog (what was built, newest first)
 
+- **At a glance: two section label text changes (19-Nov-2026).** STEERING:
+  "Key insights by pillar" → "Key Insights by Pillar"; "Needs your
+  attention" → "Need Your Attention". Pure text/casing changes in
+  `glance.html`; no behaviour, data, or other copy touched.
+
+- **At a glance: sidebar icon tooltips (19-Nov-2026).** Each collapsed-rail
+  icon (Overview + the 5 pillar group icons) now shows a custom tooltip on
+  hover naming its domain — `data-tip="Overview"` / `data-tip="{{ g.group
+  }}"` attributes feed a CSS `::after`/`::before` tooltip (dark rounded
+  label + pointer arrow, positioned to the right of the icon,
+  `pointer-events: none` so it never blocks the click) shown only while
+  `.nav-collapsed` is active (the expanded sidebar already shows the full
+  text label, so no tooltip is needed there). Kept the existing native
+  `title` attributes as a fallback. Verified live: hovering the collapsed
+  "Learning Outcomes First" icon shows a tooltip reading "3. Learning
+  Outcomes First", confirmed both via `getComputedStyle(el, '::after')`
+  returning that exact text and via screenshot.
+
+- **At a glance: collapsed sidebar icon now navigates instead of
+  re-expanding (19-Nov-2026).** `toggleGroup(id)` previously, when the
+  sidebar was in its collapsed icon-rail state, re-expanded the whole
+  sidebar and marked the clicked group open — the user pointed out this was
+  wrong: clicking a pillar icon in the rail should jump straight into that
+  pillar's domain, the same as a pillar card's "Open pillar" action, and
+  leave the sidebar collapsed. Fixed: when collapsed, `toggleGroup` now
+  looks up the group's first built item (or its first item's "not built
+  yet" stub) via `glanceMenu()` and calls `setGlanceView()` directly,
+  returning without touching `navCollapsed`. Verified live: clicking the
+  collapsed "Safe and Secure Schools" icon lands on "Physical Infra" with
+  breadcrumb "… › 2. Safe and Secure Schools › Physical Infra" and the
+  sidebar stays collapsed (`nav-collapsed` class still present).
+
+- **At a glance: sidebar hover colour set to a specific blue, pillar cards
+  made equal height (19-Nov-2026).** `.gl-sni:hover` changed from the
+  orange tint of the previous turn to `rgba(71,121,213,.55)` (the requested
+  `#4779D5`) — applied at 55% opacity rather than solid, since `#4779D5` is
+  almost identical to the existing `.on` active-item fill (`#4A7FDD`); a
+  solid hover would have been nearly indistinguishable from "this is the
+  active item." The reduced opacity keeps hover clearly visible against the
+  sidebar's dark blue gradient while staying visibly lighter/less saturated
+  than the solid active fill, so the two states stay distinguishable.
+  Separately, all five pillar cards (`.gl-pc`) gained `min-height: 420px`
+  (measured as the tallest card in its default two-metric state, Learning
+  Outcomes First, which is taller than the others by the height of its
+  "Show more metrics" control) so every card lines up to the same height by
+  default — including the empty "Social and Emotional Wellbeing" card,
+  which now shows its "no data" message with matching blank space below
+  rather than looking visibly shorter than its neighbours. `min-height`
+  only raises the floor, so the masonry columns built in the previous turn
+  still work exactly as before when a card expands: verified live that all
+  5 cards measure exactly 420px by default, and after expanding Learning
+  Outcomes First to 5 metrics, columns 1/2/3 measured 856/856/786px —
+  columns 1 and 2 (two 420px cards + gap each) stayed independent of column
+  3's new height, so no dead gap reappeared.
+
+- **At a glance: pillar card border takes its own accent colour on hover
+  (19-Nov-2026).** Per a reference example (a card whose border turns
+  orange to match its orange icon tile on hover), each `.gl-pc` now carries
+  its accent colour as a CSS variable (`[style.--pc-accent]="c.tileFg"`)
+  and `.gl-pc:hover { border-color: var(--pc-accent, var(--pri-soft-bd)); }`
+  plus a subtle shadow lift, with a 150ms transition. Verified live via a
+  real mouse-move event (not a synthetic DOM event, to trigger genuine CSS
+  `:hover`): hovering "Safe and Secure Schools" changed its computed
+  `border-color` to `rgb(184,90,34)` — exactly `#B85A22`, that card's own
+  icon accent — confirmed by screenshot alongside the existing "Open pillar"
+  hover-reveal still working correctly together.
+
+- **At a glance: pillar grid converted to masonry columns; sidebar hover
+  colour changed to light orange (19-Nov-2026).**
+  - **Masonry columns, as discussed/recommended** (see prior session note on
+    the CSS-Grid-row-height gap problem): `.gl-pgrid` is no longer
+    `display: grid` — it's `display: flex` with each column its own
+    `flex-direction: column` `.pcol` div, and `glance.ts` gained
+    `mainWidth` (tracked by the existing top-bar `ResizeObserver`, now
+    renamed `measureLayout()`, also reading `.gl-main`'s `clientWidth`),
+    `pillarCols` (replicates the old CSS Grid's `repeat(auto-fit,
+    minmax(300px,1fr))` breakpoint arithmetic against that measured width,
+    so the same responsive column count is preserved) and
+    `pillarColumns` (round-robin distributes `glancePillarInsights()`'s 5
+    cards across that many columns — with 3 columns this lands identically
+    to the old visual layout: col 1 = Access and Equity + Social and
+    Emotional Wellbeing, col 2 = Safe and Secure Schools + Alumni and
+    Community Mentorship, col 3 = Learning Outcomes First alone). Because
+    each column is now an independent flex box instead of a shared grid
+    row, expanding Learning Outcomes First to 5 metrics no longer leaves a
+    dead gap under the shorter cards in columns 1 and 2 — they sit flush
+    under their own column-mate regardless of column 3's height. Verified
+    live: after expanding, the three columns measured 525px / 692px / 786px
+    — three different heights, each sized only by its own content — and a
+    screenshot confirms Wellbeing/Alumni sit immediately under Access and
+    Equity/Safe and Secure Schools with no gap.
+  - **Sidebar hover colour**: `.gl-sni:hover` (covers the Overview button,
+    every pillar-group button, and every submenu item, since they all share
+    this base class) changed from a neutral white tint
+    (`rgba(255,255,255,.10)`) to a light orange tint
+    (`rgba(251,146,60,.28)`, compiled to `#fb923c47`) — confirmed in the
+    built output.
+
+- **At a glance: sidebar nav row spacing reverted (19-Nov-2026).** The
+  `#gl-nav-items { gap: 10px }` rule added in the previous turn was removed
+  entirely on request ("go back to original menu") — the sidebar's nav rows
+  (Overview, "Menu" label, each pillar-group button, submenus) are back to
+  their original spacing with no added gap, in both the expanded sidebar and
+  the collapsed icon rail. Confirmed via grep that no trace of `#gl-nav-items`
+  remains in `glance.scss`.
+
+- **At a glance: sidebar nav row spacing increased (19-Nov-2026).** Explored
+  stretching the sidebar box to match the main content's height
+  (`align-items: stretch` on `.gl-wrap`, dropping `.gl-side`'s `max-height`/
+  `overflow-y`) per an initial ask to "cover the screen" — verified it worked
+  (sidebar height matched main's 1854px exactly) but the user then clarified
+  they wanted the smaller fix instead (option "2c": keep the box's natural
+  height, just add breathing room between the existing nav rows) and asked
+  to cancel the stretch change. Reverted `.gl-wrap`/`.gl-side` back to their
+  original `align-items: start` / sticky-with-viewport-capped-`max-height`
+  behaviour exactly, then added `#gl-nav-items { display: flex; flex-direction:
+  column; gap: 10px; }` so the Overview button, each pillar-group button and
+  the "Menu" label all sit with a visible 10px gap instead of touching —
+  applies in both the expanded sidebar and the collapsed icon rail (same
+  container, same effect). Verified live: expanded/collapsed sidebar heights
+  are back to their own natural size (574px / 464px) rather than matching
+  main content's 1854px / 1833px, and a screenshot confirms the icon rail now
+  has clearly spaced-out rows.
+
+- **At a glance: top-bar layout — breadcrumb moved before Year, role
+  dropdown, "Filter" label (19-Nov-2026).** After several rounds of live
+  steering settled on: the scope breadcrumb (Tamil Nadu › District › Block)
+  now lives in the top header bar (`.b1r`), ordered before "Year" and the
+  user badge; the filter row below (`.gl-bar2`, District/Block/Management/
+  Category selects) gained a plain "Filter" label at its start. Added a
+  cosmetic, display-only role picker next to the user badge: `AuthService`
+  gained `DASHBOARD_ROLES` (Secretary/State, District Collector/District,
+  CEO/District, DEO (Elementary)/Educational district, DEO (Secondary)/
+  Educational district, BEO/Block, School/GHSS Melur) and a `role` signal +
+  `setRole(id)`; a dropdown button shows the current role + its scope label
+  and opens a list of all seven to switch — picking one only changes the
+  displayed badge, never any data, route, or scope filter. Per explicit
+  request this stayed scoped to the `/glance` page only — an earlier pass
+  had also added the same dropdown to the main dashboard's top bar
+  (`app.html`/`app.ts`/`app.scss`); that was fully reverted (confirmed via
+  `git diff --stat` showing zero changes to those three files) once the
+  "only at a glance" instruction arrived. `AuthService`'s role list/signal
+  stays (harmless, unused by the main dashboard's template).
+
 - **At a glance: reverted the metric-heading highlight (19-Nov-2026).** The
   left-border tag treatment added to `.pc-lbl` in the previous turn (14px
   600-weight ink text, `var(--pri-soft)` background, 3px `var(--pri-dk)`

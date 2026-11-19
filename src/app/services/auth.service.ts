@@ -4,6 +4,24 @@ import { AUTH_USER, AUTH_SALT, AUTH_HASH } from '../auth.generated';
 const SESSION_KEY = 'emis.session';
 
 /**
+ * Display-only role picker for the signed-in-user badge (top right of both
+ * the main dashboard and the "At a glance" page). Purely cosmetic: picking a
+ * role changes the name/scope shown next to the user icon, nothing else —
+ * it does not restrict or re-scope any data. There is only one real login
+ * (see AuthService doc comment); this does not add role-based access control.
+ */
+export interface DashboardRole { id: string; label: string; scope: string; }
+export const DASHBOARD_ROLES: DashboardRole[] = [
+  { id: 'secretary', label: 'Secretary', scope: 'State' },
+  { id: 'collector', label: 'District Collector', scope: 'District' },
+  { id: 'ceo', label: 'CEO', scope: 'District' },
+  { id: 'deo-elem', label: 'DEO (Elementary)', scope: 'Educational district' },
+  { id: 'deo-sec', label: 'DEO (Secondary)', scope: 'Educational district' },
+  { id: 'beo', label: 'BEO', scope: 'Block' },
+  { id: 'school', label: 'School', scope: 'GHSS Melur' },
+];
+
+/**
  * Sign-in gate for the dashboard.
  *
  * The credentials come from DASHBOARD_USER / DASHBOARD_PASSWORD at build time
@@ -24,6 +42,15 @@ export class AuthService {
   readonly error = this._error.asReadonly();
   readonly busy = this._busy.asReadonly();
   readonly user = computed(() => (this._authed() ? AUTH_USER : ''));
+
+  // ---- display-only role badge (see DASHBOARD_ROLES doc comment above) ----
+  readonly roles = DASHBOARD_ROLES;
+  private readonly _role = signal<DashboardRole>(DASHBOARD_ROLES[0]);
+  readonly role = this._role.asReadonly();
+  setRole(id: string): void {
+    const r = DASHBOARD_ROLES.find((x) => x.id === id);
+    if (r) this._role.set(r);
+  }
 
   constructor() {
     // restore a session from this tab if one is present
@@ -85,6 +112,7 @@ export class AuthService {
   signOut(): void {
     this._authed.set(false);
     this._error.set('');
+    this._role.set(DASHBOARD_ROLES[0]);
     try {
       sessionStorage.removeItem(SESSION_KEY);
     } catch {
