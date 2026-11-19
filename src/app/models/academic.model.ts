@@ -41,6 +41,12 @@ export interface ExamClassStat {
   updated: number;
   /** Subject averages within this sitting, for head-to-head comparison. */
   subjects: { name: string; avg: number; pass: number }[];
+  /**
+   * True when the sitting is not in the export and was derived (board mode:
+   * Quarterly / Half Yearly for Class X & XII, stepped from the Annual sitting
+   * by the scope's own exam-to-exam gap). Shown with an 'Assumed data' badge.
+   */
+  assumed?: boolean;
 }
 
 /** Higher-secondary stream summary. */

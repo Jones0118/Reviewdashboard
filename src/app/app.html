@@ -3962,20 +3962,45 @@
           </select>
         </label>
       }
+      @if (isBoard() && activeSub() !== 'trend') {
+        <label class="tc-field">
+          <span>Exam Type</span>
+          <p-multiSelect [options]="ac.boardExamOptions" [ngModel]="ac.boardExams()" (ngModelChange)="setAcBoardExams($event)"
+                         optionLabel="label" optionValue="value" placeholder="All exams"
+                         display="chip" [maxSelectedLabels]="3" styleClass="ms" />
+        </label>
+      }
+      @if (isBoard() && activeSub() !== 'numbers' && activeSub() !== 'trend') {
+        <label class="tc-field">
+          <span>Class</span>
+          <select class="metric-select" [ngModel]="ac.boardClass()" (ngModelChange)="setAcBoardClass($event)">
+            @for (c of ac.boardClassOptions; track c.value) { <option [value]="c.value">{{ c.label }}</option> }
+          </select>
+        </label>
+      }
       @if (activeSub() === 'numbers') {
         <div class="tc-rank">
           <button [class.on]="ac.subjectSet()==='core'" (click)="setAcSubjectSet('core')">
-            <i class="fa-solid fa-book"></i> Class 6-10 (5 subjects)
+            <i class="fa-solid fa-book"></i> {{ isBoard() ? 'Class X (5 subjects)' : 'Class 6-10 (5 subjects)' }}
           </button>
           <button [class.on]="ac.subjectSet()==='hs'" (click)="setAcSubjectSet('hs')">
-            <i class="fa-solid fa-flask"></i> Class 11-12 (streams)
+            <i class="fa-solid fa-flask"></i> {{ isBoard() ? 'Class XII (streams)' : 'Class 11-12 (streams)' }}
           </button>
         </div>
       }
-      <span class="ac-note"><i class="fa-solid fa-circle-info"></i>
-        <b>Scope:</b> Government, Partially Aided &amp; Fully Aided schools only.
-        Class 10 &amp; 12 = board exam (Annual only); classes 6-10 sit 5 core subjects, 11-12 are stream based.
-      </span>
+      @if (isBoard()) {
+        <span class="ac-note"><i class="fa-solid fa-circle-info"></i>
+          <b>Scope:</b> Class X &amp; XII (board classes) in Government, Partially Aided &amp; Fully Aided schools.
+          The export carries the <b>Annual</b> sitting only for these classes; Quarterly / Half Yearly figures are derived from Annual
+          by each scope's own exam-to-exam gap and carry an Assumed data badge until exported.
+          @if (ac.boardAssumed()) { <p-tag value="Assumed data" severity="warn" styleClass="ml-2" /> }
+        </span>
+      } @else {
+        <span class="ac-note"><i class="fa-solid fa-circle-info"></i>
+          <b>Scope:</b> Government, Partially Aided &amp; Fully Aided schools only.
+          Class 10 &amp; 12 = board exam (Annual only); classes 6-10 sit 5 core subjects, 11-12 are stream based.
+        </span>
+      }
     </div>
 
     @if (ds.canGoBack()) {
@@ -3989,11 +4014,16 @@
     <!-- ---------- ACADEMIC: NUMBERS ---------- -->
     @if (activeSub() === 'numbers') {
       <div class="view-title">
-        <i class="fa-solid fa-graduation-cap"></i> Academic Scores — {{ acScopeLabel() }}
-        <span class="yr">{{ ac.activeYear() }}</span>
+        <i class="fa-solid fa-graduation-cap"></i> {{ isBoard() ? 'Academic Scores, Class X & XII' : 'Academic Scores' }} — {{ acScopeLabel() }}
+        <span class="yr">{{ ac.activeYear() }}@if (isBoard()) { &middot; {{ ac.boardExamLabel() }}}</span>
+        @if (ac.boardAssumed()) { <p-tag value="Assumed data" severity="warn" styleClass="ml-2" /> }
       </div>
 
-      @if (!ac.schoolHasData()) {
+      @if (isBoard() && !ac.current()) {
+        <div class="no-data"><i class="fa-solid fa-circle-exclamation"></i>
+          No board sitting for {{ ac.boardExamLabel() }} at this scope in the export.
+        </div>
+      } @else if (!ac.schoolHasData()) {
         <div class="no-data"><i class="fa-solid fa-circle-exclamation"></i>
           This school has no graded exam records (primary schools are excluded from academic scoring).
         </div>
@@ -4026,7 +4056,11 @@
         </div>
         <div class="card">
           <div class="card-title"><i class="fa-solid fa-layer-group"></i> Mark Band Distribution — {{ ac.subjectSetLabel() }}</div>
-          <div echarts [options]="acBandOpt()" (chartInit)="registerChart('acBand', $event)" class="chart tall-chart"></div>
+          @if (isBoard()) {
+            <div class="no-data"><i class="fa-solid fa-circle-info"></i> Mark bands (below 35 / 35-60 / 61-80 / above 80) are not in the board-exam export; only subject averages and pass % are.</div>
+          } @else {
+            <div echarts [options]="acBandOpt()" (chartInit)="registerChart('acBand', $event)" class="chart tall-chart"></div>
+          }
         </div>
       </div>
 
@@ -4070,8 +4104,10 @@
           <ng-template pTemplate="header">
             <tr>
               <th>Subject</th><th class="num">Average Mark</th><th class="num">Pass %</th>
-              <th class="num">Below 35</th><th class="num">35-60</th>
-              <th class="num">61-80</th><th class="num">Above 80</th><th class="num">Absentees</th>
+              @if (!isBoard()) {
+                <th class="num">Below 35</th><th class="num">35-60</th>
+                <th class="num">61-80</th><th class="num">Above 80</th><th class="num">Absentees</th>
+              }
             </tr>
           </ng-template>
           <ng-template pTemplate="body" let-s>
@@ -4079,11 +4115,13 @@
               <td class="strong">{{ s.name }}</td>
               <td class="num" [class.bad]="s.avg < 50" [class.good]="s.avg >= 60">{{ s.avg }}</td>
               <td class="num" [class.bad]="s.pass < 70">{{ s.pass }}%</td>
-              <td class="num bad">{{ fmt(s.below35) }}</td>
-              <td class="num">{{ fmt(s.b35_60) }}</td>
-              <td class="num">{{ fmt(s.b61_80) }}</td>
-              <td class="num good">{{ fmt(s.above80) }}</td>
-              <td class="num">{{ fmt(s.absent) }}</td>
+              @if (!isBoard()) {
+                <td class="num bad">{{ fmt(s.below35) }}</td>
+                <td class="num">{{ fmt(s.b35_60) }}</td>
+                <td class="num">{{ fmt(s.b61_80) }}</td>
+                <td class="num good">{{ fmt(s.above80) }}</td>
+                <td class="num">{{ fmt(s.absent) }}</td>
+              }
             </tr>
           </ng-template>
         </p-table>
@@ -5764,6 +5802,790 @@
     </div>
     }
   }
+
+    <!-- ================= BOARD EXAM (Class X / XII performance reports) ================= -->
+    <!-- Numbers / Trend / Comparison, scope = shared breadcrumb (State -> District -> Block -> School). -->
+    @if (isBoardExam()) {
+      @if (!be.loaded()) {
+        <div class="ac-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading board exam reports…</div>
+      } @else {
+      <div class="trend-controls be-bar">
+        <div class="tc-rank" role="group" aria-label="Class">
+          <button [class.on]="be.cls() === 10" [attr.aria-pressed]="be.cls() === 10" (click)="be.setClass(10)"><i class="fa-solid fa-book"></i> Class X</button>
+          <button [class.on]="be.cls() === 12" [attr.aria-pressed]="be.cls() === 12" (click)="be.setClass(12)"><i class="fa-solid fa-flask"></i> Class XII</button>
+        </div>
+        <label class="tc-field"><span>Management</span>
+          <select class="metric-select" [ngModel]="be.fMgmt()" (ngModelChange)="be.fMgmt.set($event)">
+            @for (m of be.mgmtFilterOptions(); track m) { <option [value]="m">{{ m }}</option> }
+          </select></label>
+        <label class="tc-field"><span>Category type</span>
+          <select class="metric-select" [ngModel]="be.fCtype()" (ngModelChange)="be.fCtype.set($event)"
+                  [disabled]="be.ctypeFilterOptions().length < 2" [title]="be.ctypeFilterOptions().length < 2 ? 'School categories are available once you open a district' : ''">
+            @for (c of be.ctypeFilterOptions(); track c) { <option [value]="c">{{ c }}</option> }
+          </select></label>
+        <label class="tc-field"><span>Academic year</span>
+          <select class="metric-select" [ngModel]="be.fYear()" (ngModelChange)="be.fYear.set($event)">
+            @for (y of be.yearFilterOptions(); track y.value) { <option [value]="y.value">{{ y.label }}</option> }
+          </select></label>
+        <button class="exp-btn" [disabled]="!be.hasFilters()" (click)="be.resetFilters()"><i class="fa-solid fa-rotate-left"></i> Reset</button>
+        @if (activeSub() === 'numbers' && be.level() !== 'school') {
+          <div class="tc-rank" role="group" aria-label="Chart ranking">
+            <button [class.on]="be.unitRank() === 'top'" [disabled]="be.unitShowAll()" (click)="be.unitRank.set('top')"><i class="fa-solid fa-arrow-trend-up"></i> Top</button>
+            <button [class.on]="be.unitRank() === 'bottom'" [disabled]="be.unitShowAll()" (click)="be.unitRank.set('bottom')"><i class="fa-solid fa-arrow-trend-down"></i> Bottom</button>
+          </div>
+          <label class="tc-field"><span>Show in charts</span>
+            <select class="metric-select" [ngModel]="be.unitCountValue()" (ngModelChange)="be.setUnitCount($event)">
+              @for (n of be.unitCountOptions; track n) { <option [value]="n">{{ n === 'all' ? 'All ' + (be.unitLabel() | lowercase) + 's' : n }}</option> }
+            </select></label>
+        }
+        @if (activeSub() === 'trend') {
+          <label class="tc-field"><span>From</span>
+            <select class="metric-select" [ngModel]="be.trendFromYear()" (ngModelChange)="be.setTrendFrom($event)">
+              @for (y of be.trendFromOptions(); track y) { <option [value]="y">{{ y }}</option> }
+            </select></label>
+          <label class="tc-field"><span>To</span>
+            <select class="metric-select" [ngModel]="be.trendToYear()" (ngModelChange)="be.setTrendTo($event)">
+              @for (y of be.trendToOptions(); track y) { <option [value]="y">{{ y }}</option> }
+            </select></label>
+          @if (be.trendHasWindow()) { <button class="exp-btn" (click)="be.resetTrendYears()"><i class="fa-solid fa-rotate-left"></i> All years</button> }
+          <div class="tc-rank" role="group" aria-label="Metric">
+            <button [class.on]="be.trendMetric() === 'pass'" (click)="be.trendMetric.set('pass')">Pass %</button>
+            <button [class.on]="be.trendMetric() === 'avg'" (click)="be.trendMetric.set('avg')">Average mark</button>
+          </div>
+        }
+        @if (activeSub() === 'comparison') {
+          <label class="tc-field"><span>Metric</span>
+            <select class="metric-select" [ngModel]="be.compareMetric()" (ngModelChange)="be.compareMetric.set($event)">
+              @for (m of be.compareMetrics; track m.value) { <option [value]="m.value">{{ m.label }}</option> }
+            </select></label>
+          <div class="tc-rank">
+            <button [class.on]="be.compareRank() === 'top'" (click)="be.compareRank.set('top')"><i class="fa-solid fa-arrow-trend-up"></i> Top</button>
+            <button [class.on]="be.compareRank() === 'bottom'" (click)="be.compareRank.set('bottom')"><i class="fa-solid fa-arrow-trend-down"></i> Bottom</button>
+          </div>
+          <label class="tc-field"><span>Show</span>
+            <select class="metric-select" [ngModel]="be.compareCount()" (ngModelChange)="be.compareCount.set(+$event)">
+              @for (n of [8, 12, 20, 38]; track n) { <option [value]="n">{{ n }}</option> }
+            </select></label>
+        }
+      </div>
+
+      <!-- active filters + geographic level (requirement module 1) -->
+      <div class="be-scope-row">
+        @for (c of be.filterChips(); track c.label) {
+          <span class="be-chip"><b>{{ c.label }}:</b> {{ c.value }}</span>
+        }
+        @if (be.assumed()) { <p-tag value="Assumed data" severity="warn" /> }
+        @if (be.hasFilters()) { <button class="be-link" (click)="be.resetFilters()"><i class="fa-solid fa-rotate-left"></i> Reset filters</button> }
+      </div>
+      @if (be.filterScopeNote()) {
+        <div class="no-data"><i class="fa-solid fa-circle-info"></i> {{ be.filterScopeNote() }}</div>
+      }
+
+      @if (ds.canGoBack()) {
+      <div class="back-bar">
+        <button class="back-btn" (click)="ds.goUp()"><i class="fa-solid fa-arrow-left"></i> {{ ds.backLabel() }}</button>
+        <span class="back-scope">Currently viewing: <b>{{ be.scopeLabel() }}</b></span>
+        <button class="home-btn" (click)="ds.goToState()"><i class="fa-solid fa-house"></i> Tamil Nadu</button>
+      </div>
+      }
+
+      <!-- ===== NUMBERS ===== -->
+      @if (activeSub() === 'numbers') {
+        <div class="view-title">
+          <i class="fa-solid fa-graduation-cap"></i> {{ be.clsLabel() }} Board Exam — {{ be.scopeLabel() }}
+          <span class="yr">AY {{ be.activeYear() }}</span>
+          @if (be.scopeCat(); as c) { <span class="be-pill be-pill-lg" [style.--cat]="be.catColor[c]">{{ c }}</span> }
+          @if (be.assumed()) { <p-tag value="Assumed data" severity="warn" styleClass="ml-2" /> }
+        </div>
+
+        @if (be.assumed()) {
+          <div class="no-data"><i class="fa-solid fa-triangle-exclamation"></i>
+            The {{ be.clsLabel() }} district report for <b>{{ be.scopeLabel() }}</b> is not in the Resources folder, so the detail below is
+            <b>assumed</b>: the district total, pass %, average mark and both changes are its <b>real</b> row in the state report, the schools,
+            UDISE, block, management, category and class {{ be.cls() === 10 ? 'X' : 'XII' }} enrolment are <b>real</b> from the enrolment roll,
+            and only the spread of marks across schools and subjects is synthesized (deterministically per UDISE, so it never shifts between visits).
+            Printed district reports available: <b>{{ be.detailDistricts().join(', ') }}</b>.
+          </div>
+        }
+        @if (be.level() === 'school' && !be.school() && !be.schoolReport()) {
+          <div class="no-data"><i class="fa-solid fa-circle-exclamation"></i> This school does not sit the {{ be.clsLabel() }} exam in the roll (no class {{ be.cls() === 10 ? 'X' : 'XII' }} section), so it has no board row.</div>
+        }
+
+        <!-- KPI cards -->
+        <div class="ac-kpi be-kpi">
+          @for (k of be.kpis(); track k.label) {
+            <div class="ac-box" [class.be-kpi-up]="k.tone === 'up'" [class.be-kpi-down]="k.tone === 'down'">
+              <div class="ac-ico"><i [class]="k.icon"></i></div>
+              <div>
+                <div class="ac-val">{{ k.value }}
+                  @if (k.delta != null) { <span class="be-delta big" [class.up]="k.delta >= 0" [class.down]="k.delta < 0">{{ k.delta >= 0 ? '+' : '' }}{{ k.delta }}</span> }
+                  @if (k.delta == null && !k.tone && !k.sub && be.isPrevYear()) { <span class="be-na">change N/A</span> }
+                </div>
+                <div class="ac-lbl">{{ k.label }}@if (k.sub) { &middot; {{ k.sub }} }</div>
+              </div>
+            </div>
+          }
+        </div>
+
+        <!-- school scope: the school's own report -->
+        @if (be.level() === 'school') {
+          @if (be.schoolReport(); as r) {
+            @let o = r.overall;
+            <div class="grid-row be-report-grid">
+              <div class="card">
+                <div class="card-title"><i class="fa-solid fa-chart-column"></i> Subject average: school vs district vs state <span class="hint">{{ r.years[1] }}; dashed line = school {{ r.years[0] }}</span></div>
+                <div echarts [options]="be.schoolReportOpt()" class="chart tall-chart"></div>
+              </div>
+              <div class="card">
+                <div class="card-title"><i class="fa-solid fa-table-cells"></i> School report <span class="hint">{{ r.block }} block &middot; UDISE {{ r.udise }}</span></div>
+                <div class="be-scroll">
+                <table class="be-grid">
+                  <thead>
+                    <tr><th rowspan="2">Subject</th><th colspan="2" class="num">Appeared</th><th colspan="3" class="num">Pass % {{ r.years[1] }}</th><th colspan="3" class="num">Avg mark {{ r.years[1] }}</th><th colspan="2" class="num">Rank {{ r.years[1] }}</th><th colspan="2">Rating</th></tr>
+                    <tr><th class="num">{{ r.years[0] }}</th><th class="num">{{ r.years[1] }}</th><th class="num">School</th><th class="num">Dist.</th><th class="num">State</th><th class="num">School</th><th class="num">Dist.</th><th class="num">State</th><th class="num">District</th><th class="num">State</th><th>{{ r.years[0] }}</th><th>{{ r.years[1] }}</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr class="be-all"><td class="strong">Overall</td><td class="num">{{ o.appeared[0] }}</td><td class="num">{{ o.appeared[1] }}</td>
+                      <td class="num strong">{{ o.pass[1] }}</td><td class="num">{{ o.distPass[1] }}</td><td class="num">{{ o.statePass[1] }}</td>
+                      <td class="num strong be-cell" [style.--cat]="be.catColor[be.band(o.avg[1])!]">{{ o.avg[1] }} @if (be.delta(o.avg[0], o.avg[1]); as d) { <span class="be-delta" [class.up]="d >= 0" [class.down]="d < 0">{{ d >= 0 ? '+' : '' }}{{ d }}</span> }</td><td class="num">{{ o.distAvg[1] }}</td><td class="num">{{ o.stateAvg[1] }}</td>
+                      <td class="num">{{ o.rankDistrict[1] }}</td><td class="num">{{ o.rankState[1] }}</td>
+                      <td><span class="be-pill" [style.--cat]="be.catColor[o.rating[0] ?? '']">{{ o.rating[0] }}</span></td><td><span class="be-pill" [style.--cat]="be.catColor[o.rating[1] ?? '']">{{ o.rating[1] }}</span></td></tr>
+                    @for (s of r.subjects; track s.subject) {
+                    <tr><td class="strong">{{ s.subject }}</td><td class="num">{{ s.appeared[0] }}</td><td class="num">{{ s.appeared[1] }}</td>
+                      <td class="num strong">{{ s.pass[1] }}</td><td class="num">{{ s.distPass[1] }}</td><td class="num">{{ s.statePass[1] }}</td>
+                      <td class="num strong be-cell" [style.--cat]="be.catColor[be.band(s.avg[1])!]">{{ s.avg[1] }} @if (be.delta(s.avg[0], s.avg[1]); as d) { <span class="be-delta" [class.up]="d >= 0" [class.down]="d < 0">{{ d >= 0 ? '+' : '' }}{{ d }}</span> }</td><td class="num">{{ s.distAvg[1] }}</td><td class="num">{{ s.stateAvg[1] }}</td>
+                      <td class="num">{{ s.rankDistrict[1] }}</td><td class="num">{{ s.rankState[1] }}</td>
+                      <td><span class="be-pill" [style.--cat]="be.catColor[s.rating[0] ?? '']">{{ s.rating[0] }}</span></td><td><span class="be-pill" [style.--cat]="be.catColor[s.rating[1] ?? '']">{{ s.rating[1] }}</span></td></tr>
+                    }
+                  </tbody>
+                </table>
+                </div>
+              </div>
+            </div>
+          } @else if (be.school(); as s) {
+            <div class="grid-row row-two">
+              <div class="card">
+                <div class="card-title"><i class="fa-solid fa-chart-column"></i> Subject-wise performance <span class="hint">{{ be.subjectSource() }}</span></div>
+                <div echarts [options]="be.subjectChartOpt()" class="chart tall-chart"></div>
+              </div>
+              <div class="card table-card">
+                <div class="card-title"><i class="fa-solid fa-table-cells"></i> Annexure row <span class="hint">{{ s.block }} &middot; {{ s.mgmt }} &middot; UDISE {{ s.udise }}</span></div>
+                <div class="be-scroll">
+                <table class="be-grid">
+                  <thead><tr><th>Subject</th><th class="num">Avg mark</th><th class="num">Change</th><th class="num">Rank (district)</th><th class="num">Rank (state)</th><th>Category</th></tr></thead>
+                  <tbody>
+                    @for (r of be.subjectRows(); track r.subject) {
+                      <tr><td class="strong">{{ r.subject }}</td><td class="num strong be-cell" [style.--cat]="be.catColor[r.rating ?? '']">{{ r.avg }}</td>
+                        <td class="num">@if (be.delta(r.prevAvg, r.avg); as d) { <span class="be-delta" [class.up]="d >= 0" [class.down]="d < 0">{{ d >= 0 ? '+' : '' }}{{ d }}</span> }</td>
+                        <td class="num">{{ r.rank }}</td><td class="num">{{ s.subjects[r.subject]?.rankState }}</td>
+                        <td><span class="be-pill" [style.--cat]="be.catColor[r.rating ?? '']">{{ r.rating }}</span></td></tr>
+                    }
+                  </tbody>
+                </table>
+                </div>
+                <div class="be-foot"><i class="fa-solid fa-circle-info"></i> Supplementary (failed + absent): {{ s.supplementary }} &middot; performance {{ s.prevPerf }} → {{ s.perf }}. The school's own two-year report is not in the Resources folder yet.</div>
+              </div>
+            </div>
+          }
+        } @else {
+
+        <!-- pass % and average mark by child unit: Top / Bottom N side by side, or all of them full-width one below the other -->
+        <div class="grid-row" [class.row-two]="!be.unitShowAll()">
+          <div class="card">
+            <div class="card-title"><i class="fa-solid fa-circle-check"></i> Pass % by {{ be.unitLabel() | lowercase }}
+              <span class="hint">{{ be.unitSliceLabel() }} &middot; colour = category band of the average mark &middot; dashed = reference</span>
+              @if (!be.unitShowAll()) {
+                <button class="be-link" (click)="be.viewAllUnits()">View all {{ be.units().length }} <i class="fa-solid fa-chevron-right"></i></button>
+              } @else {
+                <button class="be-link" (click)="be.setUnitCount(5)"><i class="fa-solid fa-chevron-left"></i> Top 5 only</button>
+              }</div>
+            @if (be.passChartRows().length) {
+              <div echarts [options]="be.passChartOpt()" class="chart" [style.height.px]="be.unitChartHeight()"></div>
+            } @else {
+              <div class="no-data"><i class="fa-solid fa-circle-info"></i> No pass % figures for this scope and filter combination.</div>
+            }
+          </div>
+          <div class="card">
+            <div class="card-title"><i class="fa-solid fa-pen-ruler"></i> Average mark by {{ be.unitLabel() | lowercase }}
+              <span class="hint">{{ be.unitSliceLabel() }} &middot; ranked on the average mark, so the order can differ from pass %</span>
+              @if (!be.unitShowAll()) {
+                <button class="be-link" (click)="be.viewAllUnits()">View all {{ be.units().length }} <i class="fa-solid fa-chevron-right"></i></button>
+              } @else {
+                <button class="be-link" (click)="be.setUnitCount(5)"><i class="fa-solid fa-chevron-left"></i> Top 5 only</button>
+              }</div>
+            @if (be.avgChartRows().length) {
+              <div echarts [options]="be.avgChartOpt()" class="chart" [style.height.px]="be.unitChartHeight()"></div>
+            } @else {
+              <div class="no-data"><i class="fa-solid fa-circle-info"></i> No average-mark figures for this scope and filter combination.</div>
+            }
+          </div>
+        </div>
+
+        <!-- subject-wise + performance category -->
+        <div class="grid-row row-two">
+          <div class="card">
+            <div class="card-title"><i class="fa-solid fa-book-open"></i> Subject-wise performance <span class="hint">{{ be.subjectSource() }}</span></div>
+            @if (be.subjectRows().length) {
+              <div echarts [options]="be.subjectChartOpt()" class="chart tall-chart"></div>
+            } @else {
+              <div class="no-data"><i class="fa-solid fa-circle-info"></i> No subject-level figures for this scope in the ingested reports.</div>
+            }
+          </div>
+          <div class="card">
+            <div class="card-title"><i class="fa-solid fa-flag"></i> Schools by performance rating
+              <span class="hint">{{ be.perfCounts()?.unit }} per category, AY {{ be.activeYear() }} &middot; click a slice for the list</span></div>
+            @if (be.perfCounts()) {
+              <div echarts [options]="be.perfChartOpt()" (chartClick)="onBePerfClick($event)" class="chart tall-chart"></div>
+            } @else {
+              <div class="no-data"><i class="fa-solid fa-circle-info"></i> No category breakdown for this scope.</div>
+            }
+          </div>
+        </div>
+
+        @if (be.perfCounts()?.subjectCats?.length) {
+          <div class="card">
+            <div class="card-title"><i class="fa-solid fa-layer-group"></i> Subject-wise performance
+              <span class="hint">number of {{ be.perfCounts()?.unit }} in each subject performance category &middot; click a segment for the list</span>
+              <span class="tc-rank be-metric">
+                <button [class.on]="be.stack100()" (click)="be.stack100.set(true)">% share</button>
+                <button [class.on]="!be.stack100()" (click)="be.stack100.set(false)">Counts</button>
+              </span>
+              @if (be.perfCounts()?.derivedSubjects || be.assumed()) { <p-tag [value]="be.perfCounts()?.derivedSubjects ? 'Derived' : 'Assumed data'" severity="warn" styleClass="ml-2" /> }</div>
+            <div echarts [options]="be.subjectCatOpt()" (chartClick)="onBeSubjectCatClick($event)" class="chart tall-chart"></div>
+            <div class="be-foot"><i class="fa-solid fa-circle-info"></i> {{ be.subjectCatNote() }}</div>
+          </div>
+        } @else {
+          <div class="card">
+            <div class="card-title"><i class="fa-solid fa-layer-group"></i> Subject-wise performance</div>
+            <div class="no-data"><i class="fa-solid fa-circle-info"></i>
+              A category distribution needs more than one unit. At school scope the subject table above carries this school's own subject bands.</div>
+          </div>
+        }
+
+        <!-- schools behind a clicked category, or the units behind an alert (modules 5, 6, 7) -->
+        @if (be.pick(); as p) {
+          <div class="card table-card be-report" id="be-pick">
+            <div class="card-title">
+              @if (p.cat) { <span class="be-pill" [style.--cat]="be.catColor[p.cat]">{{ p.cat }}</span> }
+              <i class="fa-solid fa-list"></i> {{ p.title }}
+              <span class="count-chip">{{ be.pickUnits().length }}</span>
+              <span class="tbl-export">
+                <button class="exp-btn xls" (click)="exportTable('beCatUnits','excel')"><i class="fa-solid fa-file-excel"></i> Excel</button>
+                <button class="exp-btn csv" (click)="exportTable('beCatUnits','csv')"><i class="fa-solid fa-file-csv"></i> CSV</button>
+              </span>
+              <button class="be-close" (click)="be.closePick()" title="Close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            @if (be.pickUnits().length) {
+              <p-table [value]="be.pickUnits()" styleClass="p-datatable-sm p-datatable-striped be-table" [scrollable]="true" scrollHeight="420px"
+                       [rows]="15" [paginator]="be.pickUnits().length > 15" [rowsPerPageOptions]="[15,30,60]">
+                <ng-template pTemplate="header">
+                  <tr><th>{{ be.unitLabel() }}</th><th>Where</th><th class="num">Appeared</th>
+                    <th class="num">Pass %</th><th class="num">{{ p.subject ? p.subject + ' avg' : 'Avg mark' }}</th><th class="num">Change</th><th class="num">Rank</th><th></th></tr>
+                </ng-template>
+                <ng-template pTemplate="body" let-u>
+                  <tr class="rv-row" (click)="be.drill(u)" [title]="'Open ' + u.name">
+                    <td class="strong be-school">{{ u.name }}@if (u.udise) { <br/><small class="text-muted">{{ u.udise }}</small> }</td>
+                    <td>{{ u.sub }}</td><td class="num">{{ fmt(u.appeared) }}</td>
+                    <td class="num">{{ u.pass ?? 'N/A' }}{{ u.pass != null ? '%' : '' }}</td>
+                    <td class="num strong be-cell" [style.--cat]="be.catColor[u.cat ?? '']">{{ u.avg ?? 'N/A' }}</td>
+                    <td class="num">@if (u.avgDelta != null) { <span class="be-delta" [class.up]="u.avgDelta >= 0" [class.down]="u.avgDelta < 0">{{ u.avgDelta >= 0 ? '+' : '' }}{{ u.avgDelta }}</span> } @else { <span class="be-na">N/A</span> }</td>
+                    <td class="num">{{ u.rank ?? '' }}</td>
+                    <td class="num"><i class="fa-solid fa-chevron-right text-muted"></i></td>
+                  </tr>
+                </ng-template>
+              </p-table>
+            } @else {
+              <div class="no-data"><i class="fa-solid fa-circle-info"></i> Nothing left in this list once the active filters are applied.</div>
+            }
+          </div>
+        }
+        }
+
+        <!-- ===== Needs Your Attention: Critical and Watch (requirement module 7) ===== -->
+        <div class="card be-attention">
+          <div class="card-title"><i class="fa-solid fa-bell"></i> Needs Your Attention — {{ be.scopeLabel() }}
+            <span class="count-chip" [class.bad]="be.criticalAlerts().length > 0">{{ be.criticalAlerts().length }} critical</span>
+            <span class="count-chip">{{ be.watchAlerts().length }} watch</span>
+            <span class="hint">thresholds are configurable, not policy</span>
+            <span class="tbl-export">
+              <button class="exp-btn" (click)="beThreshOpen.set(!beThreshOpen())"><i class="fa-solid fa-sliders"></i> Thresholds</button>
+              <button class="exp-btn xls" (click)="exportTable('beAlerts','excel')"><i class="fa-solid fa-file-excel"></i> Excel</button>
+              <button class="exp-btn pdf" (click)="exportTable('beAlerts','pdf')"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+            </span></div>
+
+          @if (beThreshOpen()) {
+            <div class="be-thresh">
+              @for (t of beThresholdFields; track t.key) {
+                <label class="tc-field"><span>{{ t.label }}</span>
+                  <input class="metric-select" type="number" step="0.5" [ngModel]="be.thresholds()[t.key]"
+                         (ngModelChange)="be.setThreshold(t.key, +$event)" /></label>
+              }
+              <button class="exp-btn" (click)="be.resetThresholds()"><i class="fa-solid fa-rotate-left"></i> Defaults</button>
+            </div>
+          }
+
+          @if (be.isPrevYear()) {
+            <div class="no-data"><i class="fa-solid fa-circle-info"></i>
+              Showing AY {{ be.prevYear() }}. The reports carry no comparison year for it, so decline alerts are suppressed — only level-based alerts appear.</div>
+          }
+          @if (!be.alerts().length) {
+            <div class="no-data"><i class="fa-solid fa-circle-check"></i> Nothing crosses a threshold at this scope.</div>
+          } @else {
+            <div class="be-alert-groups">
+              @for (g of [{ sev: 'Critical', rows: be.criticalAlerts() }, { sev: 'Watch', rows: be.watchAlerts() }]; track g.sev) {
+                <div class="be-alert-col" [class.crit]="g.sev === 'Critical'">
+                  <div class="be-alert-head">
+                    <i class="fa-solid" [class.fa-circle-exclamation]="g.sev === 'Critical'" [class.fa-triangle-exclamation]="g.sev === 'Watch'"></i>
+                    {{ g.sev }} <span class="count-chip">{{ g.rows.length }}</span>
+                  </div>
+                  @if (!g.rows.length) { <div class="no-data">No {{ g.sev | lowercase }} items.</div> }
+                  @for (a of g.rows; track a.id) {
+                    <div class="be-alert">
+                      <div class="be-alert-top">
+                        <span class="be-alert-kind">{{ a.kind }}</span>
+                        <span class="be-alert-where"><i class="fa-solid fa-location-dot"></i> {{ a.where }}
+                          @if (a.block && a.school) { &middot; {{ a.block }} }
+                          @if (a.subject) { &middot; {{ a.subject }} }</span>
+                      </div>
+                      <div class="be-alert-nums">
+                        @if (a.open?.kind === 'units') { <span class="be-alert-tag">worst unit</span> }
+                        <span><b>{{ a.current ?? 'N/A' }}</b>{{ a.unit === 'pp' ? '%' : '' }} now</span>
+                        <span>{{ a.previous ?? 'N/A' }}{{ a.previous != null && a.unit === 'pp' ? '%' : '' }} last year</span>
+                        @if (a.change != null) {
+                          <span class="be-delta" [class.up]="a.change >= 0" [class.down]="a.change < 0">{{ a.change >= 0 ? '+' : '' }}{{ a.change }}{{ a.unit === 'pp' ? ' pp' : (a.unit === 'mark' ? ' marks' : ' schools') }}</span>
+                        } @else { <span class="be-na">change N/A</span> }
+                        @if (a.schools != null) { <span class="be-alert-n">{{ fmt(a.schools) }} school{{ a.schools === 1 ? '' : 's' }}</span> }
+                        @if (a.assumed) { <span class="be-na">assumed</span> }
+                      </div>
+                      @if (a.detail) { <div class="be-alert-detail">{{ a.detail }}</div> }
+                      <div class="be-alert-act"><i class="fa-solid fa-lightbulb"></i> {{ a.action }}
+                        @if (a.open) { <button class="be-link" (click)="openBeAlert(a)">Open <i class="fa-solid fa-chevron-right"></i></button> }
+                      </div>
+                    </div>
+                  }
+                </div>
+              }
+            </div>
+          }
+        </div>
+
+        @if (be.level() !== 'school') {
+        @if (be.level() === 'district' && be.byMgmt().length) {
+          <div class="card table-card">
+            <div class="card-title"><i class="fa-solid fa-table-list"></i> Results by management <span class="hint">district report, section A &middot; supplementary = failed + absent</span>
+              @if (be.assumed()) { <p-tag value="Assumed data" severity="warn" styleClass="ml-2" /> }</div>
+            <p-table [value]="be.byMgmt()" styleClass="p-datatable-sm be-table">
+              <ng-template pTemplate="header">
+                <tr><th>Management</th><th class="num">Schools</th><th class="num">Appeared</th><th class="num">District pass %</th><th class="num">District avg</th><th class="num">State pass %</th><th class="num">State avg</th><th class="num">Supplementary</th></tr>
+              </ng-template>
+              <ng-template pTemplate="body" let-m>
+                <tr [class.be-total]="m.mgmt === 'All Managements'" [class.be-me]="m.mgmt === be.fMgmt()">
+                  <td class="strong">{{ m.mgmt }}</td><td class="num">{{ m.schools }}</td><td class="num">{{ fmt(m.appeared) }}</td>
+                  <td class="num"><b>{{ m.pass }}</b> <span class="be-delta" [class.up]="(m.passDelta ?? 0) >= 0" [class.down]="(m.passDelta ?? 0) < 0">{{ (m.passDelta ?? 0) >= 0 ? '+' : '' }}{{ m.passDelta }}</span></td>
+                  <td class="num"><b>{{ m.avg }}</b> <span class="be-delta" [class.up]="(m.avgDelta ?? 0) >= 0" [class.down]="(m.avgDelta ?? 0) < 0">{{ (m.avgDelta ?? 0) >= 0 ? '+' : '' }}{{ m.avgDelta }}</span></td>
+                  <td class="num">{{ m.statePass ?? 'N/A' }}</td><td class="num">{{ m.stateAvg ?? 'N/A' }}</td><td class="num bad">{{ fmt(m.supplementary) }}</td>
+                </tr>
+              </ng-template>
+            </p-table>
+            <div class="be-foot"><i class="fa-solid fa-circle-info"></i> Figures are as printed for the selected year; the state columns are the state-wide figure for that management group.</div>
+          </div>
+        }
+
+        }
+
+        <!-- ===== Grid 1: subject-wise details by management (requirement module 8) ===== -->
+        @if (be.subjectMgmtGrid(); as g) {
+          <div class="card table-card">
+            <div class="card-title"><i class="fa-solid fa-table-cells-large"></i> {{ be.clsLabel() }} subject-wise details
+              <span class="hint">{{ be.gridMetricLabel() }} per subject and management &middot; {{ be.isPrevYear() ? 'AY ' + be.prevYear() + ', no change available' : '(Δ) = change in ' + (be.gridMetric() === 'pass' ? 'percentage points' : 'marks') }}</span>
+              <span class="tc-rank be-metric">
+                <button [class.on]="be.gridMetric() === 'pass'" (click)="be.gridMetric.set('pass')">Pass %</button>
+                <button [class.on]="be.gridMetric() === 'avg'" (click)="be.gridMetric.set('avg')">Average mark</button>
+              </span>
+              @if (be.assumed()) { <p-tag value="Assumed data" severity="warn" styleClass="ml-2" /> }
+              <span class="tbl-export">
+                <button class="exp-btn xls" (click)="exportTable('beSubjectGrid','excel')"><i class="fa-solid fa-file-excel"></i> Excel</button>
+                <button class="exp-btn csv" (click)="exportTable('beSubjectGrid','csv')"><i class="fa-solid fa-file-csv"></i> CSV</button>
+                <button class="exp-btn pdf" (click)="exportTable('beSubjectGrid','pdf')"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+              </span></div>
+            <div class="be-scroll">
+              <table class="be-grid">
+                <thead>
+                  <tr><th>Management</th>
+                    @for (s of g.subjects; track s) { <th class="num" [class.be-all]="s === 'All Subjects'">{{ s }}</th> }
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (r of g.rows; track r.mgmt) {
+                    <tr [class.be-me]="r.me">
+                      <td class="strong">{{ r.mgmt }}</td>
+                      @for (c of r.cells; track c.subject) {
+                        <td class="num" [class.be-all]="c.subject === 'All Subjects'" [class.be-cell]="!!c.cat" [style.--cat]="c.cat ? be.catColor[c.cat] : ''">
+                          @if (c.v != null) {
+                            <b>{{ c.v }}{{ be.gridMetric() === 'pass' ? '%' : '' }}</b>
+                            @if (c.d != null) { <span class="be-delta" [class.up]="c.d >= 0" [class.down]="c.d < 0">{{ c.d >= 0 ? '+' : '' }}{{ c.d }}</span> }
+                          } @else { <span class="be-na">N/A</span> }
+                        </td>
+                      }
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+            <div class="be-foot"><i class="fa-solid fa-circle-info"></i>
+              Values are {{ be.gridMetric() === 'pass' ? 'pass percentages; the change is in percentage points (pp)' : 'average marks; the change is in marks' }}.
+              {{ g.source }}. Class X and Class XII keep their own subject lists.</div>
+          </div>
+        }
+
+        @if (be.level() !== 'school') {
+        <!-- drill table (Grid 2: district performance ranking at state scope) -->
+        <div class="card table-card">
+          <div class="card-title"><i class="fa-solid fa-table-list"></i>
+            {{ be.level() === 'state' ? 'District Performance Ranking' : be.unitLabel() + '-wise data' }} — {{ be.scopeLabel() }}
+            <span class="count-chip">{{ be.units().length }} {{ be.unitLabel() | lowercase }}s</span>
+            <span class="hint">click a row to drill down</span>
+            @if (be.assumed()) { <p-tag value="Assumed data" severity="warn" styleClass="ml-2" /> }
+            <span class="tbl-export">
+              <button class="exp-btn xls" (click)="exportTable('beUnits','excel')"><i class="fa-solid fa-file-excel"></i> Excel</button>
+              <button class="exp-btn csv" (click)="exportTable('beUnits','csv')"><i class="fa-solid fa-file-csv"></i> CSV</button>
+              <button class="exp-btn pdf" (click)="exportTable('beUnits','pdf')"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+            </span></div>
+          @if (be.units().length) {
+          <p-table [value]="be.units()" styleClass="p-datatable-sm p-datatable-striped be-table" [scrollable]="true" scrollHeight="560px"
+                   [rows]="25" [paginator]="be.units().length > 25" [rowsPerPageOptions]="[25,50,100]" sortMode="single" dataKey="key"
+                   [globalFilterFields]="['name','sub']" #beTable>
+            <ng-template pTemplate="caption">
+              <span class="p-input-icon-left be-search">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <input type="text" [placeholder]="'Search ' + (be.unitLabel() | lowercase) + 's'"
+                       (input)="beTable.filterGlobal($any($event.target).value, 'contains')" />
+              </span>
+            </ng-template>
+            <ng-template pTemplate="header">
+              <tr>
+                @if (be.level() === 'state') { <th class="num" pSortableColumn="rank">District rank <p-sortIcon field="rank" /></th> }
+                <th pSortableColumn="name">{{ be.unitLabel() }} <p-sortIcon field="name" /></th>
+                <th class="num" pSortableColumn="schools">Total schools <p-sortIcon field="schools" /></th>
+                <th class="num" pSortableColumn="appeared">Students appeared <p-sortIcon field="appeared" /></th>
+                <th class="num" pSortableColumn="pass">Pass % <p-sortIcon field="pass" /></th>
+                <th class="num" pSortableColumn="passDelta">Improvement in pass %
+                  <span class="hint">{{ be.prevYear() }} → {{ be.year() }}</span> <p-sortIcon field="passDelta" /></th>
+                <th class="num" pSortableColumn="avg">Average mark <p-sortIcon field="avg" /></th>
+                <th class="num" pSortableColumn="avgDelta">Improvement in average mark <p-sortIcon field="avgDelta" /></th>
+                <th>Category</th>
+                @if (be.level() === 'block') { <th class="num">Rank (district)</th> }
+                <th></th>
+              </tr>
+            </ng-template>
+            <ng-template pTemplate="body" let-u>
+              <tr class="rv-row" (click)="be.drill(u)" [title]="'Open ' + u.name">
+                @if (be.level() === 'state') { <td class="num">@if (u.rank != null) { <span class="be-rank" [class.r1]="u.rank <= 10" [class.r2]="u.rank > 10 && u.rank <= 20" [class.r3]="u.rank > 20 && u.rank <= 30" [class.r4]="u.rank > 30">{{ u.rank }}</span> } @else { <span class="be-na">N/A</span> }</td> }
+                <td class="strong">{{ u.name }} @if (u.hasReport) { <i class="fa-solid fa-file-lines be-has" [title]="be.level() === 'state' ? 'Printed district report available' : 'School report available'"></i> }
+                  @if (u.sub && be.level() !== 'state') { <br/><small class="text-muted">{{ u.sub }}</small> }</td>
+                <td class="num">{{ u.schools }}</td><td class="num">{{ fmt(u.appeared) }}</td>
+                <td class="num strong">{{ u.pass ?? 'N/A' }}{{ u.pass != null ? '%' : '' }}</td>
+                <td class="num">@if (u.passDelta != null) { <span class="be-delta" [class.up]="u.passDelta >= 0" [class.down]="u.passDelta < 0">{{ u.passDelta >= 0 ? '+' : '' }}{{ u.passDelta }} pp</span> } @else { <span class="be-na">N/A</span> }</td>
+                <td class="num strong be-cell" [style.--cat]="be.catColor[u.cat ?? '']">{{ u.avg ?? 'N/A' }}</td>
+                <td class="num">@if (u.avgDelta != null) { <span class="be-delta" [class.up]="u.avgDelta >= 0" [class.down]="u.avgDelta < 0">{{ u.avgDelta >= 0 ? '+' : '' }}{{ u.avgDelta }}</span> } @else { <span class="be-na">N/A</span> }</td>
+                <td>@if (u.cat) { <span class="be-pill" [style.--cat]="be.catColor[u.cat]">{{ u.cat }}</span> }</td>
+                @if (be.level() === 'block') { <td class="num">{{ u.rank }}</td> }
+                <td class="num"><i class="fa-solid fa-chevron-right text-muted"></i></td>
+              </tr>
+            </ng-template>
+          </p-table>
+          } @else {
+            <div class="no-data"><i class="fa-solid fa-circle-info"></i> No {{ be.unitLabel() | lowercase }} rows for this scope and filter combination.</div>
+          }
+          @if (be.level() === 'state') {
+            <div class="be-foot"><i class="fa-solid fa-circle-info"></i>
+              Pass % comes from the report's aggregate passed and appeared counts, not from averaging school percentages.
+              Rank is the state report's own ranking (equal weight to current-year performance and improvement) and is printed for AY {{ be.year() }} only.</div>
+          }
+        </div>
+        }
+      }
+
+      <!-- ===== TREND ===== -->
+      @if (activeSub() === 'trend') {
+        <div class="view-title"><i class="fa-solid fa-chart-line"></i> {{ be.clsLabel() }} Board Exam — Trend, {{ be.scopeLabel() }}<span class="yr">{{ be.trendWindowLabel() }}</span>
+          @if (be.assumed()) { <p-tag value="Assumed data" severity="warn" styleClass="ml-2" /> }</div>
+        @if (beTrendNote()) {
+          <div class="no-data"><i class="fa-solid fa-circle-info"></i> {{ beTrendNote() }}</div>
+        }
+        <div class="grid-row row-two">
+          <div class="card">
+            <div class="card-title"><i class="fa-solid fa-circle-check"></i> Pass % trend, {{ be.trendWindowLabel() }}
+              <span class="hint">{{ be.trendHasDistrict() ? 'district vs state vs best district' : 'state vs best district' }} &middot; click {{ be.prevYear() }} or {{ be.year() }} to switch the dashboard year</span></div>
+            <div echarts [options]="be.passTrendOpt()" (chartClick)="onBeTrendClick($event)" class="chart tall-chart"></div>
+          </div>
+          <div class="card">
+            <div class="card-title"><i class="fa-solid fa-pen-ruler"></i> Average mark trend, {{ be.trendWindowLabel() }}
+              <span class="hint">out of 100 per subject, the same scale in every year &middot; Govt schools</span></div>
+            <div echarts [options]="be.avgTrendOpt()" (chartClick)="onBeTrendClick($event)" class="chart tall-chart"></div>
+          </div>
+        </div>
+        <div class="grid-row row-two">
+          <div class="card">
+            <div class="card-title"><i class="fa-solid fa-book-open"></i> Subject-wise, {{ be.prevYear() }} vs {{ be.year() }} <span class="hint">{{ be.subjectSource() }}</span></div>
+            @if (be.subjectRows().some(r => r.prevAvg != null)) {
+              <div echarts [options]="be.subjectTrendOpt()" class="chart tall-chart"></div>
+            } @else {
+              <div class="no-data"><i class="fa-solid fa-circle-info"></i> No previous-year subject figures for this scope{{ be.isPrevYear() ? ' (the reports have no year before ' + be.prevYear() + ')' : '' }}.</div>
+            }
+          </div>
+          @if (be.trendUnits().length) {
+            <div class="card">
+              <div class="card-title"><i class="fa-solid fa-arrow-trend-up"></i> Change in {{ be.trendMetric() === 'pass' ? 'pass %' : 'average mark' }} by {{ be.unitLabel() | lowercase }}
+                <span class="hint">{{ be.prevYear() }} → {{ be.year() }} &middot; {{ be.trendUnitsTruncated() ? 'top ' + be.trendEnds + ' and bottom ' + be.trendEnds + ' ' + (be.unitLabel() | lowercase) + 's only' : 'every ' + (be.unitLabel() | lowercase) + ', most improved first' }}</span></div>
+              <div echarts [options]="be.trendUnitsOpt()" class="chart tall-chart"></div>
+            </div>
+          }
+        </div>
+
+        <!-- ===== Trend grid: each unit in the From and To years, with the change; click to drill ===== -->
+        @if (be.level() !== 'school') {
+          <div class="card table-card">
+            <div class="card-title"><i class="fa-solid fa-table-list"></i> {{ be.unitLabel() }}-wise, {{ be.trendGridYears().from }} vs {{ be.trendGridYears().to }} — {{ be.scopeLabel() }}
+              <span class="count-chip">{{ be.trendGridRows().length }} {{ be.unitLabel() | lowercase }}s</span>
+              <span class="hint">pass % and average mark in each selected year &middot; click a row to drill down</span>
+              @if (be.assumed()) { <p-tag value="Assumed data" severity="warn" styleClass="ml-2" /> }
+              <span class="tbl-export">
+                <button class="exp-btn xls" (click)="exportTable('beTrendGrid','excel')"><i class="fa-solid fa-file-excel"></i> Excel</button>
+                <button class="exp-btn csv" (click)="exportTable('beTrendGrid','csv')"><i class="fa-solid fa-file-csv"></i> CSV</button>
+                <button class="exp-btn pdf" (click)="exportTable('beTrendGrid','pdf')"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+              </span></div>
+            @if (be.trendGridNote()) { <div class="no-data"><i class="fa-solid fa-circle-info"></i> {{ be.trendGridNote() }}</div> }
+            @if (be.trendGridRows().length) {
+              <p-table [value]="be.trendGridRows()" styleClass="p-datatable-sm p-datatable-striped be-table" [scrollable]="true" scrollHeight="560px"
+                       [rows]="25" [paginator]="be.trendGridRows().length > 25" [rowsPerPageOptions]="[25,50,100]" sortMode="single" dataKey="key"
+                       [globalFilterFields]="['name','sub']" #beTrendTable>
+                <ng-template pTemplate="caption">
+                  <span class="p-input-icon-left be-search">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                    <input type="text" [placeholder]="'Search ' + (be.unitLabel() | lowercase) + 's'"
+                           (input)="beTrendTable.filterGlobal($any($event.target).value, 'contains')" />
+                  </span>
+                </ng-template>
+                <ng-template pTemplate="header">
+                  <tr>
+                    <th rowspan="2" pSortableColumn="name">{{ be.unitLabel() }} <p-sortIcon field="name" /></th>
+                    <th rowspan="2" class="num" pSortableColumn="schools">Schools <p-sortIcon field="schools" /></th>
+                    <th colspan="3" class="num be-grp">Pass %</th>
+                    <th colspan="3" class="num be-grp">Average mark</th>
+                    <th rowspan="2">Category</th>
+                    <th rowspan="2"></th>
+                  </tr>
+                  <tr>
+                    <th class="num" pSortableColumn="passFrom">{{ be.trendGridYears().from }} <p-sortIcon field="passFrom" /></th>
+                    <th class="num" pSortableColumn="passTo">{{ be.trendGridYears().to }} <p-sortIcon field="passTo" /></th>
+                    <th class="num" pSortableColumn="passChange">Change (pp) <p-sortIcon field="passChange" /></th>
+                    <th class="num" pSortableColumn="avgFrom">{{ be.trendGridYears().from }} <p-sortIcon field="avgFrom" /></th>
+                    <th class="num" pSortableColumn="avgTo">{{ be.trendGridYears().to }} <p-sortIcon field="avgTo" /></th>
+                    <th class="num" pSortableColumn="avgChange">Change <p-sortIcon field="avgChange" /></th>
+                  </tr>
+                </ng-template>
+                <ng-template pTemplate="body" let-r>
+                  <tr class="rv-row" (click)="be.drillTrendRow(r)" [title]="'Open ' + r.name">
+                    <td class="strong">{{ r.name }}@if (r.sub) { <br/><small class="text-muted">{{ r.sub }}</small> }</td>
+                    <td class="num">{{ r.schools }}</td>
+                    <td class="num">{{ r.passFrom ?? 'N/A' }}{{ r.passFrom != null ? '%' : '' }}</td>
+                    <td class="num strong">{{ r.passTo ?? 'N/A' }}{{ r.passTo != null ? '%' : '' }}</td>
+                    <td class="num">@if (r.passChange != null) { <span class="be-delta" [class.up]="r.passChange >= 0" [class.down]="r.passChange < 0">{{ r.passChange >= 0 ? '+' : '' }}{{ r.passChange }}</span> } @else { <span class="be-na">N/A</span> }</td>
+                    <td class="num">{{ r.avgFrom ?? 'N/A' }}</td>
+                    <td class="num strong be-cell" [style.--cat]="be.catColor[r.cat ?? '']">{{ r.avgTo ?? 'N/A' }}</td>
+                    <td class="num">@if (r.avgChange != null) { <span class="be-delta" [class.up]="r.avgChange >= 0" [class.down]="r.avgChange < 0">{{ r.avgChange >= 0 ? '+' : '' }}{{ r.avgChange }}</span> } @else { <span class="be-na">N/A</span> }</td>
+                    <td>@if (r.cat) { <span class="be-pill" [style.--cat]="be.catColor[r.cat]">{{ r.cat }}</span> }</td>
+                    <td class="num"><i class="fa-solid fa-chevron-right text-muted"></i></td>
+                  </tr>
+                </ng-template>
+              </p-table>
+            } @else {
+              <div class="no-data"><i class="fa-solid fa-circle-info"></i> No {{ be.unitLabel() | lowercase }} rows for this scope and filter combination.</div>
+            }
+          </div>
+        }
+      }
+
+      <!-- ===== COMPARISON (same structure as Academic Scores: between units / between exams) ===== -->
+      @if (activeSub() === 'comparison') {
+        <div class="view-title"><i class="fa-solid fa-code-compare"></i> Board Exam Comparison — {{ be.scopeLabel() }}<span class="yr">AY {{ be.activeYear() }}</span>
+          @if (be.assumed()) { <p-tag value="Assumed data" severity="warn" styleClass="ml-2" /> }</div>
+
+        <!-- comparison sub-tabs -->
+        <div class="cmp-tabs">
+          <button [class.on]="be.compareMode()==='districts'" (click)="be.compareMode.set('districts')">
+            <i class="fa-solid fa-map-location-dot"></i> Between {{ be.unitLabel() }}s
+          </button>
+          <button [class.on]="be.compareMode()==='exams'" (click)="be.compareMode.set('exams')">
+            <i class="fa-solid fa-clipboard-list"></i> Between Exams
+          </button>
+        </div>
+
+        <!-- ===== Between districts / blocks / schools ===== -->
+        @if (be.compareMode() === 'districts') {
+          @if (be.level() === 'school') {
+            <div class="no-data"><i class="fa-solid fa-circle-info"></i> Comparison between units works at state, district and block scope. Go up a level to compare the schools in this block, or use Between Exams for this school.</div>
+          } @else {
+            @if (be.compareHeat(); as h) {
+              <div class="grid-row">
+                <div class="card">
+                  <div class="card-title">
+                    <i class="fa-solid fa-table-cells"></i> Subject vs {{ be.unitLabel() }} Heatmap
+                    <span class="hint">average mark &middot; spot which subject is weak, and where</span>
+                    @if (h.derived) { <p-tag value="Derived" severity="warn" styleClass="ml-2" /> }
+                  </div>
+                  <div echarts [options]="beHeatOpt()" class="chart" [style.height.px]="Math.max(320, 120 + h.units.length * 22)"></div>
+                  @if (h.derived) {
+                    <div class="be-foot"><i class="fa-solid fa-circle-info"></i> No per-district subject marks are printed. Each district sits at the state subject average shifted by its own distance from the state average. Drill into a district for its printed or assumed subject figures.</div>
+                  }
+                </div>
+              </div>
+            }
+            <div class="grid-row" [class.row-two]="be.level() === 'district' && be.byMgmt().length">
+              <div class="card">
+                <div class="card-title"><i class="fa-solid fa-ranking-star"></i> {{ be.compareRank() === 'top' ? 'Top' : 'Bottom' }} {{ be.compareRows().length }} {{ be.unitLabel() | lowercase }}s
+                  <span class="hint">by {{ be.compareMetric().endsWith('Delta') ? 'change from last year' : (be.compareMetric() === 'pass' ? 'pass %' : 'average mark') }} &middot; click a bar to drill down</span></div>
+                @if (be.compareRows().length) {
+                  <div echarts [options]="be.compareOpt()" (chartClick)="onBeCompareClick($event)" class="chart" [style.height.px]="Math.max(260, 40 + be.compareRows().length * 26)"></div>
+                } @else {
+                  <div class="no-data"><i class="fa-solid fa-circle-info"></i> Nothing to compare at this scope.</div>
+                }
+              </div>
+              @if (be.level() === 'district' && be.byMgmt().length) {
+                <div class="card">
+                  <div class="card-title"><i class="fa-solid fa-building-user"></i> By management vs state <span class="hint">district report, section A</span></div>
+                  <div echarts [options]="be.mgmtCompareOpt()" class="chart tall-chart"></div>
+                </div>
+              }
+            </div>
+          }
+        }
+
+        <!-- ===== Between exams: class + year on each side, optional subject focus ===== -->
+        @if (be.compareMode() === 'exams') {
+          @let h = be.examHeadToHead();
+          <div class="h2h-picker">
+            <div class="h2h-side">
+              <div class="h2h-side-tag a">Exam A</div>
+              <label class="tc-field"><span>Class</span>
+                <select class="metric-select" [ngModel]="be.h2hA().cls" (ngModelChange)="be.setH2h('a', { cls: $event })">
+                  @for (c of be.h2hClassOptions; track c.value) { <option [value]="c.value">{{ c.label }}</option> }
+                </select></label>
+              <label class="tc-field"><span>Academic year</span>
+                <select class="metric-select" [ngModel]="be.h2hA().year" (ngModelChange)="be.setH2h('a', { year: $event })">
+                  @for (y of be.yearFilterOptions(); track y.value) { <option [value]="y.value">{{ y.label }}</option> }
+                </select></label>
+              <span class="board-tag">Board</span>
+            </div>
+            <span class="h2h-vs">vs</span>
+            <div class="h2h-side">
+              <div class="h2h-side-tag b">Exam B</div>
+              <label class="tc-field"><span>Class</span>
+                <select class="metric-select" [ngModel]="be.h2hB().cls" (ngModelChange)="be.setH2h('b', { cls: $event })">
+                  @for (c of be.h2hClassOptions; track c.value) { <option [value]="c.value">{{ c.label }}</option> }
+                </select></label>
+              <label class="tc-field"><span>Academic year</span>
+                <select class="metric-select" [ngModel]="be.h2hB().year" (ngModelChange)="be.setH2h('b', { year: $event })">
+                  @for (y of be.yearFilterOptions(); track y.value) { <option [value]="y.value">{{ y.label }}</option> }
+                </select></label>
+              <span class="board-tag">Board</span>
+            </div>
+            <label class="tc-field h2h-subj"><span>Subject (optional)</span>
+              <select class="metric-select" [ngModel]="be.h2hSubject()" (ngModelChange)="be.h2hSubject.set($event)">
+                <option value="">All subjects</option>
+                @for (s of h.sharedSubjects; track s) { <option [value]="s">{{ s }}</option> }
+              </select></label>
+          </div>
+
+          @if (h.same) {
+            <div class="no-data"><i class="fa-solid fa-circle-info"></i> Exam A and Exam B are the same sitting. Change the class or the year on one side.</div>
+          } @else if (h.mixedClass) {
+            <div class="no-data"><i class="fa-solid fa-triangle-exclamation"></i> Class X and Class XII sit different subjects and papers; only the subjects they share are compared below, and the overall figures are not like-for-like.</div>
+          }
+
+          <!-- head-to-head summary -->
+          <div class="h2h-cards">
+            <div class="h2h-card a">
+              <div class="h2h-lbl">{{ h.a.label }}</div>
+              <div class="h2h-row"><span>Avg Mark{{ h.focus ? ' (' + h.focus + ')' : '' }}</span><b>{{ h.headline.aAvg ?? 'N/A' }}</b></div>
+              <div class="h2h-row"><span>Pass %</span><b>{{ h.headline.aPass ?? 'N/A' }}{{ h.headline.aPass != null ? '%' : '' }}</b></div>
+              <div class="h2h-row"><span>Students appeared</span><b>{{ h.a.appeared != null ? fmt(h.a.appeared) : 'N/A' }}</b></div>
+              <div class="h2h-row"><span>Source</span><b class="be-src">{{ h.a.source || '–' }}</b></div>
+            </div>
+            <div class="h2h-delta">
+              <div class="h2h-dl">Difference (B − A)</div>
+              <div class="h2h-dv" [class.good]="(h.avgDiff ?? 0) > 0" [class.bad]="(h.avgDiff ?? 0) < 0">
+                @if (h.avgDiff != null) {
+                  <i class="fa-solid" [class.fa-arrow-up]="h.avgDiff > 0" [class.fa-arrow-down]="h.avgDiff < 0"></i>
+                  {{ h.avgDiff > 0 ? '+' : '' }}{{ h.avgDiff }}
+                } @else { N/A }
+              </div>
+              <div class="h2h-dsub">avg mark{{ h.focus ? ' · ' + h.focus : '' }}</div>
+              <div class="h2h-dsub2" [class.good]="(h.passDiff ?? 0) > 0" [class.bad]="(h.passDiff ?? 0) < 0">
+                @if (h.passDiff != null) { {{ h.passDiff > 0 ? '+' : '' }}{{ h.passDiff }} pp pass } @else { pass % N/A }
+              </div>
+            </div>
+            <div class="h2h-card b">
+              <div class="h2h-lbl">{{ h.b.label }}</div>
+              <div class="h2h-row"><span>Avg Mark{{ h.focus ? ' (' + h.focus + ')' : '' }}</span><b>{{ h.headline.bAvg ?? 'N/A' }}</b></div>
+              <div class="h2h-row"><span>Pass %</span><b>{{ h.headline.bPass ?? 'N/A' }}{{ h.headline.bPass != null ? '%' : '' }}</b></div>
+              <div class="h2h-row"><span>Students appeared</span><b>{{ h.b.appeared != null ? fmt(h.b.appeared) : 'N/A' }}</b></div>
+              <div class="h2h-row"><span>Source</span><b class="be-src">{{ h.b.source || '–' }}</b></div>
+            </div>
+          </div>
+
+          <div class="grid-row">
+            <div class="card">
+              <div class="card-title">
+                <i class="fa-solid fa-code-compare"></i> {{ h.a.label }} vs {{ h.b.label }}
+                <span class="hint">{{ h.focus ? h.focus + ' only' : 'all shared subjects' }} · dashed line = difference (B − A) in average mark</span>
+              </div>
+              @if (be.h2hChartRows().length) {
+                <div echarts [options]="beH2hOpt()" class="chart tall-chart"></div>
+              } @else {
+                <div class="no-data"><i class="fa-solid fa-circle-info"></i> These two sittings share no subject with an average mark on both sides at this scope.</div>
+              }
+            </div>
+          </div>
+
+          <div class="card table-card">
+            <div class="card-title">
+              <i class="fa-solid fa-table-list"></i> Subject Comparison
+              <span class="count-chip">{{ fmt(h.subjects.length) }} subjects</span>
+              <span class="tbl-export">
+                <button class="exp-btn xls" (click)="exportTable('beH2h','excel')"><i class="fa-solid fa-file-excel"></i> Excel</button>
+                <button class="exp-btn csv" (click)="exportTable('beH2h','csv')"><i class="fa-solid fa-file-csv"></i> CSV</button>
+                <button class="exp-btn pdf" (click)="exportTable('beH2h','pdf')"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+              </span>
+            </div>
+            <p-table [value]="h.subjects" styleClass="p-datatable-sm p-datatable-striped be-table">
+              <ng-template pTemplate="header">
+                <tr>
+                  <th>Subject</th>
+                  <th class="num">{{ h.a.label }} avg</th><th class="num">{{ h.b.label }} avg</th><th class="num">Avg diff</th>
+                  <th class="num">{{ h.a.label }} pass</th><th class="num">{{ h.b.label }} pass</th><th class="num">Pass diff</th>
+                </tr>
+              </ng-template>
+              <ng-template pTemplate="body" let-s>
+                <tr>
+                  <td class="strong">{{ s.name }}</td>
+                  <td class="num">{{ s.aAvg ?? 'N/A' }}</td><td class="num">{{ s.bAvg ?? 'N/A' }}</td>
+                  <td class="num" [class.good]="(s.avgDiff ?? 0) > 0" [class.bad]="(s.avgDiff ?? 0) < 0">@if (s.avgDiff != null) { {{ s.avgDiff > 0 ? '+' : '' }}{{ s.avgDiff }} } @else { <span class="be-na">N/A</span> }</td>
+                  <td class="num">{{ s.aPass ?? 'N/A' }}{{ s.aPass != null ? '%' : '' }}</td><td class="num">{{ s.bPass ?? 'N/A' }}{{ s.bPass != null ? '%' : '' }}</td>
+                  <td class="num" [class.good]="(s.passDiff ?? 0) > 0" [class.bad]="(s.passDiff ?? 0) < 0">@if (s.passDiff != null) { {{ s.passDiff > 0 ? '+' : '' }}{{ s.passDiff }} pp } @else { <span class="be-na">N/A</span> }</td>
+                </tr>
+              </ng-template>
+              <ng-template pTemplate="emptymessage">
+                <tr><td colspan="7" class="empty">These two sittings share no common subjects at this scope.</td></tr>
+              </ng-template>
+            </p-table>
+            <div class="be-foot"><i class="fa-solid fa-circle-info"></i> Previous-year figures are derived as value − change from the printed report. Subject pass % is printed at state and district scope only.</div>
+          </div>
+        }
+      }
+      }
+    }
 
     <!-- ---------- ALL CHILDREN IN SCHOOL (standalone dashboard) ---------- -->
     <!-- Same ACiS drill as the Review Dashboard component (shared template),

@@ -699,6 +699,438 @@ with a Total row and Excel/CSV/PDF (`exportScholar` in app.ts).
 
 ## 10. Feature changelog (what was built, newest first)
 
+- **At a glance: "Key insights by pillar" replaces the old Key insights grid (19-Nov-2026).**
+  Request: "replace with this — make this setup in overview page key insights", with reference
+  screenshots of a 5-card pillar grid (Access and Equity / Safe and Secure Schools / Learning
+  Outcomes First / Social and Emotional Wellbeing / Alumni and Community Mentorship), each card
+  showing an icon, a status badge, two metric blocks (headline number + two-segment bar + legend),
+  and an "Open pillar" button. Replaced the old single-metric `glanceInsights` grid entirely with
+  a new `glancePillarInsights` computed (`glance.ts`) and a `.gl-pgrid`/`.gl-pc` card template
+  (`glance.html`/`glance.scss`), one card per `GLANCE_GROUPS` pillar:
+  - **Access and Equity**: Average attendance (Present/Absent, `Attendance`/`a_s`) and Children
+    out of school — Common Pool (`All Children in School`: `ac_pool` headline, `ac_adm`/`ac_tba`
+    split into Admitted/To be admitted).
+  - **Safe and Secure Schools**: Schools with no critical infra gap (`Infrastructure`/`gap` vs
+    total schools — NOT `i_need`, which renders "–" / is not aggregated at scope level, confirmed
+    by reading the Infrastructure module's own tile grid) and Buildings needing attention
+    (`Infrastructure`/`i_d` "to be demolished" + the non-tile real field `infRepair` "needs
+    repair", read directly off `kv.scopeValues()` since it has no catalog `KpiDef`).
+  - **Learning Outcomes First**: Exam pass percentage (`Academic Performance`/`a_pass`,
+    Passed/Not passed) and THIRAN students (`THIRAN`/`t_s` headline, `t_bl` BLO attainment %
+    split into Caught up/Still below level — the same real id `glanceCompletion` already uses).
+  - **Social and Emotional Wellbeing**: codebase-wide search (models, services, kpi catalog,
+    assets) found zero fields for sports period, counselling, SEL, or wellbeing anywhere — this
+    card has no metrics and shows "No KPI data source exists yet for this pillar in the
+    dashboard" with a grey "Not built" badge, instead of the reference's fabricated "68% daily
+    sports period" / "62,400 referred for counselling" numbers.
+  - **Alumni and Community Mentorship**: Vizhuthugal (Alumni) and NSNOP have no backing data
+    either; SMC is the one real module under this pillar, so its two headline metrics stand in —
+    Schools holding SMC meetings (`smcSchoolsHeld`/`smcSchoolsNotHeld`, direct fields) and SMC
+    resolutions (`smcRaised`/`smcClosed`/`smcPending`, same real figures the old Key insights SMC
+    card already used).
+  - "Open pillar" reuses the existing in-page `setGlanceView(id)` sidebar navigation (jumps to the
+    pillar's first built submenu item, or its first item's "not built yet" stub when nothing in
+    the pillar has data — verified both paths live: Wellbeing → Co-curricular/not-built stub,
+    Safe and Secure Schools → Physical Infra module page).
+  - Removed now-fully-dead code with the old grid: `glanceInsights`, `palliTargetPct` (its only
+    caller), `attWindow`/`glanceDays` (fed only the old attendance card's sparkline, no template
+    control existed for `attWindow`), and the `glanceSpark` sparkline-geometry helper. Kept
+    `glanceColor` (still used by `glanceCompletion`) and `palliByDesig`/`PALLI_DESIGS`/
+    `palliMonth`/`palliMonths` (still used by the Palli Paarvai module page's designation chart).
+  - Build-clean (`ng build` exit 0) and verified live via headless Chrome: all 5 cards render
+    with real figures (e.g. attendance 89.0%, THIRAN 7.44L identified · caught up 94%, SMC
+    resolutions 1,44,715 raised), status badges computed from real catalog bands (Watch/Off
+    track/On track), and the Wellbeing card's honest no-data state.
+
+- **At a glance: Attendance page cleanup — KPI tiles, readout, team table, pluralization
+  (19-Nov-2026).**
+  - **Removed the shared `.gl-kgrid` KPI tile grid** for the Attendance module page only
+    (`@if (gm.module !== 'Attendance') { ... }` wraps it in `glance.html`). Every other module
+    page (Palli Paarvai, Academic Performance, etc.) still shows its tile grid — only Attendance's
+    7 flat tiles were called out as redundant with the richer "Where am I?" cards below them.
+  - **Removed the "Where am I?" narrative readout note box** (the bullet-point sentence summary,
+    e.g. "Student marking compliance for Tamil Nadu is 82.5%…"). Deleted both the template usage
+    and the now-unused `attPageReadout` computed from `glance.ts` entirely (not just hidden).
+  - **"How is my team doing?" table rewritten to the exact reference layout**: 5 columns —
+    District/Block/School (dynamic) / Total Schools / Total Working Schools / Marked by Schools /
+    Marked %. Added a `markedPct` field to `attPageUnitRows` (`working && markedToday != null ?
+    round(markedToday/working*1000)/10 : null`) to back the new last column.
+  - **Fixed a double-plural / plural-where-singular-expected bug** found while verifying the
+    table rewrite: `attPageUnitLabel` previously returned `at.childLabel()` directly, which is
+    already plural ('Districts'/'Blocks'/'Schools'). Several template spots append their own 's'
+    (e.g. `{{ attPageUnitLabel() | lowercase }}s` → "districtss"), and others expected a singular
+    noun ("Find a {{ attPageUnitLabel() | lowercase }} by name" → "Find a districts by name", the
+    table's first column header showing "Districts" instead of "District"). Changed the computed
+    to strip a trailing 's' (except the 'This School' school-scope label, which has none to strip)
+    so it returns the singular form, matching the convention `palliUnitLabel` already used on the
+    Palli Paarvai page. Verified post-fix via headless Chrome text extraction: count line reads
+    "38 of 38 districts", search placeholder "Find a district by name", table header "District",
+    peer-chart labels "District average (mean of 38)" / "Best district (Tirupathur)".
+  - All three changes build-clean (`ng build` exit 0) and confirmed live via headless-Chrome
+    screenshot: KPI grid gone, readout gone, 5-column table rendering real numbers (e.g. Tiruvallur
+    2,057 schools / 535 working / 389 marked / 72.7%), gender/category/peer charts and the 14-day
+    trend chart all still rendering correctly.
+
+- **At a glance: sidebar/content cleanup (19-Nov-2026).**
+  - **"Key trends" section removed** from the Overview page (the 5-chart card: Attendance,
+    Enrolment, Palli Paarvai observations, Exam progression, All Children in School). Removed
+    the chart-only TS members with it (`ATT_WINDOWS`/`setAttWindow`/`glanceAttPoints`/
+    `glanceAttDays`/`glanceAttOpt`, the whole `ENROL_MGMT`/enrolment-trend group, `glancePalliOpt`
+    + `setPalliMonth`, the whole `EXAM_TYPES`/exam-progression group, the whole `ACIS_MGMT`/ACiS
+    chart group incl. `rv.loadAcisStudents()` in `ngOnInit`), the shared `ANIM`/`V3_AXIS` chart
+    style objects, and the now-unused `NgxEchartsDirective` import — the Overview page has no
+    ECharts instances left (headline panel and insight-card sparklines are hand-rolled SVG).
+    Kept everything the **Key insights** cards still depend on: `attWindow`/`glanceDays` (feeds
+    the Student attendance sparkline), and `palliMonth`/`palliMonths`/`palliObsInScope`/
+    `palliByDesig`/`palliTotal`/`palliLoading`/`PALLI_DESIGS`/`palliTargetPct` (feeds the Palli
+    Paarvai observation % card). Verified with a template + cross-reference grep before deleting
+    each symbol.
+  - **Sidebar: "3. Learning Outcomes First" gained an "Attendance" item** (`id: 'attendance'`,
+    `module: 'Attendance'`, same KPI-catalog module the Key insights "Student attendance" card
+    and the completion/attention lists already read — no new data path).
+  - **"School Governance"** (`id: 'governance'`) now has `module: 'Palli Paarvai'` (was `null` /
+    "not built yet"), so its submenu page lists the real Palli Paarvai tiled KPIs with a "View
+    details" link into the Review Dashboard drill, the same pattern "Classroom Teaching &
+    Engagement" and "District Governance" already use for the same module (one module backing
+    several sidebar items is an established pattern here, not new). Requested with a reference
+    file `D:\general\Dashboard\Resources\School-Education-Dashboard-with-Palli-Paarvai.html`; that
+    file's school list and observation counts are fabricated demo rows (`D.S` array, names like
+    "PUPS Ariyalur 1-01"), not a real export, so its data was **not** copied in — only the idea
+    (surface Palli Paarvai under this item) was kept, wired to the app's real observation data per
+    the no-fabrication rule elsewhere in this doc.
+
+- **At a glance: Palli Paarvai analytics page (19-Nov-2026).** "Build the entire dashboard from
+  the template" — the reference file `School-Education-Dashboard-with-Palli-Paarvai.html` turned
+  out to be an earlier **Download HTML** snapshot of this very app (same six domain groups, same
+  breadcrumb style — confirmed by opening it headless and diffing its nav text against
+  `GLANCE_GROUPS`), with one richer "Palli Paarvai" page hand-bolted onto group 3 using fabricated
+  demo data (its own UI said so: *"Sample dataset… does not reconcile to the Overview card"*).
+  So "the entire dashboard" already matched; the one real gap was that richer page. Built it for
+  real, reusing the exact plumbing the main Review Dashboard's Palli drill already uses — no new
+  data path, no fabrication:
+  - `rv.drillRows()` (the same computed the District Review grid reads) gives one row per child
+    unit of the current scope — districts at state, blocks at district, schools at block — each
+    carrying real `palliClassObsPct` / `palliSchoolsNotObsPct` / `palliOfficialsNotObsPct` /
+    `palliSchools3PlusPct` (`realFields()` in review.service.ts). `palliUnitRows` in glance.ts
+    wraps this with a real school count (`unitSchoolCount()`, read from `ds.districts()` /
+    `blocksForDistrict()`, not the row's own possibly-scaled count) and a catalog band.
+  - **"Where am I?"**: the 4 existing KPI tiles, a `palliReadout()` narrative (best/lowest child
+    unit, how many are below the scope figure, schools-not-observed / officials-behind), an
+    "Observations by designation" bar chart (`glancePalliDesigOpt`, resurrected from the
+    `palliByDesig` computed that survived the Key-trends removal) and a "Comparison with peers"
+    bar chart (`glancePalliPeerOpt`: this scope vs the best and worst child unit on % of Class
+    Observation).
+  - **"Weekly observation activity"**: real weekly observation counts from the last 8 weeks
+    present in `palli-obs.json`, scoped to the selected district/block (`palliWeekly`, built the
+    same way `palliObsInScope` already filters). A weekly target line is overlaid **only at state
+    scope** (`palliWeeklyTarget`: the real monthly target model ÷ ~4.33) — there's no real
+    target subset below state level, so the line is left off rather than invented, same rule
+    `palliTargetPct` already follows.
+  - **"How is my team doing?"**: a searchable, clickable unit table (`palliUnitRows`, filtered by
+    `palliUnitSearch`) with a "Copy table as CSV" button (`copyPalliCsv()`, clipboard). Clicking a
+    row drills (`drillPalliUnit()` → `ds.drillToDistrict`/`drillToBlock`), consistent with the
+    rest of the glance page being scope-driven from the header dropdowns.
+  - Deliberately **not** ported from the template: the A–E five-band colour grading (this page
+    reuses the existing 3-band good/watch/off-track pills everywhere else on /glance instead of
+    adding a one-off scale) and the "Learning outcomes by subject" breakdown (Palli Paarvai is a
+    school-visit-observation programme with no subject-wise learning-outcome measure of its own —
+    that figure belongs to Academic Performance / Board Exam, and porting it here would have meant
+    fabricating a metric that doesn't exist for this programme).
+  - Brought `NgxEchartsDirective` back into the page's imports (removed in the Key-trends cleanup
+    above, now genuinely needed again for the two new charts).
+  - **SHOW: Performance / Compliance toggle (19-Nov-2026, on request)** — the one piece of the
+    template initially left out without being flagged as a fabrication issue (unlike the A-E
+    grading and the subject breakdown, this one maps straight onto real data). `palliShow` signal
+    ('performance' | 'compliance') drives `palliShowId`/`palliShowField`/`palliShowLabel`:
+    Performance = `p_co` (% of Class Observation), Compliance = `p_s3` (% of Schools Observed 3+
+    Times) — both already-real KPIs. Switching it re-points `palliUnitRows`' band, `palliReadout`
+    and `glancePalliPeerOpt` at the selected measure, and highlights the matching column (with its
+    band pill) in the unit table instead of always showing it on % Class Observation.
+
+- **At a glance: Attendance analytics page (19-Nov-2026)** — same treatment as Palli Paarvai,
+  for the reference design `D:\general\Dashboard\Resources\TN Attendance Dashboard.html`
+  ("Attendance Dashboard": SHOW Students/Teachers × METRIC Marking status/Attendance %, Where
+  am I? / Comparison with peers / How much have I improved? / How is my team doing? / Standard
+  reports). Checked first what's real in `AttendanceService`/`attendance.model.ts` (via
+  context-gatherer): no gender or school-category field exists anywhere in `AttendanceNode`/
+  `AttendanceSchool`, so the reference design's gender+category breakdown chart could not be
+  built with real data. Everything else maps onto real fields:
+  - `attPageShow` ('students'|'teachers') × `attPageMetric` ('marking'|'attendance') drive
+    `attPageField()` → `compliance` (marking, not split by student/teacher — a single school-day
+    marking event covers both) or `attendance`/`teacherAttendance`.
+  - **"Where am I?"** 3 KPI cards are a genuine **single-day snapshot** (`attPageToday()` = the
+    last entry of the current scope's own `AttendanceNode.daily[]`, never the shared
+    `AttendanceService.day`/`.window` signals, so this page never perturbs the main Attendance
+    tab): present/expected (or tPresent/tExpected) %, marked/schools %, and the real `unmarked`
+    count — these reconcile exactly (`marked + unmarked = schools` from the same day record).
+  - **Breakdown chart**: by **management** (`at.byManagement()` — Government / Partly Aided /
+    Fully Aided), the real axis this data has, substituted for the reference design's gender ×
+    school-category chart with a dashed state-average line.
+  - **Peer comparison**: reuses `at.children()` (already scope-reactive — districts at state,
+    blocks at district, schools at block); distinguishes "my position" (the scope's own pooled
+    figure) from "{unit} average" (the plain mean of the children, matching the reference
+    design's distinct "state average: mean of 38 districts" bar) from the best child.
+  - **Trend** ("How much have I improved?"): 14 days / weeks / months built ad hoc from the
+    real `daily[]` (already working-days-only); weekly/monthly are a plain average of the daily
+    %, labelled as such.
+  - **Unit table**: `at.children()` again, with each child's own latest-day marked/pending count
+    and the real school count (`unitSchoolCount()`, shared with the Palli page). Search, CSV
+    (`copyAttPageCsv`), click-to-drill (`drillUnit` — renamed from `drillPalliUnit` since both
+    pages now share it).
+  - **"Standard reports"**: four links straight into the real catalog KPIs (`a_s60`, `a_t60`,
+    `d15`, `tl30`) via the existing `openGlanceKpi()` — no new navigation. `tl30` is flagged
+    "estimated" in this list, since it's the one assumed field here (`estimateLong30()`: a flat
+    2% of teaching staff, no real per-teacher leave-duration source — confirmed via the same
+    context-gatherer pass).
+  - **19-Nov-2026, on request: split into two real graphs.** Re-checked `AttendanceSchool` and
+    found `ctype` real and populated with exactly the reference design's four categories
+    (`Primary School` / `Middle School` / `High School` / `Higher Secondary School`, confirmed
+    straight from `attendance-schools.json`) — the earlier research had missed this field, so
+    "by school category" is now its own **real** chart (`attPageCategoryRows`/
+    `glanceAttPageCategoryOpt`, grouped from `at.scopeSchools()` by `ctype`, weighted by
+    `enrolled`, with the state-average dashed line), replacing the "by management" substitute.
+    Gender remains genuinely unavailable as a rate (confirmed again: no boys/girls field
+    anywhere in `AttendanceNode`/`AttendanceSchool`) — rather than apportion a fabricated
+    differential, `attPageGenderRows`/`glanceAttPageGenderOpt` plots the real scope-wide figure
+    on both bars with the real enrolment counts (`ds.current().boys`/`.girls`) in the label, and
+    the chart's own subtitle says plainly that the rate is the same because no split exists.
+
+- **At a glance → standalone HTML (18-Nov-2026).** Two pieces, no second copy of the KPI logic:
+  - **"Download HTML" button** in the glance header (`GlancePage.exportHtml()`, `exporting` signal).
+    Clones the component host as rendered — current scope, filters, chart windows, open submenu
+    item — and writes ONE self-contained file: every `<style>` Angular / PrimeNG injected plus
+    the linked sheets (global, Font Awesome, primeicons, Google Inter / Noto Tamil) inlined, with
+    `url(...)` font and icon files embedded as data URIs (`inlineCssAssets`, 2 MB cap per asset);
+    each ECharts canvas becomes a PNG via `echarts.getInstanceByDom(el).getDataURL()`; dropdowns
+    become the filter-summary text, buttons are disabled, non-active chart chips removed, entrance
+    animations switched off, sticky bars made static. Footer line records scope · filter · time.
+    File name `At-a-Glance-<Scope>-<yyyy-mm-dd>.html`, ~3.7 MB (fonts dominate).
+  - **`scripts/snapshot-glance.mjs`** (`npm run snapshot:glance [baseUrl] [outDir]`): drives
+    headless Chrome / Edge over the DevTools protocol (Node 22+ global WebSocket, no puppeteer),
+    opens `/glance` on the running dev server, signs in with `DASHBOARD_USER` /
+    `DASHBOARD_PASSWORD` (gen-auth defaults), waits for the lazy assets and ≥ 4 chart canvases,
+    presses the page's own Download HTML button and waits for `Browser.downloadProgress`. First
+    output: `At-a-Glance-Tamil-Nadu-2026-11-18.html` at the repo root (state scope, all schools).
+  - Observed in that snapshot (live-page behaviour, not an export bug): the Needs-attention list
+    shows Teacher attendance % and Student attendance % twice, because the same KPI is tiled in
+    both State Summary and Attendance. Worth de-duplicating in `glanceAttention` by KPI id.
+
+- **Board Exam tab (17-Nov-2026):** top-menu tab after "Academic Scores X & XII". Source:
+  `D:\general\Dashboard\Resources\Board Exam` (six PDFs: 10th/12th STATE_REPORT_GOVT, and
+  ARIYALUR 10th/12th DISTRICT_REPORT GOVT/AIDED). Ingest `scripts/ingest-board.py` (Python +
+  PyMuPDF; `python scripts/ingest-board.py`) → `src/assets/board-exam.json` (~200 KB).
+  - **State reports are image-only PDFs** (no text layer). The 38-district tables for both
+    classes were transcribed by hand into `STATE_ROWS` in the script and **verified**: the
+    district "appeared" figures sum exactly to the printed state totals (4,07,044 / 3,50,353).
+    Govt schools only. Section B trend lines (2022-26, district / state / best) are also
+    transcribed (`TREND`).
+  - **District reports** are parsed from text: section A (by management: schools, appeared,
+    pass/avg with YoY delta, state pass/avg, supplementary), section D (subject pass % and
+    average marks by management; a management row whose PDF cells are blank cannot be mapped
+    positionally and is marked `reliable:false` and omitted — 12th Other Govt Depts / Private),
+    and the school annexure via `page.find_tables()` (10th: 27 cols over 2 pages; 12th: 24-col
+    identity table + subject continuation table keyed by school name). Section C counts
+    (subject × category, school × category, this year and last) are **recomputed from the
+    annexure rows** and match the printed stacked bars exactly (e.g. 10th school cats
+    10/51/26/32; Maths 10/24/43/42). Category bands: avg >70 Good, >60 Satisfactory, >50 Needs
+    Improvement, ≤50 Poor. The ↑/↓ glyphs are U+2B06/U+2B07, minus is U+2212.
+  - **School reports** (`<UDISE>*.xlsx`, one per school, two years side by side, school vs
+    district vs state, ranks, rating) are parsed by `parse_school_report` into
+    `classes[cls].schoolReports[udise]`. Today: 33320100206 (10th), 33320101202 (12th). Their
+    STATE rows are the only state-level per-subject source and feed the state-scope subject chart.
+  - Code: `models/board-exam.model.ts`, `services/board-exam.service.ts` (`BoardExamService`,
+    `be` in App), `app.html` `@if (isBoardExam())` block, `app.scss` `.be-*`. Layout follows the
+    other dashboards: shared sub-menu **Numbers / Trend / Comparison** (no Alarming / Caution),
+    Class X / XII toggle in the control bar, scope = shared breadcrumb State -> District -> Block ->
+    School (`units()` = the children of the scope: districts / blocks / annexure schools; block
+    names and annexure UDISEs match the roll exactly, so `ds.drillTo*` is used throughout).
+    Numbers: 3 KPI cards (pass %, average mark, appeared) + category pill, pass-% and average-mark
+    bar charts by unit (colour = category band, dashed reference line), subject-wise chart,
+    performance-category chart (this year vs last), subject x category stacked bars (district /
+    block), results-by-management table (district), drill table with export (`beUnits`). School
+    scope shows the school report (or the annexure row). Trend: 5-year lines (state / district /
+    best), subject two-year bars, YoY change by unit. Comparison: top/bottom N by metric,
+    management vs state (district). Only ARIYALUR has district / block / school detail; other
+    districts show their state-report row and a notice.
+  - To add more districts: drop their `<DISTRICT>_{10th,12th}_DISTRICT_REPORT_{GOVT,AIDED}.pdf`
+    in the Resources folder, extend the `for mg in …` loop to iterate districts, rerun the ingest.
+
+- **Board Exam: requirement build-out (17-Nov-2026).** Implements the gaps between the tab as
+  first built and `C:\Users\Emis\Downloads\Board Examination Dashboard — Requirements and AI
+  Prompts.md` (12 modules). Everything lives in `BoardExamService` + the `@if (isBoardExam())`
+  block; no other dashboard was touched.
+  - **Module 1 — global filters.** `fMgmt` / `fCtype` / `fYear` signals next to `cls`, with
+    `resetFilters()`, `filterChips()` (shown as `.be-chip` pills with the geographic level) and
+    `filterScopeNote()` (says so when a filter cannot reach the figures on screen). They apply
+    immediately (the other dashboards behave that way) — there is no separate "Apply" button.
+    Management maps through `mgmtGroup()`, which folds both the printed annexure values and the
+    roll's long management names onto the report's four groups; **"UNAIDED" contains "AIDED", so
+    private is tested first** and `School Education Department School` is matched before the
+    generic `DEPARTMENT` rule. Category Type is **not in the board reports** — it comes from the
+    enrolment roll's `ctype` by UDISE (`ctypeByUdise`), so it only narrows annexure-backed views.
+    Academic Year offers the two years the reports carry; the previous year is derived as
+    `value − change` by `py()`, and `pd()` returns null for it, so every change column reads N/A.
+    `scopeSchools()` is now the **filtered** annexure list, `annexureSchools()` the raw one.
+  - **Assumed district detail (`assumedDistrict`).** The 37 districts without a printed report
+    are no longer dead ends. Real anchors: the district's state-report row (schools, appeared,
+    pass, avg and both changes), the enrolment roll (name, UDISE, block, management, category,
+    real class X / XII enrolment → `appeared`; schools with no class X / XII roll are dropped)
+    and the reference report's real subject shape (`subjectShape()`, section D Govt SED offsets
+    from All Subjects), per-management state figures and state / best-district trend series.
+    Only the per-school spread is synthesized, deterministically from the UDISE (`hash01`), so a
+    school's figures never change between visits. Verified: the assumed Govt SED weighted pass
+    and average land within ~1 point of the district's printed row, and the assumed government
+    school counts total 6,370 (printed 6,269) for class X and 3,261 (3,178) for class XII.
+    `assumed()` drives an **"Assumed data" badge** on every card, table and export subtitle.
+    `norm()` now carries a `DISTRICT_ALIAS` table (TRICHY→TIRUCHIRAPPALLI, OOTY→THE NILGIRIS,
+    PUDUKOTTAI→PUDUKKOTTAI, TUTICORIN→THOOTHUKKUDI, KANYAKUMARI→KANNIYAKUMARI, VIRUDHU NAGAR,
+    TIRUPPATHUR (V)→TIRUPATHUR, KALLACURICHY, TIRUVALLORE→TIRUVALLUR, RANIPETTAI→RANIPET), so
+    **all 38 report rows now match the roll** (10 did not before).
+  - **Modules 3 & 4 — the pass-% and average-mark trends are both on screen** in the Trend view
+    (`passTrendOpt` / `avgTrendOpt` from one `trendChart(metric)`); the metric toggle now only
+    drives the by-unit change chart. Clicking a point calls `pickTrendYear()`: the x axis is the
+    exam year (2026 = AY 2025-26), so 2026 / 2025 switch the dashboard year and older points
+    return a note instead of pretending there is detail behind them.
+  - **Modules 5 & 6 — the category charts are clickable.** `openCat(cat, subject?)` sets
+    `catPick`; `catUnits()` lists the schools (or districts at state scope) behind the bar, with
+    drill-through and export (`beCatUnits`). The subject chart defaults to **100% stacked**
+    (`stack100`, with a "% share / Counts" toggle) and its tooltip carries both the count and
+    the share. When a filter is active the denominators are recomputed from the filtered
+    annexure population rather than the printed report totals, and the card says so.
+  - **Module 7 — Needs Your Attention.** `alerts()` → Critical / Watch cards (`.be-alert*`),
+    each with the issue, scope, subject, affected schools, current / previous / change, a
+    recommended action and an Open button (`openAlert`). Rules: pass-% fall, average-mark fall,
+    pass % below a floor, share of schools rated Poor, and subjects sitting in a weak band.
+    Thresholds live in `BOARD_THRESHOLDS` / the `thresholds` signal and are editable in the UI
+    (`beThreshOpen`, `beThresholdFields`, `setThreshold`, `resetThresholds`). Items are
+    de-duplicated by id and sorted by severity then magnitude; decline rules are **suppressed on
+    the previous-year view**, which has no comparison year in the reports. Export: `beAlerts`.
+  - **Module 8 — Grid 1.** `subjectMgmtGrid()` transposes section D into management rows ×
+    subject columns (plus All Subjects), each cell showing the figure and its change, with a
+    Pass % / Average mark toggle (`gridMetric`), category shading on the average-mark view and
+    conditional up/down colouring. Section D has no "All Managements" column, so the Management
+    filter **highlights** its row (`.be-me`) instead of reducing the table. Export
+    (`beSubjectGrid`) is long format — one row per management and subject — so the columns stay
+    fixed across classes.
+  - **Module 9 — Grid 2** is the existing drill table at state scope, retitled "District
+    Performance Ranking", with the improvement columns labelled `2024-25 → 2025-26`, a search
+    box, `N/A` instead of blanks, and a footnote on how pass % and rank are derived.
+  - **Module 12 is not built**: the dashboard reads a static asset, so server-side aggregation,
+    role-based access and audit are out of reach here. The honest notes in the UI say which
+    figures are printed, derived or assumed.
+
+- **Board Exam: layout and consolidation follow-ups (17-Nov-2026).**
+  - **Unit charts show a slice, not all 38 districts.** `unitRank` (Top / Bottom) + `unitCount`
+    (5 / 10 / 20 / All, `unitCountValue` for the `<select>`) drive both the pass-% and
+    average-mark charts through `unitSlice(metric)` → `passChartRows` / `avgChartRows`.
+    **Default: top 5.** Each card has a "View all N" link (`viewAllUnits()`, highest to lowest)
+    and a "Top 5 only" link back; `unitSliceLabel()` says what is on screen and
+    `unitChartHeight()` follows the number of bars drawn. The two charts rank independently, so
+    their order can differ — the hints say so.
+  - **Numbers layout order is now the requirement document's**: KPI cards → charts (pass %,
+    average mark, rating, subject-wise) → list panel → **Needs Your Attention** → Results by
+    management → Grid 1 → Grid 2. The school-scope branch closes after the charts, so the
+    alerts and Grid 1 render at every scope while Results by management and the ranking grid
+    stay behind `@if (be.level() !== 'school')`.
+  - **Needs Your Attention is consolidated.** A rule that fires for many units produces ONE
+    card ("Pass % fell by 5 pp or more — 6 districts") carrying the affected unit count, the
+    total schools behind them, the **worst** unit's figures (tagged "worst unit") and a
+    `detail` line naming the worst three and "and N more". Open lists those units in the shared
+    panel. Critical / Watch are separate cards per rule, so the counts stay meaningful.
+  - **One list panel for everything** (`pick`, `pickUnits`, `pickExportRows`, `closePick`),
+    opened by a category click, a subject segment or an alert. `catPick` / `catUnits` are gone.
+    `openBeAlert()` in App scrolls `#be-pick` into view, since the panel sits above the alerts.
+  - **The subject-wise category chart and Grid 1 now render at every scope.**
+    - State scope `subjectCats` counts **districts** per band, placing each district at the
+      state subject average shifted by its own distance from the state average (both inputs
+      real, the shift derived — `derivedSubjects: true`, a "Derived" tag and
+      `subjectCatNote()`). Clicking a segment lists those districts.
+    - `subjectMgmtGrid` gained three more scopes: **block** (rebuilt from that block's annexure
+      rows by management group, via `gridCell()`), **school** (one row, its own management) and
+      **state** (the state subject figure shifted by each management group's distance from the
+      state figure). Average marks are printed; **subject pass % at block / school scope is
+      derived from the subject average**, and the grid's `source` line says which it is.
+  - **Needs Your Attention metrics (17-Nov-2026, on request):** the five earlier rules were
+    replaced by three — (1) **Year-on-year improvement**: units whose pass % FELL
+    (`yoyDropCritical` 5 pp / `yoyDropWatch` 2 pp); (2) **Average mark**: units in the Poor
+    (`avgMarkCritical` ≤ 50) or Needs Improvement (`avgMarkWatch` ≤ 60) band; (3) **Subjects
+    with a low pass % and / or a low average mark** (`subjectPassCritical` 80 / `subjectPassWatch`
+    90, `subjectAvgCritical` 50 / `subjectAvgWatch` 60). The subject card leads with the average
+    mark and carries the pass % in its detail line; below district scope the reports print no
+    subject pass %, so it says so. The "share rated Poor" and "pass % floor" rules are gone.
+    `BoardThresholds` keys changed accordingly (`beThresholdFields` in App matches).
+  - **Chart shapes (17-Nov-2026, on request):** the pass-% and average-mark unit charts are now
+    **vertical** bars (category x axis, labels rotate above 6 / 12 bars, reference line on the y
+    axis; `unitChartHeight` is 340 / 420 px). "Schools by performance rating" is a **pie**
+    (outer ring = selected year, labels with count and share). The previous-year inner ring was
+    added and then **removed on request** the same day; `perfCounts().prev` is still computed
+    and used by the alerts. Slice clicks still reach `onBePerfClick` via `e.name`.
+  - **17-Nov-2026, on request:** the long "Source: …" note in the Board Exam control bar was
+    removed (the scope chips, the assumed-data notice and each card's own footnote still carry
+    the provenance). "View all N" now stacks the pass-% and average-mark cards **full-width, one
+    below the other** (`[class.row-two]="!be.unitShowAll()"` on the grid row; `.grid-row` alone
+    is a single-column grid) and raises the chart height to 460 px, so the expanded chart pushes
+    the next one down instead of squeezing 38 bars into half a row.
+  - **17-Nov-2026 (later), on request:**
+    - **KPI card "Year-on-year improvement"** added as the third card: pass-% change in pp with
+      an up/down tone (`tone` on the KPI row → `.be-kpi-up/.be-kpi-down`), the average-mark change
+      in its sub-line, N/A on the previous-year view.
+    - **Trend From / To year window.** `trendFrom` / `trendTo` (null = full range),
+      `trendFromYear/ToYear`, `trendFromOptions/ToOptions` (each bounded by the other),
+      `setTrendFrom/To` (pull the other end along), `resetTrendYears`, `trendIdx`,
+      `trendWindowLabel`. Both trend lines slice to the window via `trendChart()`.
+    - **Change-by-unit chart = top 5 and bottom 5 only** (`trendEnds`, `trendUnitsAll` → `trendUnits`
+      with a `null` gap row rendered as "…" and a shaded `markArea`; `trendUnitsTruncated`). Now a
+      vertical bar chart with a zero line; all units are drawn when there are ≤ 10.
+    - **Comparison restructured like Academic Scores:** `compareMode` 'districts' | 'exams' with the
+      same `.cmp-tabs`. *Between units*: a **Subject vs Unit heatmap** (`compareHeat` →
+      `beHeatOpt` via the shared `cs.subjectHeatmap`; at state scope it is the derived
+      state-subject-shifted-by-district figure and is tagged "Derived") above the existing ranked
+      bars (now clickable → `onBeCompareClick` drills) and the management-vs-state chart.
+      *Between exams*: a head-to-head picker (class × academic year per side, optional subject
+      focus) → `h2hA` / `h2hB` / `h2hSubject`, `setH2h`, `h2hSide(cls, year)` (per-scope figures
+      for ANY class, which is why the district detail was refactored), `examHeadToHead`,
+      `h2hChartRows` → `beH2hOpt` via the shared `cs.examHeadToHead`, subject table, export `beH2h`.
+      Default: Class X AY 2024-25 vs Class X AY 2025-26. Warns when both sides are the same sitting
+      or when classes differ (only shared subjects are compared).
+    - **Refactor for the above:** the class-bound computeds are now wrappers over per-class
+      helpers — `blockFor`, `subjectsFor`, `stateTotalFor`, `stateRowsFor`, `scopeStateRowFor`,
+      `stateSubjectsFor`, `refDistrictFor`, `realDistrictFor`, `districtFor(cls)`; the assumed
+      district is built by `buildAssumed(cls)` into `assumedDistrict10` / `assumedDistrict12`
+      (`hash01` / `spread` take a `cls`, `subjectShapeFor(cls)`, `rollEligible(district, cls)`).
+      Figures for the current class are unchanged.
+    - **Trend grid (17-Nov-2026, on request).** Below the trend charts, a `{Unit}-wise, {From} vs
+      {To}` table: Schools · Pass % in the From year, the To year and the change (pp) · Average
+      mark in the From year, the To year and the change · Category. Rows follow the trend window
+      and drill District → Block → School on click (`drillTrendRow` → `drill`). Built from
+      `unitYears()` (per-unit current = printed, previous = value − change, independent of the
+      Academic Year filter) mapped through `yearSlot()` (2026 → cur, 2025 → prev). Per-unit
+      figures exist for those two years only, so a window year outside them shows N/A and
+      `trendGridNote()` says so; From = To shows no change. Export `beTrendGrid`.
+    - **Grid restyle (17-Nov-2026, on request).** One modern look for every Board Exam table:
+      `:host ::ng-deep .be-table` (all eight PrimeNG grids) and the matching `.be-grid` rules
+      (the hand-built school-report and subject × management tables, now all wrapped in
+      `.be-scroll`, which carries the rounded 1 px frame). Soft grey header band with wrapped
+      labels and a lighter second header row, zebra rows, 13 px body text, tabular numbers, blue
+      hover on drillable rows, a rounded frame, transparent caption / paginator, centred `.be-grp`
+      group headers. `.be-delta` is now a tinted pill that draws its own ▲ / ▼ (the hand-typed
+      arrows and brackets around deltas were removed), `.be-pill` is a tinted outline pill with a
+      colour dot instead of a solid block, `.be-cell` is a 3 px category stripe.
+    - **Encoding incident (17-Nov-2026, fixed).** A `Get-Content | Set-Content` pass on
+      `app.html` decoded UTF-8 as Windows-1252 and re-saved, turning every non-ASCII character
+      into mojibake (`—` → `â€”`, 280 sequences). Repaired in place by re-encoding only valid
+      multibyte sequences (`%TEMP%\fix-mojibake.ps1`); HEAD was never affected. **Rule for this
+      repo:** edit files with the editor tools or `[System.IO.File]::ReadAllText` /
+      `WriteAllText` with `UTF8Encoding($false)`; never `Get-Content`/`Set-Content` or `>` on
+      source files. Also note `cls` is a PowerShell alias for Clear-Host — don't name a
+      function that.
+
+- **Academic Scores X & XII tab (17-Nov-2026):** `AcademicService.boardMode` projects every
+  node to the board classes via `examClass` sittings (`boardRows`/`projectNode`); filters
+  `boardExams` (multi-select) and `boardClass` (0/10/12); Quarterly / Half Yearly sittings for
+  classes 10/12 are **assumed** (stepped from Annual by the scope's own exam gap, deterministic
+  jitter, `assumed:true`, "Assumed data" badge) because the export has Annual only.
+
 - **"At a glance" executive page (13-Nov-2026, moved to its own route 16-Nov-2026):** a
   standalone page at **`/glance`** that ports the layout of
   `D:\general\Dashboard\review\SED-Review-Dashboard.html` into the Angular app. It is reached

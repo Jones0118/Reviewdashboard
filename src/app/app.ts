@@ -33,6 +33,8 @@ import { InfraService } from './services/infra.service';
 import { Class1MonitorService } from './services/class1-monitor.service';
 import { ReviewService, DrillRow } from './services/review.service';
 import { KpiValuesService } from './services/kpi-values.service';
+import { BoardAlert, BoardExamService, BoardThresholds } from './services/board-exam.service';
+import { BOARD_CATEGORIES, BoardCategory } from './models/board-exam.model';
 import { KPI_MODULES, KpiDef } from './models/kpi-catalog.model';
 import { ExportColumn, ExportService } from './services/export.service';
 import { DONUT_DIMENSIONS, DonutDimension, MAP_METRICS, MapMetric } from './models/enrollment.model';
@@ -72,6 +74,8 @@ export class App implements OnInit {
   readonly c1 = inject(Class1MonitorService);
   readonly rv = inject(ReviewService);
   private readonly kv = inject(KpiValuesService);
+  readonly be = inject(BoardExamService);
+  readonly Math = Math;
   readonly auth = inject(AuthService);
   private readonly ex = inject(ExportService);
   private readonly cs = inject(ChartService);
@@ -138,6 +142,10 @@ export class App implements OnInit {
     { label: 'School Dashboard' },
     { label: 'Infrastructure' },
     { label: 'Academic Scores' },
+    // Same page as Academic Scores, projected to the board classes (AcademicService.boardMode)
+    { label: 'Academic Scores X & XII' },
+    // Board exam performance reports (state / district / school), Class X and XII
+    { label: 'Board Exam' },
     { label: 'Attendance' },
     { label: 'All Children in School' },
     { label: 'Class 1 Enrolment Monitor' },
@@ -175,6 +183,10 @@ export class App implements OnInit {
     if (this.activeTab() === 'Review Dashboard') {
       return this.ALL_SUB_MENUS.filter((s) => s.id === 'cards');
     }
+    // Board Exam: Numbers / Trend / Comparison only (no alerts or cautions defined for it)
+    if (this.activeTab() === 'Board Exam') {
+      return this.ALL_SUB_MENUS.filter((s) => s.id === 'numbers' || s.id === 'trend' || s.id === 'comparison');
+    }
     // "District Review" (cards) belongs only to the Review Dashboard; other
     // dashboards drop it. Infrastructure additionally has no Trend view.
     return this.ALL_SUB_MENUS.filter((s) =>
@@ -183,7 +195,9 @@ export class App implements OnInit {
   });
   activeSub = signal<'cards' | 'numbers' | 'trend' | 'comparison' | 'alarming' | 'caution'>('numbers');
 
-  readonly isAcademic = computed(() => this.activeTab() === 'Academic Scores');
+  readonly isBoard = computed(() => this.activeTab() === 'Academic Scores X & XII');
+  readonly isBoardExam = computed(() => this.activeTab() === 'Board Exam');
+  readonly isAcademic = computed(() => this.activeTab() === 'Academic Scores' || this.isBoard());
   readonly isAttendance = computed(() => this.activeTab() === 'Attendance');
   readonly isInfra = computed(() => this.activeTab() === 'Infrastructure');
   readonly isSchoolTab = computed(() => this.activeTab() === 'School Dashboard');
@@ -1154,6 +1168,8 @@ export class App implements OnInit {
   });
 
   setAcYear(y: string): void { this.ac.year.set(y); }
+  setAcBoardExams(e: string[]): void { this.ac.boardExams.set(e ?? []); }
+  setAcBoardClass(c: number): void { this.ac.boardClass.set(+c || 0); }
   setAcFromYear(y: string): void { this.ac.fromYear.set(y); }
   setAcToYear(y: string): void { this.ac.toYear.set(y); }
   setAcMetric(m: string): void { this.ac.metric.set(m as AcademicMetric); }
@@ -1462,6 +1478,36 @@ export class App implements OnInit {
       { header: 'Alert', field: 'kind' },
       { header: 'Measured', field: 'detail' },
     ],
+    beUnits: [
+      { header: 'Name', field: 'name' }, { header: 'Schools', field: 'schools', type: 'number' }, { header: 'Appeared', field: 'appeared', type: 'number' },
+      { header: 'Pass %', field: 'pass' }, { header: 'Pass change', field: 'passChange' }, { header: 'Average mark', field: 'avg' }, { header: 'Avg change', field: 'avgChange' },
+      { header: 'Rank', field: 'rank' }, { header: 'Category', field: 'category' },
+    ],
+    beAlerts: [
+      { header: 'Severity', field: 'severity' }, { header: 'Issue', field: 'kind' }, { header: 'Where', field: 'where' },
+      { header: 'District', field: 'district' }, { header: 'Block', field: 'block' }, { header: 'Subject', field: 'subject' },
+      { header: 'Schools', field: 'schools' }, { header: 'Current', field: 'current' }, { header: 'Previous', field: 'previous' },
+      { header: 'Change', field: 'change' }, { header: 'Units covered', field: 'detail' }, { header: 'Recommended action', field: 'action' },
+    ],
+    beSubjectGrid: [
+      { header: 'Management', field: 'mgmt' }, { header: 'Subject', field: 'subject' }, { header: 'Metric', field: 'metric' },
+      { header: 'Value', field: 'value' }, { header: 'Year-on-year change', field: 'change' },
+    ],
+    beCatUnits: [
+      { header: 'Name', field: 'name' }, { header: 'Where', field: 'where' }, { header: 'UDISE', field: 'udise' },
+      { header: 'Appeared', field: 'appeared', type: 'number' }, { header: 'Pass %', field: 'pass' },
+      { header: 'Average mark', field: 'avg' }, { header: 'Rank', field: 'rank' }, { header: 'Category', field: 'category' },
+    ],
+    beH2h: [
+      { header: 'Subject', field: 'subject' }, { header: 'Exam A avg', field: 'aAvg' }, { header: 'Exam B avg', field: 'bAvg' }, { header: 'Avg diff', field: 'avgDiff' },
+      { header: 'Exam A pass %', field: 'aPass' }, { header: 'Exam B pass %', field: 'bPass' }, { header: 'Pass diff (pp)', field: 'passDiff' },
+    ],
+    beTrendGrid: [
+      { header: 'Name', field: 'name' }, { header: 'Where', field: 'where' }, { header: 'Schools', field: 'schools', type: 'number' },
+      { header: 'Pass % (from year)', field: 'passFrom' }, { header: 'Pass % (to year)', field: 'passTo' }, { header: 'Pass change (pp)', field: 'passChange' },
+      { header: 'Avg mark (from year)', field: 'avgFrom' }, { header: 'Avg mark (to year)', field: 'avgTo' }, { header: 'Avg change', field: 'avgChange' },
+      { header: 'Category', field: 'category' }, { header: 'Years', field: '_years' },
+    ],
     acSubjects: [
       { header: 'Subject', field: 'name' },
       { header: 'Average Mark', field: 'avg' },
@@ -1657,6 +1703,12 @@ export class App implements OnInit {
       case 'alerts': case 'acAlerts': case 'atAlerts': case 'infAlerts':
         return this.filteredAlerts();
       case 'acSubjects': return this.ac.activeSubjects();
+      case 'beUnits': return this.be.unitExportRows();
+      case 'beAlerts': return this.be.alertExportRows();
+      case 'beSubjectGrid': return this.be.subjectGridExportRows();
+      case 'beCatUnits': return this.be.pickExportRows();
+      case 'beH2h': return this.be.h2hExportRows();
+      case 'beTrendGrid': return this.be.trendGridExportRows();
       case 'acChildren': return this.ac.comparisonRows();
       case 'acChildTrend': return this.ac.childTrendRows();
       case 'acSittings': return this.ac.examSittings();
@@ -1694,6 +1746,12 @@ export class App implements OnInit {
       case 'comparison': return `Indicator Comparison - ${scope}`;
       case 'alerts': return `Alarming Indicators - ${scope}`;
       case 'acSubjects': return `Subject Detail - ${this.ac.subjectSetLabel()} - ${scope}`;
+      case 'beUnits': return `Board Exam ${this.be.clsLabel()} - ${this.be.unitLabel()}-wise - ${scope}`;
+      case 'beAlerts': return `Board Exam ${this.be.clsLabel()} - Needs Your Attention - ${scope}`;
+      case 'beSubjectGrid': return `Board Exam ${this.be.clsLabel()} - Subject-wise Details by Management - ${scope}`;
+      case 'beCatUnits': return `Board Exam ${this.be.clsLabel()} - ${this.be.pick()?.title ?? 'List'}`;
+      case 'beH2h': { const h = this.be.examHeadToHead(); return `Board Exam - ${h.a.label} vs ${h.b.label} - ${scope}`; }
+      case 'beTrendGrid': { const y = this.be.trendGridYears(); return `Board Exam ${this.be.clsLabel()} - ${this.be.unitLabel()}-wise ${y.from} vs ${y.to} - ${scope}`; }
       case 'acChildren': return `${this.ac.childLabel()} Academic Summary - ${scope}`;
       case 'acChildTrend': return `${this.ac.childLabel()} ${this.ac.metricLabel()} Change - ${scope}`;
       case 'acSittings': return `Exam Sittings - ${scope}`;
@@ -1725,6 +1783,8 @@ export class App implements OnInit {
     const bits: string[] = [];
     if (this.isSchoolTab()) bits.push(`Source: ${this.ds.source()}`, `Year: ${this.ds.data()?.currentYear ?? ''}`);
     if (this.isAcademic()) bits.push(`Academic year: ${this.ac.activeYear()}`, 'Government / Partially Aided / Fully Aided only');
+    if (this.isBoardExam()) bits.push(`AY ${this.be.activeYear()}`, `${this.be.clsLabel()} · ${this.be.fMgmt()} · ${this.be.fCtype()}`,
+      this.be.assumed() ? 'Assumed data: district detail synthesized from the real state row and enrolment roll' : 'Board exam performance reports (Govt schools at state level; Govt + Aided in annexures)');
     if (this.isAttendance()) bits.push(this.at.periodLabel(), 'Government / Partially Aided / Fully Aided only');
     if (this.isInfra()) {
       // caution checks span every type, so naming one would be misleading
@@ -2150,6 +2210,63 @@ export class App implements OnInit {
   });
   readonly canDrillRows = computed(() => this.ds.level() !== 'school');
 
+  // ---------- Board Exam interactions ----------
+  /** Threshold editor for "Needs Your Attention". */
+  readonly beThreshOpen = signal(false);
+  readonly beThresholdFields: { key: keyof BoardThresholds; label: string }[] = [
+    { key: 'yoyDropCritical', label: 'YoY pass % fall — critical (pp)' },
+    { key: 'yoyDropWatch', label: 'YoY pass % fall — watch (pp)' },
+    { key: 'avgMarkCritical', label: 'Average mark below — critical' },
+    { key: 'avgMarkWatch', label: 'Average mark below — watch' },
+    { key: 'subjectPassCritical', label: 'Subject pass % below — critical' },
+    { key: 'subjectPassWatch', label: 'Subject pass % below — watch' },
+    { key: 'subjectAvgCritical', label: 'Subject average below — critical' },
+    { key: 'subjectAvgWatch', label: 'Subject average below — watch' },
+  ];
+  /** Message shown when a trend year has no detail behind it. */
+  readonly beTrendNote = signal('');
+  /** Clicking a performance-rating bar opens that category's list. */
+  onBePerfClick(e: any): void {
+    const cat = (e?.name ?? e?.value?.[1]) as BoardCategory;
+    if (BOARD_CATEGORIES.includes(cat)) { this.be.openCat(cat); this.scrollToBePick(); }
+  }
+  /** Clicking a segment of the subject-wise chart opens that subject + category list. */
+  onBeSubjectCatClick(e: any): void {
+    const cat = e?.seriesName as BoardCategory;
+    const subject = this.be.perfCounts()?.subjectCats?.[e?.dataIndex]?.subject;
+    if (BOARD_CATEGORIES.includes(cat) && subject) { this.be.openCat(cat, subject); this.scrollToBePick(); }
+  }
+  /** Opening a consolidated alert shows the units behind it in the list panel. */
+  openBeAlert(a: BoardAlert): void {
+    this.be.openAlert(a);
+    this.scrollToBePick();
+  }
+  /** The list panel sits above the alerts, so bring it into view when it opens. */
+  private scrollToBePick(): void {
+    queueMicrotask(() => document.getElementById('be-pick')?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+  }
+  /** Clicking a trend point switches the dashboard to that academic year where the reports allow it. */
+  onBeTrendClick(e: any): void {
+    const year = e?.name ?? this.be.trendYears()[e?.dataIndex];
+    this.beTrendNote.set(year == null ? '' : this.be.pickTrendYear(year));
+  }
+  /** Comparison: ranked bar → drill into that unit. */
+  onBeCompareClick(e: any): void {
+    const u = this.be.compareRows()[e?.dataIndex];
+    if (u) this.be.drill(u);
+  }
+  /** Comparison: subject × unit heatmap, reusing the shared Academic heatmap builder. */
+  readonly beHeatOpt = computed(() => {
+    const h = this.be.compareHeat();
+    return h && h.units.length ? this.cs.subjectHeatmap(h.units, h.subjects, h.cells, { id: 'beHeat', title: `Subject vs ${this.be.unitLabel()} — ${this.be.scopeLabel()}` }) : {};
+  });
+  /** Comparison: head-to-head between two sittings, reusing the shared Academic builder. */
+  readonly beH2hOpt = computed(() => {
+    const h = this.be.examHeadToHead();
+    const rows = this.be.h2hChartRows();
+    return rows.length ? this.cs.examHeadToHead(rows, h.a.label, h.b.label, { id: 'beH2h', title: `${h.a.label} vs ${h.b.label} — ${this.be.scopeLabel()}` }) : {};
+  });
+
   readonly districtOptions = computed(() =>
     this.ds.districts().map((d) => ({ label: this.ds.titleCase(d.name), value: d.name })),
   );
@@ -2174,6 +2291,7 @@ export class App implements OnInit {
     this.inf.load().catch(() => { /* optional dataset */ });
     this.c1.load().catch(() => { /* optional dataset */ });
     const review = this.rv.load().catch(() => { /* optional dataset */ });
+    this.be.load().catch(() => { /* optional dataset */ });
 
     // Deep link from the standalone "At a glance" page (/glance): a KPI or
     // module card there navigates to /?topic=…&kpi=…&module=… and lands on the
@@ -2455,6 +2573,9 @@ export class App implements OnInit {
 
   setTab(t: string): void {
     this.activeTab.set(t);
+    // Class X & XII tab = the Academic page in board mode
+    this.ac.boardMode.set(t === 'Academic Scores X & XII');
+    if (t === 'Board Exam' && !['numbers', 'trend', 'comparison'].includes(this.activeSub())) this.activeSub.set('numbers');
     this.alertKind.set('');
     this.cautionId.set('');
     // Infrastructure has no Trend view; fall back to Numbers

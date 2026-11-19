@@ -10,6 +10,7 @@
     "gen:auth": "node scripts/gen-auth.mjs",
     "gen:schemes": "node scripts/gen-schemes.mjs",
     "gen:kpi": "node scripts/gen-kpi-modules.mjs",
+    "snapshot:glance": "node scripts/snapshot-glance.mjs",
     "prestart": "node scripts/gen-auth.mjs && node scripts/gen-schemes.mjs && node scripts/gen-kpi-modules.mjs",
     "prebuild": "node scripts/gen-auth.mjs && node scripts/gen-schemes.mjs && node scripts/gen-kpi-modules.mjs"
   },

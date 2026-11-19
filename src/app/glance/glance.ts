@@ -15,8 +15,8 @@ import { InfraService } from '../services/infra.service';
 import { ReviewService } from '../services/review.service';
 import { KpiValuesService } from '../services/kpi-values.service';
 import { KPI_MODULES } from '../models/kpi-catalog.model';
-import { AcisStudentCol, PalliObsCol } from '../models/real-data.model';
-import { inr, inrAxis, inrShort } from '../utils/format';
+import { PalliObsCol } from '../models/real-data.model';
+import { inr, inrShort } from '../utils/format';
 
 /**
  * "At a glance" — standalone executive page at /glance, modelled on
@@ -59,14 +59,14 @@ export class GlancePage implements OnInit {
     // Same datasets the dashboard loads; every load() is idempotent, so landing
     // here directly or after the main page costs nothing extra.
     await this.ds.load();
+    // this page reads all-class academic figures; the Class X & XII tab may have left board mode on
+    this.ac.boardMode.set(false);
     this.at.load().catch(() => { /* optional dataset */ });
     this.ac.load().catch(() => { /* optional dataset */ });
     this.inf.load().catch(() => { /* optional dataset */ });
     this.rv.load().catch(() => { /* optional dataset */ });
     // observation line list for the Palli Paarvai trend chart (lazy asset)
     this.rv.loadPalliObs();
-    // common-pool student list for the ACiS school-category chart (lazy asset)
-    this.rv.loadAcisStudents();
   }
 
   readonly ready = computed(() => this.ds.loaded() && this.rv.loaded());
@@ -148,6 +148,94 @@ export class GlancePage implements OnInit {
   onBlockChange(block: string | null): void { if (block) this.ds.drillToBlock(block); else this.ds.goToDistrict(); }
   print(): void { window.print(); }
 
+  // ---- "Download HTML": a self-contained snapshot of the page as rendered ----
+  readonly exporting = signal(false);
+  /**
+   * Serialises the page as it stands (scope, filters, chart windows, open
+   * submenu item) into one standalone .html: the component's own compiled
+   * styles plus the global sheets are inlined, every ECharts canvas becomes a
+   * PNG, fonts and icon files are embedded as data URIs so the file reads the
+   * same offline. Interactive controls (dropdowns, buttons) are rendered as
+   * static text — the file is a report, not a copy of the app.
+   */
+  async exportHtml(): Promise<void> {
+    if (this.exporting()) return;
+    this.exporting.set(true);
+    try {
+      const host = this.el.nativeElement;
+      const clone = host.cloneNode(true) as HTMLElement;
+
+      // charts: canvas → image, read from the live instances by position
+      const live = Array.from(host.querySelectorAll<HTMLElement>('[echarts]'));
+      const copies = Array.from(clone.querySelectorAll<HTMLElement>('[echarts]'));
+      const echarts = await import('echarts');
+      live.forEach((el, i) => {
+        const inst = echarts.getInstanceByDom(el);
+        const target = copies[i];
+        if (!inst || !target) return;
+        const img = document.createElement('img');
+        img.src = inst.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#ffffff' });
+        img.alt = 'chart';
+        img.style.cssText = `display:block;width:100%;height:${el.offsetHeight}px;object-fit:contain;`;
+        target.replaceWith(img);
+      });
+
+      // controls → static text
+      clone.querySelectorAll('.b1r .gl-btn, .gl-collapse, .freset').forEach((n) => n.remove());
+      const sel = clone.querySelector<HTMLElement>('.gl-bar2 .sel');
+      if (sel) { sel.textContent = ''; const s = document.createElement('span'); s.className = 'fl'; s.textContent = this.filterSummary(); sel.appendChild(s); }
+      clone.querySelectorAll('button').forEach((b) => { b.setAttribute('disabled', ''); b.style.cursor = 'default'; });
+      clone.querySelectorAll('.gl-win').forEach((w) => { w.querySelectorAll('.chip:not(.on)').forEach((c) => c.remove()); });
+
+      // styles: every <style> Angular / PrimeNG injected, plus the linked sheets (fonts, icons, global)
+      const inlineCss: string[] = [];
+      for (const st of Array.from(document.querySelectorAll('style'))) inlineCss.push(st.textContent ?? '');
+      for (const link of Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]'))) {
+        try { inlineCss.push(await this.inlineCssAssets(await (await fetch(link.href)).text(), link.href)); } catch { /* skip an unreachable sheet */ }
+      }
+      // the page animates in; a saved file should open settled
+      inlineCss.push('.gl-anim,.gl-bp .sbar i,.gl-ent .bar i,.gl-spark .sl{animation:none!important}.gl-spark .sl{stroke-dashoffset:0!important}.gl-top{position:static!important}.gl-side{position:static!important;max-height:none!important}');
+
+      const scope = this.ds.titleCase(this.ds.scopeLabel());
+      const when = new Date();
+      const stamp = when.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+      const title = `At a glance — ${scope} — ${this.rv.currentYear()}`;
+      const note = `<div style="font:12px Inter,system-ui,sans-serif;color:#64748B;text-align:center;padding:10px 16px;background:#F4F6FA;border-top:1px solid #E6ECF5">`
+        + `Snapshot of the School Education Dashboard "At a glance" page · ${this.escape(scope)} · ${this.escape(this.filterSummary())} · saved ${this.escape(stamp)}. `
+        + `Figures are as shown on the live page at that moment; controls are static in this file.</div>`;
+      const html = `<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">`
+        + `<title>${this.escape(title)}</title><style>${inlineCss.join('\n')}</style></head>`
+        + `<body style="margin:0;background:#F4F6FA">${clone.outerHTML}${note}</body></html>`;
+
+      const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `At-a-Glance-${scope.replace(/[^\w]+/g, '-')}-${when.toISOString().slice(0, 10)}.html`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    } finally {
+      this.exporting.set(false);
+    }
+  }
+  /** Replace url(...) references in a stylesheet with data URIs so fonts and icons travel with the file. */
+  private async inlineCssAssets(css: string, baseHref: string): Promise<string> {
+    const refs = [...new Set([...css.matchAll(/url\(\s*(['"]?)([^'")]+)\1\s*\)/g)].map((m) => m[2]))]
+      .filter((u) => !u.startsWith('data:') && !u.startsWith('#'));
+    const out = new Map<string, string>();
+    await Promise.all(refs.map(async (u) => {
+      try {
+        const abs = new URL(u, baseHref).href;
+        const res = await fetch(abs);
+        if (!res.ok) return;
+        const blob = await res.blob();
+        if (blob.size > 2_000_000) return; // leave very large assets as links
+        out.set(u, await new Promise<string>((ok) => { const r = new FileReader(); r.onload = () => ok(String(r.result)); r.readAsDataURL(blob); }));
+      } catch { /* leave the original reference */ }
+    }));
+    return css.replace(/url\(\s*(['"]?)([^'")]+)\1\s*\)/g, (m, _q, u) => (out.has(u) ? `url("${out.get(u)}")` : m));
+  }
+  private escape(s: string): string { return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string)); }
+
   /** Which page the glance view shows: 'overview' or a component title. */
   glanceView = signal<string>('overview');
   setGlanceView(v: string): void {
@@ -203,22 +291,6 @@ export class GlancePage implements OnInit {
     // V3 status colours (ST.c): on track / watch / off track; neutral = primary blue
     return band === 'good' ? '#10B981' : band === 'warn' ? '#F59E0B' : band === 'bad' ? '#E11D48' : '#2F62C4';
   }
-  /** Inline-SVG sparkline geometry (120x40 viewBox, as in the V3 reference), null when too short. */
-  private glanceSpark(series: number[], color: string) {
-    const s = series.filter((v) => v != null && isFinite(v));
-    if (s.length < 2) return null;
-    const w = 120, h = 40;
-    const mn = Math.min(...s), mx = Math.max(...s);
-    const pad = (mx - mn) * 0.35 || Math.abs(mx * 0.05) || 1;
-    const lo = mn - pad, hi = mx + pad;
-    const x = (i: number) => 4 + i * ((w - 8) / (s.length - 1));
-    const y = (v: number) => h - 5 - ((v - lo) / (hi - lo)) * (h - 10);
-    return {
-      points: s.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' '),
-      cx: x(s.length - 1).toFixed(1), cy: y(s[s.length - 1]).toFixed(1), color,
-    };
-  }
-
   /**
    * Vertical menu → submenu, from review/"Vertical Menu - Sheet1.csv". Each
    * submenu item points at the Review component (KPI module title) that holds
@@ -244,17 +316,16 @@ export class GlancePage implements OnInit {
       { id: 'board', label: '10th & 12th Board Exam Performance', module: 'Academic Performance', icon: 'fa-solid fa-graduation-cap' },
       { id: 'blp-middle', label: 'Basic-level Proficiency in Middle Grades', module: 'THIRAN', icon: 'fa-solid fa-book-open-reader' },
       { id: 'qh-exam', label: '10th & 12th Quarterly / Half-yearly Exam Performance', module: 'Academic Performance', icon: 'fa-solid fa-pen-ruler' },
-    ] },
-    { id: 'g4', group: '4. Teaching, Governance & Monitoring', icon: 'fa-solid fa-chalkboard-user', items: [
+      { id: 'attendance', label: 'Attendance', module: 'Attendance', icon: 'fa-solid fa-calendar-check' },
       { id: 'classroom', label: 'Classroom Teaching & Engagement', module: 'Palli Paarvai', icon: 'fa-solid fa-eye' },
       { id: 'learn-monitor', label: 'Learning Monitoring & Support', module: null, icon: 'fa-solid fa-magnifying-glass-chart' },
       { id: 'teacher-cap', label: 'Teacher Capacity & Development', module: null, icon: 'fa-solid fa-user-tie' },
       { id: 'digital', label: 'Labs & Digital Infra', module: 'Digital Infrastructure (Middle/High/Hr.Sec)', icon: 'fa-solid fa-desktop' },
-      { id: 'governance', label: 'School Governance', module: null, icon: 'fa-solid fa-landmark' },
+      { id: 'governance', label: 'School Governance', module: 'Palli Paarvai', icon: 'fa-solid fa-landmark' },
       { id: 'vetri', label: 'Vetri Palligal', module: null, icon: 'fa-solid fa-trophy' },
       { id: 'field', label: 'District Governance - Field Inspections & Monitoring', module: 'Palli Paarvai', icon: 'fa-solid fa-clipboard-check' },
     ] },
-    { id: 'g5', group: '5. Social and Emotional Wellbeing', icon: 'fa-solid fa-heart', items: [
+    { id: 'g5', group: '4. Social and Emotional Wellbeing', icon: 'fa-solid fa-heart', items: [
       { id: 'cocurricular', label: 'Co-curricular', module: null, icon: 'fa-solid fa-palette' },
       { id: 'libraries', label: 'Public Libraries', module: null, icon: 'fa-solid fa-book' },
       { id: 'health', label: 'Student Health & Wellbeing', module: null, icon: 'fa-solid fa-heart-pulse' },
@@ -262,7 +333,7 @@ export class GlancePage implements OnInit {
       { id: 'thunai', label: 'Thunai', module: null, icon: 'fa-solid fa-hands-holding-child' },
       { id: 'values', label: 'Value Education', module: null, icon: 'fa-solid fa-seedling' },
     ] },
-    { id: 'g6', group: '6. Alumni and Community Mentorship', icon: 'fa-solid fa-people-arrows', items: [
+    { id: 'g6', group: '5. Alumni and Community Mentorship', icon: 'fa-solid fa-people-arrows', items: [
       { id: 'smc', label: 'School Management Committee (SMC)', module: 'SMC', icon: 'fa-solid fa-people-group' },
       { id: 'alumni', label: 'Vizhuthugal (Alumni)', module: null, icon: 'fa-solid fa-user-graduate' },
       { id: 'nsnop', label: 'Namma School Namma Ooru Palli (NSNOP)', module: null, icon: 'fa-solid fa-house-flag' },
@@ -309,7 +380,6 @@ export class GlancePage implements OnInit {
     if (this.ds.selectedSchool()) parts.push(this.ds.selectedSchool()!);
     return parts.join(' › ') + ' › ' + this.rv.currentYear();
   });
-  readonly glanceAsOf = computed(() => `Attendance to ${this.at.asOf() || '—'} · enrolment roll ${this.rv.currentYear()}`);
 
   /** School counts by broad type for the current scope (roll is students-only in the node). */
   private readonly glanceSchoolTypeCounts = computed(() => {
@@ -327,7 +397,8 @@ export class GlancePage implements OnInit {
     const govtSch = cnt('Government'), aidedSch = cnt('Fully Aided', 'Partially Aided'), privSch = cnt('Un-aided');
     const ptr = n.teaching ? Math.round((n.students / n.teaching) * 10) / 10 : 0;
     // white tints read as one scale on the blue panel and stay legible (reviewer: old greens/ambers were ~2.6:1)
-    const COLORS = ['#FFFFFF', 'rgba(255,255,255,.62)', 'rgba(255,255,255,.34)'];
+    // V3 headline-bar palette (mint / amber) plus a light sky for the third segment; all legible on the blue panel
+    const COLORS = ['#6EE7B7', '#FDE68A', '#BAE6FD'];
     const split = (...parts: [string, number][]) => {
       const tot = parts.reduce((s, [, v]) => s + v, 0) || 1;
       return {
@@ -357,326 +428,200 @@ export class GlancePage implements OnInit {
     ];
   });
 
-  /** Six headline insight cards, one per key component, each linking to its drill. */
-  readonly glanceInsights = computed(() => {
-    const out: {
-      icon: string; title: string; module: string; id: string; topic: string; value: string;
-      pill: { cls: string; text: string } | null; delta: { dir: 'up' | 'down'; text: string } | null;
-      spark: { points: string; cx: string; cy: string; color: string } | null; note: string;
-    }[] = [];
+  /**
+   * Key insights by pillar — one card per GLANCE_GROUPS pillar (Access and
+   * Equity / Safe and Secure Schools / Learning Outcomes First / Social and
+   * Emotional Wellbeing / Alumni and Community Mentorship), each with up to
+   * two real metrics (a headline number + a two-segment breakdown bar) and a
+   * status badge. Replaces the old single-metric insight-card grid.
+   *
+   * No figure here is invented: every segment is a real catalog KPI or a
+   * direct real field, divided only against another real figure from the
+   * same source. Where a pillar has no backing data at all (Social and
+   * Emotional Wellbeing — no sports/counselling/SEL field exists anywhere in
+   * this dataset), the card says so instead of showing numbers.
+   */
+  readonly glancePillarInsights = computed(() => {
+    type Seg = { label: string; value: string; pct: number; color: string };
+    type Metric = { label: string; big: string; suffix: string; segs: [Seg, Seg] };
+    type Card = {
+      id: string; icon: string; title: string; tileBg: string; tileFg: string;
+      pill: { cls: string; text: string } | null; metrics: Metric[]; openId: string | null;
+    };
     const r1 = (v: number) => Math.round(v * 10) / 10;
-
-    // Attendance — real 30-day daily series behind the sparkline
-    const aS = this.glanceKpi('Attendance', 'a_s');
-    if (aS) {
-      const days = this.glanceDays();
-      const first = days[0]?.attendance, last = days[days.length - 1]?.attendance;
-      const diff = days.length > 1 ? r1(last - first) : null;
-      const aT = this.glanceKpi('Attendance', 'a_t'), aNm = this.glanceKpi('Attendance', 'a_nm');
-      out.push({
-        icon: 'fa-solid fa-clipboard-check', title: 'Student attendance', module: aS.module, id: aS.id, topic: aS.topic,
-        value: aS.value, pill: this.glancePill(aS.band),
-        delta: diff == null ? null : { dir: diff >= 0 ? 'up' : 'down', text: `${Math.abs(diff)} pts over ${days.length} school days` },
-        spark: this.glanceSpark(days.map((d) => d.attendance), this.glanceColor(aS.band)),
-        note: `Teacher attendance ${aT?.value ?? '–'} · ${aNm?.raw != null ? r1(aNm.raw) + '%' : '–'} of schools not marking attendance.`,
-      });
-    }
-
-    // Enrolment — real year-wise roll
-    const t = this.ds.scopeTrend();
-    const n = this.ds.current();
-    if (n && t.students.length) {
-      const s = t.students, last = s[s.length - 1], prev = s.length > 1 ? s[s.length - 2] : null;
-      const pct = prev ? r1(((last - prev) / prev) * 100) : null;
-      const diff = prev != null ? last - prev : 0;
-      out.push({
-        icon: 'fa-solid fa-school', title: 'Enrolment', module: 'State Summary', id: 'stu', topic: 'enr',
-        value: inrShort(n.students), pill: null,
-        delta: pct == null ? null : { dir: pct >= 0 ? 'up' : 'down', text: `${Math.abs(pct)}% vs ${t.years[t.years.length - 2]}` },
-        spark: this.glanceSpark(s.slice(-6), '#2F62C4'),
-        note: prev != null
-          ? `${inrShort(Math.abs(diff))} ${diff >= 0 ? 'more' : 'fewer'} children than last year · Boys ${inrShort(n.boys)} · Girls ${inrShort(n.girls)}.`
-          : `Boys ${inrShort(n.boys)} · Girls ${inrShort(n.girls)}.`,
-      });
-    }
-
-    // Potential dropout — EMIS PD report
-    const pd = this.glanceKpi('Potential Dropout', 'ac_pd');
-    if (pd) {
-      const pdp = this.glanceKpi('Potential Dropout', 'ac_pdp'), rep = this.glanceKpi('Potential Dropout', 'ac_pdr');
-      out.push({
-        icon: 'fa-solid fa-user-clock', title: 'Potential dropouts', module: pd.module, id: pd.id, topic: pd.topic,
-        value: pd.value, pill: this.glancePill(pdp?.band ?? 'none'), delta: null, spark: null,
-        note: `Absent 15+ of the last 30 days · ${pdp?.raw != null ? pdp.raw.toFixed(2) + '%' : '–'} of enrolment · ${rep?.value ?? '–'} repeaters.`,
-      });
-    }
-
-    // Academic — exam pass %, with the YoY improvement as the delta
-    const pass = this.glanceKpi('Academic Performance', 'a_pass');
-    if (pass) {
-      const yoy = this.glanceKpi('Academic Performance', 'a_yoy');
-      const avg = this.glanceKpi('Academic Performance', 'a_avg'), cov = this.glanceKpi('Academic Performance', 'a_cov');
-      const y = yoy?.raw;
-      out.push({
-        icon: 'fa-solid fa-graduation-cap', title: 'Pass percentage', module: pass.module, id: pass.id, topic: pass.topic,
-        value: pass.value, pill: this.glancePill(pass.band),
-        delta: y == null ? null : { dir: y >= 0 ? 'up' : 'down', text: `${Math.abs(r1(y))} pts year-on-year` },
-        spark: null,
-        note: `Average mark ${avg?.value ?? '–'} · assessment coverage ${cov?.value ?? '–'} · ${this.rv.examPeriod()} assessment.`,
-      });
-    }
-
-    // SMC – resolutions closed (closure rate = closed / raised; the catalog's m_k, a view-details KPI)
     const vals = this.kv.scopeValues();
-    const mk = KPI_MODULES.find((m) => m.title === 'SMC')?.kpis.find((k) => k.id === 'm_k');
-    const closure = vals['smcClosureRate'] ?? null;
-    if (mk && closure != null) {
-      const emg = this.glanceKpi('SMC', 'm_ek'), oth = this.glanceKpi('SMC', 'm_ok');
-      out.push({
-        icon: 'fa-solid fa-people-group', title: 'SMC resolutions closed', module: 'SMC', id: 'm_k', topic: 'smc',
-        value: this.kv.format(mk, closure), pill: this.glancePill(this.kv.band(mk, closure)), delta: null, spark: null,
-        note: `${inr(vals['smcPending'] ?? 0)} resolutions still open of ${inr(vals['smcRaised'] ?? 0)} raised · emergency ${emg?.value ?? '–'} · other ${oth?.value ?? '–'} completed.`,
-      });
-    }
-
-    // All Children in School – common pool students
-    const pool = this.glanceKpi('All Children in School', 'ac_pool');
-    if (pool) {
-      const sp = this.glanceKpi('All Children in School', 'ac_sp'), adm = this.glanceKpi('All Children in School', 'ac_adm'), tba = this.glanceKpi('All Children in School', 'ac_tba');
-      out.push({
-        icon: 'fa-solid fa-map', title: 'Common pool students', module: pool.module, id: pool.id, topic: pool.topic,
-        value: pool.value, pill: this.glancePill(sp?.band ?? 'none'), delta: null, spark: null,
-        note: `Left one school, not yet admitted to another · ${sp?.value ?? '–'} surveyed · ${adm?.value ?? '–'} admitted · ${tba?.value ?? '–'} to be admitted.`,
-      });
-    }
-
-    // Palli Paarvai – observations against the monthly class-observation target
-    const pal = this.palliTargetPct();
-    if (pal) {
-      out.push({
-        icon: 'fa-solid fa-eye', title: 'Palli Paarvai observation %', module: 'Palli Paarvai', id: 'p_co', topic: 'palli',
-        value: pal.value, pill: pal.pill, delta: null, spark: null, note: pal.note,
-      });
-    }
-    // V3 icon-tile tones, cycled per card: [tile bg, icon fg]
-    const TONES: [string, string][] = [['#EAF0FB', '#2F62C4'], ['#E6F5EF', '#2F8A66'], ['#FDF0E6', '#B85A22'], ['#F2EAFC', '#7B3AC6']];
-    return out.map((k, i) => ({ ...k, tileBg: TONES[i % 4][0], tileFg: TONES[i % 4][1] }));
-  });
-
-  /**
-   * Shared ECharts axis/grid styling, matching the V3 reference charts:
-   * 11px #64748B labels, #CBD5E1 baseline, #EEF2F8 gridlines, no ticks,
-   * legend drawn in the card header (HTML) rather than by ECharts.
-   */
-  /** Shared ECharts animation: ease in on first paint, tween on every data change. */
-  private readonly ANIM = { animation: true, animationDuration: 500, animationEasing: 'cubicOut', animationDurationUpdate: 450, animationEasingUpdate: 'cubicInOut' } as const;
-  private readonly V3_AXIS = {
-    axisTick: { show: false },
-    axisLabel: { fontSize: 11, color: '#64748B' },
-    axisLine: { lineStyle: { color: '#CBD5E1' } },
-    splitLine: { lineStyle: { color: '#EEF2F8' } },
-  };
-
-  /**
-   * Attendance view for the chart and the attendance insight card (local to
-   * this page): last 7 / 15 school days, or a monthly trend built by summing
-   * the daily present / expected counts per calendar month.
-   */
-  readonly ATT_WINDOWS: { label: string; key: 'w7' | 'w15' | 'month' }[] = [
-    { label: 'Week', key: 'w7' }, { label: '15 days', key: 'w15' }, { label: 'Monthly', key: 'month' },
-  ];
-  readonly attWindow = signal<'w7' | 'w15' | 'month'>('w15');
-  setAttWindow(key: 'w7' | 'w15' | 'month'): void { this.attWindow.set(key); }
-  /** Daily records behind the current view (all 30 days when Monthly). */
-  readonly glanceDays = computed(() => {
-    const n = this.at.current();
-    if (!n) return [];
-    const w = this.attWindow();
-    const keep = w === 'w7' ? 7 : w === 'w15' ? 15 : n.daily.length;
-    return n.daily.slice(Math.max(0, n.daily.length - keep));
-  });
-  /** Chart points: one per day, or one per month (present ÷ expected), with the absent share. */
-  readonly glanceAttPoints = computed(() => {
-    const days = this.glanceDays();
-    const r1 = (v: number) => Math.round(v * 10) / 10;
-    const dayLabel = (iso: string) =>
-      new Date(iso + 'T00:00:00Z').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', timeZone: 'UTC' });
-    if (this.attWindow() !== 'month') {
-      return days.map((d) => ({ label: dayLabel(d.date), present: d.attendance, absent: r1(100 - d.attendance), days: 1 }));
-    }
-    const months = new Map<string, { present: number; expected: number; days: number }>();
-    for (const d of days) {
-      const k = d.date.slice(0, 7);
-      const m = months.get(k) ?? { present: 0, expected: 0, days: 0 };
-      m.present += d.present; m.expected += d.expected; m.days += 1;
-      months.set(k, m);
-    }
-    return [...months.entries()].map(([k, m]) => {
-      const present = m.expected ? r1((m.present / m.expected) * 100) : 0;
-      const label = new Date(k + '-01T00:00:00Z').toLocaleDateString('en-GB', { month: 'short', year: 'numeric', timeZone: 'UTC' });
-      return { label, present, absent: r1(100 - present), days: m.days };
-    });
-  });
-  readonly glanceAttDays = computed(() => this.glanceDays().length);
-
-  /** Key trend 1: student attendance, stacked present / absent to 100%, against the 90% target — V3 bar style. */
-  readonly glanceAttOpt = computed(() => {
-    const pts = this.glanceAttPoints();
-    const monthly = this.attWindow() === 'month';
-    return {
-      ...this.ANIM,
-      textStyle: { fontFamily: 'Inter, system-ui, sans-serif' },
-      tooltip: {
-        trigger: 'axis', valueFormatter: (v: number) => `${v}%`,
-        formatter: (ps: any[]) => {
-          const i = ps[0]?.dataIndex ?? 0, p = pts[i];
-          const span = monthly ? ` · ${p.days} school days` : '';
-          return `<b>${p.label}</b>${span}<br/>Present <b>${p.present}%</b><br/>Absent <b>${p.absent}%</b>`;
-        },
-      },
-      grid: { left: 40, right: 12, top: 22, bottom: pts.length > 8 ? 40 : 28 },
-      xAxis: {
-        type: 'category', data: pts.map((p) => p.label), ...this.V3_AXIS, splitLine: { show: false },
-        // every label stays; dense views rotate instead of dropping alternate dates
-        axisLabel: { ...this.V3_AXIS.axisLabel, interval: 0, rotate: pts.length > 8 ? 35 : 0 },
-      },
-      yAxis: {
-        // daily views start at 60 so a 3-point move is visible; monthly keeps the full scale
-        type: 'value', min: monthly ? 0 : 60, max: 100, interval: monthly ? 25 : 10, ...this.V3_AXIS, axisLine: { show: false },
-        axisLabel: { ...this.V3_AXIS.axisLabel, formatter: '{value}%' },
-      },
-      series: [
-        {
-          name: 'Present', type: 'bar', stack: 'att', data: pts.map((p) => p.present),
-          barCategoryGap: '36%', barMaxWidth: monthly ? 96 : 56,
-          itemStyle: { color: '#2F62C4' },
-          markLine: {
-            silent: true, symbol: 'none',
-            lineStyle: { color: '#D97706', type: 'dashed', width: 2 },
-            label: { show: true, position: 'insideEndTop', formatter: 'Target 90%', fontSize: 11, fontWeight: 600, color: '#B45309' },
-            data: [{ yAxis: 90 }],
-          },
-        },
-        {
-          name: 'Absent', type: 'bar', stack: 'att', data: pts.map((p) => p.absent),
-          barMaxWidth: monthly ? 96 : 56,
-          itemStyle: { color: '#C9D8F2', borderRadius: [4, 4, 0, 0] },
-          // the present % sits above the full bar, as V3 labels its bars
-          label: {
-            show: pts.length <= 16, position: 'top', fontSize: 11, fontWeight: 600, color: '#24498F',
-            formatter: (p: any) => `${pts[p.dataIndex].present}%`,
-          },
-        },
-      ],
+    const menu = this.glanceMenu();
+    const openIdFor = (gid: string) => {
+      const g = menu.find((x) => x.id === gid);
+      return g ? (g.items.find((i) => i.built)?.id ?? g.items[0]?.id ?? null) : null;
     };
-  });
-  /**
-   * Enrolment chart management filter (chart-local). "All" uses the
-   * pre-aggregated trend; a management picks the schools of that type in the
-   * current scope and sums their per-year `series` (boys/girls likewise).
-   */
-  readonly ENROL_MGMT: { label: string; stype: string[] | null }[] = [
-    { label: 'All', stype: null },
-    { label: 'Govt', stype: ['Government'] },
-    { label: 'Aided', stype: ['Fully Aided', 'Partially Aided'] },
-    { label: 'Private', stype: ['Un-aided'] },
-  ];
-  readonly enrolMgmt = signal('All');
-  setEnrolMgmt(label: string): void { this.enrolMgmt.set(label); }
-  readonly glanceEnrolTrend = computed(() => {
-    const pick = this.ENROL_MGMT.find((m) => m.label === this.enrolMgmt()) ?? this.ENROL_MGMT[0];
-    if (!pick.stype) return this.ds.scopeTrend();
-    const years = this.ds.years();
-    const n = years.length;
-    const students = new Array<number>(n).fill(0), boys = new Array<number>(n).fill(0), girls = new Array<number>(n).fill(0);
-    const want = new Set(pick.stype);
-    for (const r of this.ds.schoolRowsInScope()) {
-      if (!want.has(r.stype)) continue;
-      for (let i = 0; i < n; i++) {
-        students[i] += r.series?.[i] ?? 0; boys[i] += r.bseries?.[i] ?? 0; girls[i] += r.gseries?.[i] ?? 0;
+    const out: Card[] = [];
+
+    // ---- 1. Access and Equity — student attendance, children out of school ----
+    {
+      const metrics: Metric[] = [];
+      const aS = this.glanceKpi('Attendance', 'a_s');
+      if (aS?.raw != null) {
+        const present = r1(aS.raw), absent = r1(100 - aS.raw);
+        metrics.push({
+          label: 'Average attendance', big: aS.value, suffix: '',
+          segs: [
+            { label: 'Present', value: `${present}%`, pct: present, color: '#10B981' },
+            { label: 'Absent', value: `${absent}%`, pct: absent, color: '#FDA4AF' },
+          ],
+        });
       }
+      const pool = this.glanceKpi('All Children in School', 'ac_pool');
+      const adm = this.glanceKpi('All Children in School', 'ac_adm');
+      const tba = this.glanceKpi('All Children in School', 'ac_tba');
+      if (pool?.raw != null && adm?.raw != null && tba?.raw != null) {
+        const total = (adm.raw as number) + (tba.raw as number) || 1;
+        const admPct = r1(((adm.raw as number) / total) * 100), tbaPct = r1(100 - admPct);
+        metrics.push({
+          label: 'Children out of school (Common Pool)', big: pool.value, suffix: 'flagged',
+          segs: [
+            { label: 'Admitted to schools', value: `${inr(adm.raw as number)} · ${admPct}%`, pct: admPct, color: '#10B981' },
+            { label: 'To be admitted', value: `${inr(tba.raw as number)} · ${tbaPct}%`, pct: tbaPct, color: '#F59E0B' },
+          ],
+        });
+      }
+      out.push({
+        id: 'g1', icon: 'fa-solid fa-scale-balanced', title: 'Access and Equity',
+        tileBg: '#EAF0FB', tileFg: '#2F62C4', pill: this.glancePill(aS?.band ?? 'none'),
+        metrics, openId: openIdFor('g1'),
+      });
     }
-    return { years, students, boys, girls };
+
+    // ---- 2. Safe and Secure Schools — facility coverage, buildings needing attention ----
+    {
+      const metrics: Metric[] = [];
+      // 'i_need' (infNeedsAny) is not aggregated at scope level (renders "–" on
+      // the Infrastructure tile grid itself); 'gap' (Schools with critical infra
+      // gap) is the real, scope-aggregated composite flag, so it is used here.
+      const gap = this.glanceKpi('Infrastructure', 'gap');
+      const schoolsTotal = this.ds.current()?.schools ?? 0;
+      if (gap?.raw != null && schoolsTotal > 0) {
+        const gapPct = r1(Math.min(100, ((gap.raw as number) / schoolsTotal) * 100));
+        const okPct = r1(100 - gapPct);
+        const okCount = Math.max(0, schoolsTotal - (gap.raw as number));
+        metrics.push({
+          label: 'Schools with no critical infra gap', big: `${okPct}%`, suffix: '',
+          segs: [
+            { label: 'No critical gap', value: `${inr(okCount)} · ${okPct}%`, pct: okPct, color: '#2F62C4' },
+            { label: 'Has gaps', value: `${inr(gap.raw as number)} · ${gapPct}%`, pct: gapPct, color: '#CBD5E1' },
+          ],
+        });
+      }
+      const demolish = this.glanceKpi('Infrastructure', 'i_d');
+      const repair = vals['infRepair'] ?? null;
+      if (demolish?.raw != null && repair != null) {
+        const total = (demolish.raw as number) + repair || 1;
+        const demPct = r1(((demolish.raw as number) / total) * 100), repPct = r1(100 - demPct);
+        metrics.push({
+          label: 'Buildings needing attention', big: inr(total), suffix: 'identified',
+          segs: [
+            { label: 'To be demolished', value: `${inr(demolish.raw as number)} · ${demPct}%`, pct: demPct, color: '#FDA4AF' },
+            { label: 'Needs repair', value: `${inr(repair)} · ${repPct}%`, pct: repPct, color: '#F59E0B' },
+          ],
+        });
+      }
+      out.push({
+        id: 'g2', icon: 'fa-solid fa-shield-halved', title: 'Safe and Secure Schools',
+        tileBg: '#FDF0E6', tileFg: '#B85A22', pill: this.glancePill(gap?.band ?? demolish?.band ?? 'none'),
+        metrics, openId: openIdFor('g2'),
+      });
+    }
+
+    // ---- 3. Learning Outcomes First — exam pass %, THIRAN basic-level catch-up ----
+    {
+      const metrics: Metric[] = [];
+      const pass = this.glanceKpi('Academic Performance', 'a_pass');
+      if (pass?.raw != null) {
+        const passed = r1(pass.raw), notPassed = r1(100 - pass.raw);
+        metrics.push({
+          label: 'Exam pass percentage', big: pass.value, suffix: '',
+          segs: [
+            { label: 'Passed', value: `${passed}%`, pct: passed, color: '#2F62C4' },
+            { label: 'Not passed', value: `${notPassed}%`, pct: notPassed, color: '#FDA4AF' },
+          ],
+        });
+      }
+      const tS = this.glanceKpi('THIRAN', 't_s');
+      const tBl = this.glanceKpi('THIRAN', 't_bl');
+      if (tS?.raw != null && tBl?.raw != null) {
+        const caughtUp = Math.round((tS.raw as number) * (tBl.raw as number) / 100);
+        const below = Math.max(0, (tS.raw as number) - caughtUp);
+        const upPct = r1(tBl.raw as number), belowPct = r1(100 - upPct);
+        metrics.push({
+          label: 'THIRAN students', big: inrShort(tS.raw as number), suffix: 'identified',
+          segs: [
+            { label: 'Caught up', value: `${inrShort(caughtUp)} · ${upPct}%`, pct: upPct, color: '#10B981' },
+            { label: 'Still below level', value: `${inrShort(below)} · ${belowPct}%`, pct: belowPct, color: '#F59E0B' },
+          ],
+        });
+      }
+      out.push({
+        id: 'g3', icon: 'fa-solid fa-book-open', title: 'Learning Outcomes First',
+        tileBg: '#E6F5EF', tileFg: '#2F8A66', pill: this.glancePill(pass?.band ?? 'none'),
+        metrics, openId: openIdFor('g3'),
+      });
+    }
+
+    // ---- 4. Social and Emotional Wellbeing — no backing data anywhere in this dataset ----
+    out.push({
+      id: 'g5', icon: 'fa-solid fa-heart', title: 'Social and Emotional Wellbeing',
+      tileBg: '#F2EAFC', tileFg: '#7B3AC6', pill: { cls: 'mu', text: 'Not built' },
+      metrics: [], openId: openIdFor('g5'),
+    });
+
+    // ---- 5. Alumni and Community Mentorship — real SMC meetings + resolutions ----
+    // (Alumni/Vizhuthugal and NSNOP have no backing data; SMC is the one real
+    // module under this pillar, so its two headline metrics stand in for it.)
+    {
+      const metrics: Metric[] = [];
+      const held = vals['smcSchoolsHeld'] ?? null, notHeld = vals['smcSchoolsNotHeld'] ?? null;
+      if (held != null && notHeld != null) {
+        const total = held + notHeld || 1;
+        const heldPct = r1((held / total) * 100), notHeldPct = r1(100 - heldPct);
+        metrics.push({
+          label: 'Schools holding SMC meetings', big: `${heldPct}%`, suffix: '',
+          segs: [
+            { label: 'Held', value: `${inr(held)} · ${heldPct}%`, pct: heldPct, color: '#0f766e' },
+            { label: 'Not held', value: `${inr(notHeld)} · ${notHeldPct}%`, pct: notHeldPct, color: '#99f6e4' },
+          ],
+        });
+      }
+      const raised = vals['smcRaised'] ?? null, closed = vals['smcClosed'] ?? null, pending = vals['smcPending'] ?? null;
+      if (raised != null && closed != null && pending != null) {
+        const closedPct = r1((closed / (raised || 1)) * 100), pendingPct = r1(100 - closedPct);
+        metrics.push({
+          label: 'SMC resolutions', big: inr(raised), suffix: 'raised',
+          segs: [
+            { label: 'Closed', value: `${inr(closed)} · ${closedPct}%`, pct: closedPct, color: '#10B981' },
+            { label: 'Open', value: `${inr(pending)} · ${pendingPct}%`, pct: pendingPct, color: '#F59E0B' },
+          ],
+        });
+      }
+      const ma = KPI_MODULES.find((m) => m.title === 'SMC')?.kpis.find((k) => k.id === 'm_ma');
+      const maRaw = vals['smcMeetAttendPct'] ?? null;
+      out.push({
+        id: 'g6', icon: 'fa-solid fa-people-arrows', title: 'Alumni and Community Mentorship',
+        tileBg: '#E0F2F1', tileFg: '#0f766e',
+        pill: ma && maRaw != null ? this.glancePill(this.kv.band(ma, maRaw)) : null,
+        metrics, openId: openIdFor('g6'),
+      });
+    }
+
+    return out;
   });
 
-  /** Key trend 2: year-wise enrolment stacked boys / girls, total labelled — V3 stacked-bar style. */
-  readonly glanceEnrolOpt = computed(() => {
-    const t = this.glanceEnrolTrend();
-    const from = Math.max(0, t.years.length - 6);
-    const years = t.years.slice(from), boys = t.boys.slice(from), girls = t.girls.slice(from);
-    const totals = t.students.slice(from);
-    return {
-      color: ['#2F62C4', '#3A9A7A'],
-      ...this.ANIM,
-      textStyle: { fontFamily: 'Inter, system-ui, sans-serif' },
-      tooltip: { trigger: 'axis', valueFormatter: (v: number) => inr(v) },
-      grid: { left: 56, right: 12, top: 26, bottom: 28 },
-      xAxis: { type: 'category', data: years, ...this.V3_AXIS, splitLine: { show: false } },
-      yAxis: {
-        type: 'value', ...this.V3_AXIS, axisLine: { show: false },
-        axisLabel: { ...this.V3_AXIS.axisLabel, formatter: (v: number) => inrAxis(v) },
-      },
-      series: [
-        { name: 'Boys', type: 'bar', stack: 'roll', data: boys, barMaxWidth: 56, itemStyle: { borderColor: '#fff', borderWidth: 1 } },
-        {
-          name: 'Girls', type: 'bar', stack: 'roll', data: girls, barMaxWidth: 56,
-          itemStyle: { borderRadius: [4, 4, 0, 0], borderColor: '#fff', borderWidth: 1 },
-          label: {
-            show: true, position: 'top', fontSize: 11, fontWeight: 600, color: '#0F172A',
-            formatter: (p: any) => inrAxis(totals[p.dataIndex]),
-          },
-        },
-      ],
-    };
-  });
-  readonly enrolHasData = computed(() => this.glanceEnrolTrend().students.some((v) => v > 0));
-  readonly glanceEnrolTag = computed(() => {
-    const s = this.glanceEnrolTrend().students;
-    if (s.length < 2) return '';
-    const d = s[s.length - 1] - s[s.length - 2];
-    return `${d >= 0 ? '+' : '−'}${inrShort(Math.abs(d))} vs last year`;
-  });
   // ---- side nav collapse (icon rail) ----
   readonly navCollapsed = signal(false);
   toggleNav(): void { this.navCollapsed.update((v) => !v); }
   fmtN(v: number): string { return inr(v); }
 
-  /**
-   * Key trend 3: Palli Paarvai observations by observing designation, from the
-   * observation line list (palli-obs.json), scoped to the selected district /
-   * block, with a month filter built from the months present in the data.
-   */
-  /**
-   * Palli Paarvai observation %: observations by the five tracked designations
-   * in the selected month(s) against their monthly class-observation target
-   * (Designation_wise_Target_Calculation sheet, state-wide sanctioned posts).
-   * The target model exists only state-wide, so the % is computed at state
-   * scope; district / block scopes report the observation count instead.
-   */
-  readonly palliTargetPct = computed(() => {
-    if (this.palliLoading() || this.rv.palliObsError()) return null;
-    const rows = this.palliByDesig();
-    const obs = rows.reduce((s, r) => s + r.n, 0);
-    const monthsInScope = this.palliMonths().length - 1;           // minus "All months"
-    const months = this.palliMonth() === 'all' ? Math.max(1, monthsInScope) : 1;
-    const monthLabel = this.palliMonths().find((m) => m.key === this.palliMonth())?.label ?? 'all months';
-    if (this.ds.level() !== 'state') {
-      return { value: inr(obs), pill: null, note: `Observations by CEO, DEO, BEO and BRTE in ${this.ds.scopeLabel()} · ${monthLabel} · target model is state-wide, so no % at this scope.` };
-    }
-    const model = this.rv.palliTargetModel();
-    const target = this.PALLI_DESIGS.reduce((s, d) => s + (model.find((m) => m.official === d)?.classesPerMonth ?? 0), 0) * months;
-    if (!target) return null;
-    const pct = Math.round((obs / target) * 1000) / 10;
-    const def = KPI_MODULES.find((m) => m.title === 'Palli Paarvai')?.kpis.find((k) => k.id === 'p_co');
-    return {
-      value: `${pct}%`,
-      pill: def ? this.glancePill(this.kv.band(def, pct)) : null,
-      note: `${inr(obs)} observations against a target of ${inr(target)} · ${monthLabel} · CEO, DEO (Sec / Ele), BEO and BRTE.`,
-    };
-  });
   readonly PALLI_DESIGS = ['CEO', 'DEO (Secondary)', 'DEO (Elementary)', 'BEO', 'BRTE'];
   readonly palliMonth = signal<string>('all');
-  setPalliMonth(m: string): void { this.palliMonth.set(m); }
   /** Observations in scope, each as { month: 'YYYY-MM', desig }. */
   private readonly palliObsInScope = computed(() => {
     const a = this.rv.palliObs();
@@ -714,154 +659,399 @@ export class GlancePage implements OnInit {
   });
   readonly palliTotal = computed(() => this.palliByDesig().reduce((s, r) => s + r.n, 0));
   readonly palliLoading = computed(() => !this.rv.palliObs() && !this.rv.palliObsError());
-  readonly glancePalliOpt = computed(() => {
+
+  /**
+   * Palli Paarvai module page (glanceModule() when gm.module === 'Palli Paarvai'):
+   * a richer analytics layer above the four KPI tiles — a state read-out, two
+   * comparison charts, a weekly activity trend and a searchable unit table —
+   * all built from the same real sources the main Review Dashboard's Palli
+   * Paarvai drill uses (`rv.drillRows()` for per-unit %, `rv.palliObs()` for
+   * the observation line list). No figure here is invented.
+   */
+  private readonly PALLI_DEF = (id: string) => KPI_MODULES.find((m) => m.title === 'Palli Paarvai')?.kpis.find((k) => k.id === id);
+  private palliBand(id: string, v: number | null): string {
+    const def = this.PALLI_DEF(id);
+    return def && v != null ? this.kv.band(def, v) : 'none';
+  }
+  /** Real school count for a drillRows() unit key, from the enrolment roll (not the KPI row's scaled count). */
+  private unitSchoolCount(key: string): number {
+    const lvl = this.ds.level();
+    if (lvl === 'state') return this.ds.districts().find((d) => d.name === key)?.schools ?? 0;
+    if (lvl === 'district') return this.ds.blocksForDistrict().find((b) => b.block === key)?.schools ?? 0;
+    return 1;
+  }
+  /** SHOW: Performance (% of Class Observation) vs Compliance (% Schools Observed 3+ Times) — both real KPIs. */
+  readonly palliShow = signal<'performance' | 'compliance'>('performance');
+  readonly palliShowId = computed(() => (this.palliShow() === 'performance' ? 'p_co' : 'p_s3'));
+  readonly palliShowField = computed<'co' | 's3'>(() => (this.palliShow() === 'performance' ? 'co' : 's3'));
+  readonly palliShowLabel = computed(() => (this.palliShow() === 'performance' ? '% of Class Observation' : '% of Schools Observed 3+ Times'));
+  /** The children of the current scope (districts / blocks / schools) with their real Palli Paarvai %s. */
+  readonly palliUnitRows = computed(() => {
+    const lvl = this.ds.level();
+    if (lvl === 'school') return [];
+    const field = this.palliShowField() === 'co' ? 'palliClassObsPct' : 'palliSchools3PlusPct';
+    const id = this.palliShowId();
+    return (this.rv.drillRows() as any[]).map((r) => ({
+      key: r.key as string, name: r.name as string, schools: this.unitSchoolCount(r.key),
+      co: r.palliClassObsPct ?? null, sno: r.palliSchoolsNotObsPct ?? null,
+      ono: r.palliOfficialsNotObsPct ?? null, s3: r.palliSchools3PlusPct ?? null,
+      band: this.palliBand(id, r[field] ?? null),
+    }));
+  });
+  readonly palliUnitLabel = computed(() => ({ state: 'District', district: 'Block', block: 'School' } as Record<string, string>)[this.ds.level()] ?? 'Unit');
+  readonly palliUnitSearch = signal('');
+  readonly palliUnitRowsFiltered = computed(() => {
+    const q = this.palliUnitSearch().trim().toLowerCase();
+    const rows = this.palliUnitRows();
+    return q ? rows.filter((r) => r.name.toLowerCase().includes(q)) : rows;
+  });
+  /** Drill from a unit table row (district → block), shared by every rich module page. */
+  drillUnit(key: string): void {
+    if (this.ds.level() === 'state') this.ds.drillToDistrict(key);
+    else if (this.ds.level() === 'district') this.ds.drillToBlock(key);
+  }
+  /** Copy the unit table as CSV (clipboard), same figures as shown on screen. */
+  async copyPalliCsv(): Promise<void> {
+    const rows = this.palliUnitRowsFiltered();
+    const head = [this.palliUnitLabel(), 'Schools', '% Class Observation', '% Schools Not Observed', '% Officials Not Observed', '% Schools Observed 3+ Times'];
+    const lines = [head.join(','), ...rows.map((r) => [r.name, r.schools, r.co ?? '', r.sno ?? '', r.ono ?? '', r.s3 ?? ''].join(','))];
+    try { await navigator.clipboard.writeText(lines.join('\n')); } catch { /* clipboard unavailable (insecure context, etc.) */ }
+  }
+  /** State's read-out: a short real narrative above the charts, like the Review Dashboard's own KPI summaries. */
+  readonly palliReadout = computed(() => {
+    const field = this.palliShowField();
+    const units = this.palliUnitRows().filter((r) => r[field] != null);
+    const show = this.glanceKpi('Palli Paarvai', this.palliShowId());
+    const sno = this.glanceKpi('Palli Paarvai', 'p_sno');
+    const ono = this.glanceKpi('Palli Paarvai', 'p_ono');
+    if (!show || !units.length) return [];
+    const sorted = [...units].sort((a, b) => (b[field] as number) - (a[field] as number));
+    const best = sorted[0], worst = sorted[sorted.length - 1];
+    const below = units.filter((u) => (u[field] as number) < (show.raw as number)).length;
+    const unit = this.palliUnitLabel().toLowerCase();
+    return [
+      `${this.palliShowLabel()} for ${this.ds.scopeLabel()} is ${show.value}. Best ${unit}: ${best.name} (${best[field]}%); lowest: ${worst.name} (${worst[field]}%).`,
+      `${below} of ${units.length} ${unit}s are below the ${this.ds.scopeLabel()} figure.`,
+      sno ? `${sno.value} of schools have had no observation this term.` : '',
+      ono ? `${ono.value} of officials are behind their month-to-date target.` : '',
+    ].filter(Boolean);
+  });
+  /** Chart: observations by observing designation (real, from the line list). */
+  readonly glancePalliDesigOpt = computed(() => {
     const rows = this.palliByDesig();
     return {
-      ...this.ANIM,
       textStyle: { fontFamily: 'Inter, system-ui, sans-serif' },
-      tooltip: {
-        trigger: 'axis',
-        formatter: (ps: any[]) => {
-          const r = rows[ps[0]?.dataIndex ?? 0];
-          return `<b>${r.desig}</b><br/>Share of observations <b>${r.pct}%</b><br/>${inr(r.n)} observations`;
-        },
-      },
-      grid: { left: 40, right: 12, top: 26, bottom: 40 },
-      xAxis: {
-        type: 'category', data: rows.map((r) => r.desig.replace(' (', '\n(')), ...this.V3_AXIS, splitLine: { show: false },
-        axisLabel: { ...this.V3_AXIS.axisLabel, interval: 0, lineHeight: 14 },
-      },
-      yAxis: {
-        type: 'value', min: 0, max: 100, interval: 25, ...this.V3_AXIS, axisLine: { show: false },
-        axisLabel: { ...this.V3_AXIS.axisLabel, formatter: '{value}%' },
-      },
-      series: [{
-        name: 'Share of observations', type: 'bar', data: rows.map((r) => r.pct),
-        barCategoryGap: '36%', barMaxWidth: 56,
-        itemStyle: { color: '#2F62C4', borderRadius: [4, 4, 0, 0] },
-        label: { show: true, position: 'top', fontSize: 11, fontWeight: 600, color: '#24498F', formatter: (p: any) => `${p.value}%` },
-      }],
+      tooltip: { trigger: 'axis', formatter: (ps: any[]) => { const r = rows[ps[0]?.dataIndex ?? 0]; return `<b>${r.desig}</b><br/>Share of observations <b>${r.pct}%</b><br/>${inr(r.n)} observations`; } },
+      grid: { left: 40, right: 12, top: 16, bottom: 40 },
+      xAxis: { type: 'category', data: rows.map((r) => r.desig.replace(' (', '\n(')), axisLabel: { fontSize: 10, color: '#64748B', interval: 0, lineHeight: 13 }, axisLine: { lineStyle: { color: '#CBD5E1' } }, axisTick: { show: false } },
+      yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 10, color: '#64748B', formatter: '{value}%' }, axisLine: { show: false }, splitLine: { lineStyle: { color: '#EEF2F8' } } },
+      series: [{ name: 'Share of observations', type: 'bar', data: rows.map((r) => r.pct), barCategoryGap: '36%', barMaxWidth: 56,
+        itemStyle: { color: '#1d4ed8', borderRadius: [4, 4, 0, 0] },
+        label: { show: true, position: 'top', fontSize: 10, fontWeight: 600, color: '#24498F', formatter: (p: any) => `${p.value}%` } }],
     };
   });
-
-  /**
-   * Key trend 4: class-wise performance (Classes 6–12) — Average Mark bars with
-   * the board classes (X, XII) in maroon and Pass % as a line, as on the
-   * Academic Scores dashboard. Source: AcademicNode.byClass at the current scope.
-   */
-  readonly EXAM_TYPES = ['All', 'Quarterly', 'Half Yearly', 'Annual'];
-  readonly examType = signal('All');
-  setExamType(e: string): void { this.examType.set(e); }
-  readonly examByClass = computed(() => {
-    const n = this.ac.current();
-    const board = new Set(this.ac.data()?.boardClasses ?? [10, 12]);
-    const exam = this.examType();
-    const rows = exam === 'All'
-      ? (n?.byClass ?? []).map((c) => ({ cls: String(c.name), avg: c.avg as number | null, pass: c.pass as number | null }))
-      : (n?.examClass ?? []).filter((r) => r.exam === exam).map((r) => ({ cls: String(r.cls), avg: r.avg as number | null, pass: r.pass as number | null }));
-    // board classes only (X and XII); a sitting a class does not have (e.g. no
-    // Quarterly for Class X) shows as a gap, never as 0
-    const all = [...board].map(String).sort((a, b) => +a - +b);
-    return all.map((cls) => {
-      const r = rows.find((x) => x.cls === cls);
-      return { cls, avg: r?.avg ?? null, pass: r?.pass ?? null, board: board.has(+cls) };
-    });
-  });
-  /** Classes with no sitting for the selected exam (named in the caption). */
-  readonly examMissing = computed(() => this.examByClass().filter((r) => r.avg == null && r.pass == null).map((r) => r.cls));
-  readonly examHasData = computed(() => this.examByClass().some((r) => r.avg != null || r.pass != null));
-  readonly glanceExamOpt = computed(() => {
-    const rows = this.examByClass();
+  /** Chart: this scope vs the best and lowest child unit, on the selected SHOW measure. */
+  readonly glancePalliPeerOpt = computed(() => {
+    const field = this.palliShowField();
+    const units = this.palliUnitRows().filter((r) => r[field] != null).sort((a, b) => (b[field] as number) - (a[field] as number));
+    const show = this.glanceKpi('Palli Paarvai', this.palliShowId());
+    if (!units.length || !show) return {};
+    const best = units[0], worst = units[units.length - 1];
+    const rows = [
+      { label: this.ds.titleCase(this.ds.scopeLabel()), v: show.raw as number, color: '#2F62C4' },
+      { label: `Best ${this.palliUnitLabel().toLowerCase()}\n(${best.name})`, v: best[field] as number, color: '#D97706' },
+      { label: `Lowest ${this.palliUnitLabel().toLowerCase()}\n(${worst.name})`, v: worst[field] as number, color: '#CBD5E1' },
+    ];
     return {
-      ...this.ANIM,
       textStyle: { fontFamily: 'Inter, system-ui, sans-serif' },
-      tooltip: {
-        trigger: 'axis', axisPointer: { type: 'shadow' },
-        formatter: (ps: any[]) => {
-          if (!ps?.length) return '';
-          const r = rows[ps[0].dataIndex];
-          let out = `<b>Class ${r.cls}</b>${r.board ? ' <i>(Board exam)</i>' : ''}`;
-          if (r.avg == null && r.pass == null) return out + '<br/>No sitting for this exam';
-          for (const p of ps) out += `<br/>${p.marker} ${p.seriesName}: <b>${p.value ?? '–'}</b>`;
-          return out;
-        },
-      },
-      grid: { left: 40, right: 12, top: 26, bottom: 28 },
-      xAxis: { type: 'category', data: rows.map((r) => `Class ${r.cls}`), ...this.V3_AXIS, splitLine: { show: false }, axisLabel: { ...this.V3_AXIS.axisLabel, interval: 0 } },
-      yAxis: { type: 'value', min: 0, max: 100, interval: 20, ...this.V3_AXIS, axisLine: { show: false } },
-      series: [
-        {
-          name: 'Average Mark', type: 'bar', barMaxWidth: 64, barCategoryGap: '45%',
-          data: rows.map((r) => ({ value: r.avg, itemStyle: { color: r.board ? '#8E1B3F' : '#2F62C4', borderRadius: [4, 4, 0, 0] } })),
-        },
-        {
-          name: 'Pass %', type: 'line', data: rows.map((r) => r.pass),
-          smooth: true, symbol: 'circle', symbolSize: 7, connectNulls: false,
-          itemStyle: { color: '#2F8A66' }, lineStyle: { width: 2.5, color: '#2F8A66' },
-        },
-      ],
+      tooltip: { trigger: 'axis', valueFormatter: (v: number) => `${v}%` },
+      grid: { left: 40, right: 12, top: 16, bottom: 40 },
+      xAxis: { type: 'category', data: rows.map((r) => r.label), axisLabel: { fontSize: 10, color: '#64748B', interval: 0, lineHeight: 13 }, axisLine: { lineStyle: { color: '#CBD5E1' } }, axisTick: { show: false } },
+      yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 10, color: '#64748B', formatter: '{value}%' }, axisLine: { show: false }, splitLine: { lineStyle: { color: '#EEF2F8' } } },
+      series: [{ type: 'bar', data: rows.map((r) => ({ value: r.v, itemStyle: { color: r.color, borderRadius: [4, 4, 0, 0] } })), barCategoryGap: '40%', barMaxWidth: 70,
+        label: { show: true, position: 'top', fontSize: 11, fontWeight: 600, color: '#0F172A', formatter: (p: any) => `${p.value}%` } }],
     };
   });
-
   /**
-   * Key trend 5: All Children in School — common-pool students by the category
-   * of the school they left, with a management filter. Source: the per-student
-   * list (acis-students.json → school refs carry type `t` and category `c`),
-   * scoped to the selected district / block.
+   * Weekly observation counts in scope, most recent 8 weeks present in the
+   * export. State scope also overlays the real weekly target (the monthly
+   * target model ÷ ~4.33); district/block scope has no real target subset
+   * to compare against, so the line is left off rather than invented.
    */
-  readonly ACIS_MGMT: { label: string; types: string[] | null }[] = [
-    { label: 'All', types: null },
-    { label: 'Govt', types: ['Government'] },
-    { label: 'Aided', types: ['Fully Aided', 'Partially Aided'] },
-    { label: 'Private', types: ['Un-aided'] },
-  ];
-  readonly acisMgmt = signal('All');
-  setAcisMgmt(label: string): void { this.acisMgmt.set(label); }
-  private readonly ACIS_CATS = ['Primary School', 'Middle School', 'High School', 'Higher Secondary School'];
-  readonly acisLoading = computed(() => !this.rv.acisStudents());
-  readonly acisByCategory = computed(() => {
-    const a = this.rv.acisStudents();
+  readonly palliWeekly = computed(() => {
+    const a = this.rv.palliObs();
     if (!a) return [];
-    const pick = this.ACIS_MGMT.find((m) => m.label === this.acisMgmt()) ?? this.ACIS_MGMT[0];
-    const want = pick.types ? new Set(pick.types) : null;
+    const base = new Date(a.baseDate + 'T00:00:00Z').getTime();
     const dist = this.ds.selectedDistrict()?.toUpperCase() ?? null;
     const blk = this.ds.selectedBlock()?.toUpperCase() ?? null;
-    // one pass over the school refs decides inclusion; students then just count
-    const schoolOk = a.schools.map((s) =>
-      (!dist || (s.d ?? '').toUpperCase() === dist) && (!blk || (s.b ?? '').toUpperCase() === blk) && (!want || want.has(s.t)));
-    const counts = new Map<string, number>(this.ACIS_CATS.map((c) => [c, 0]));
-    let other = 0;
-    for (const r of a.students) {
-      const si = r[AcisStudentCol.school] as number;
-      if (!schoolOk[si]) continue;
-      const c = a.schools[si]?.c ?? '';
-      if (counts.has(c)) counts.set(c, counts.get(c)! + 1); else other++;
+    const weekStart = (dayOffset: number) => {
+      const d = new Date(base + dayOffset * 86400000);
+      const dow = (d.getUTCDay() + 6) % 7; // Monday = 0
+      d.setUTCDate(d.getUTCDate() - dow);
+      return d.toISOString().slice(0, 10);
+    };
+    const counts = new Map<string, number>();
+    for (const o of a.observations) {
+      const sch = a.schools[o[PalliObsCol.school]];
+      if (dist && (sch?.d ?? '').toUpperCase() !== dist) continue;
+      if (blk && (sch?.b ?? '').toUpperCase() !== blk) continue;
+      const wk = weekStart(o[PalliObsCol.day]);
+      counts.set(wk, (counts.get(wk) ?? 0) + 1);
     }
-    const out = this.ACIS_CATS.map((c) => ({ cat: c.replace(' School', ''), n: counts.get(c) ?? 0 }));
-    if (other) out.push({ cat: 'Others', n: other });
-    return out;
+    const weeks = [...counts.keys()].sort().slice(-8);
+    const label = (iso: string) => new Date(iso + 'T00:00:00Z').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', timeZone: 'UTC' });
+    return weeks.map((w) => ({ label: `wk of ${label(w)}`, n: counts.get(w) ?? 0 }));
   });
-  readonly acisTotal = computed(() => this.acisByCategory().reduce((s, r) => s + r.n, 0));
-  readonly glanceAcisOpt = computed(() => {
-    const rows = this.acisByCategory();
+  readonly palliWeeklyTarget = computed(() => {
+    if (this.ds.level() !== 'state') return null;
+    const model = this.rv.palliTargetModel();
+    const monthly = this.PALLI_DESIGS.reduce((s, d) => s + (model.find((m) => m.official === d)?.classesPerMonth ?? 0), 0);
+    return monthly ? Math.round((monthly / 4.33) * 10) / 10 : null;
+  });
+  readonly glancePalliWeeklyOpt = computed(() => {
+    const rows = this.palliWeekly();
+    if (!rows.length) return {};
+    const target = this.palliWeeklyTarget();
     return {
-      ...this.ANIM,
       textStyle: { fontFamily: 'Inter, system-ui, sans-serif' },
-      tooltip: { trigger: 'axis', valueFormatter: (v: number) => inr(v) },
-      grid: { left: 56, right: 12, top: 26, bottom: 40 },
-      xAxis: { type: 'category', data: rows.map((r) => r.cat.replace('Higher Secondary', 'Higher\nSecondary')), ...this.V3_AXIS, splitLine: { show: false }, axisLabel: { ...this.V3_AXIS.axisLabel, interval: 0, lineHeight: 14 } },
-      yAxis: {
-        type: 'value', ...this.V3_AXIS, axisLine: { show: false },
-        axisLabel: { ...this.V3_AXIS.axisLabel, formatter: (v: number) => inrAxis(v) },
-      },
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+      grid: { left: 48, right: 70, top: 16, bottom: 36 },
+      xAxis: { type: 'category', data: rows.map((r) => r.label), axisLabel: { fontSize: 10, color: '#64748B' }, axisLine: { lineStyle: { color: '#CBD5E1' } }, axisTick: { show: false } },
+      yAxis: { type: 'value', axisLabel: { fontSize: 10, color: '#64748B' }, axisLine: { show: false }, splitLine: { lineStyle: { color: '#EEF2F8' } } },
       series: [{
-        name: 'Students in common pool', type: 'bar', data: rows.map((r) => r.n),
-        barCategoryGap: '36%', barMaxWidth: 56,
-        itemStyle: { color: '#2F62C4', borderRadius: [4, 4, 0, 0] },
-        label: { show: true, position: 'top', fontSize: 11, fontWeight: 600, color: '#24498F', formatter: (p: any) => inr(p.value) },
+        name: 'Observations', type: 'bar', data: rows.map((r) => r.n), barMaxWidth: 48,
+        itemStyle: { color: '#1d4ed8', borderRadius: [4, 4, 0, 0] },
+        label: { show: true, position: 'top', fontSize: 10, fontWeight: 600, color: '#24498F' },
+        markLine: target == null ? undefined : { silent: true, symbol: 'none', lineStyle: { color: '#D97706', type: 'dashed' },
+          label: { formatter: `~${target}/wk`, fontSize: 10, color: '#B45309', position: 'insideEndTop' }, data: [{ yAxis: target }] },
       }],
     };
   });
+
+  /**
+   * Attendance module page (glanceModule() when gm.module === 'Attendance'): the
+   * same richer analytics layer as Palli Paarvai's — SHOW (Students/Teachers) ×
+   * METRIC (Marking status/Attendance %), a state read-out, two comparison
+   * charts, a trend and a searchable unit table — built entirely from
+   * `AttendanceService`'s real per-scope and per-child nodes. No figure here
+   * is invented. One honest substitution: the reference design breaks the
+   * first chart down by gender and school category, but neither breakdown
+   * exists in the attendance data (confirmed: no gender field, no category
+   * field anywhere in `AttendanceNode`/`AttendanceSchool`) — the real
+   * breakdown this data DOES have is by management (`at.byManagement()`),
+   * used instead.
+   */
+  readonly attPageShow = signal<'students' | 'teachers'>('students');
+  readonly attPageMetric = signal<'marking' | 'attendance'>('marking');
+  readonly attPageShowLabel = computed(() => (this.attPageShow() === 'students' ? 'Student' : 'Teacher'));
+  readonly attPageMetricLabel = computed(() => (this.attPageMetric() === 'marking' ? 'Marking status' : 'Attendance %'));
+  /** The field on an AttendanceNode (or AttendanceDay) for the active SHOW/METRIC pair. Marking compliance is recorded once per school, not split by student/teacher. */
+  private attPageField(): string {
+    if (this.attPageMetric() === 'marking') return 'compliance';
+    return this.attPageShow() === 'students' ? 'attendance' : 'teacherAttendance';
+  }
+  /** The latest working day on a node's own daily series (no shared window/day signal touched — local to this page). */
+  private latestDay(node: { daily?: any[] } | null | undefined): any {
+    return node?.daily?.length ? node.daily[node.daily.length - 1] : null;
+  }
+  /** Headline % for the current scope, active SHOW/METRIC. */
+  readonly attPageHeadline = computed(() => {
+    const n = this.at.current() as any;
+    return n ? (n[this.attPageField()] as number) : null;
+  });
+  readonly attPageToday = computed(() => this.latestDay(this.at.current()));
+  /** "Where am I?" — three real snapshot cards for the latest working day in scope. */
+  readonly attPageCards = computed(() => {
+    const day = this.attPageToday();
+    if (!day) return null;
+    const students = this.attPageShow() === 'students';
+    const present = students ? day.present : day.tPresent;
+    const expected = students ? day.expected : day.tExpected;
+    const presentPct = expected ? Math.round((present / expected) * 1000) / 10 : null;
+    const markedPct = day.schools ? Math.round((day.marked / day.schools) * 1000) / 10 : null;
+    return {
+      date: day.date,
+      presentPct, presentLabel: `${inrShort(present)} of ${inrShort(expected)} ${students ? 'enrolled' : 'teaching staff'}`,
+      markedPct, markedLabel: `${inr(day.marked)} of ${inr(day.schools)} schools reporting that day`,
+      pending: day.unmarked, pendingLabel: `${inr(day.unmarked)} schools had not marked attendance that day`,
+    };
+  });
+  /** By school category (real: AttendanceSchool.ctype = Primary/Middle/High/Higher Secondary School, confirmed real in the asset). */
+  readonly attPageCategoryRows = computed(() => {
+    const field = this.attPageField();
+    const schools = this.at.scopeSchools();
+    const order = ['Primary School', 'Middle School', 'High School', 'Higher Secondary School'];
+    const groups = new Map<string, any[]>();
+    for (const s of schools) {
+      const k = (s as any).ctype || 'Other';
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k)!.push(s);
+    }
+    const wavg = (list: any[]) => {
+      const tot = list.reduce((a, s) => a + s.enrolled, 0);
+      return tot ? Math.round((list.reduce((a, s) => a + (s[field] as number) * s.enrolled, 0) / tot) * 10) / 10 : null;
+    };
+    const keys = [...order.filter((k) => groups.has(k)), ...[...groups.keys()].filter((k) => !order.includes(k))];
+    return keys.map((k) => {
+      const list = groups.get(k)!;
+      return { name: k.replace(' School', ''), v: wavg(list), enrolled: list.reduce((a, s) => a + s.enrolled, 0), schools: list.length };
+    }).filter((r) => r.v != null);
+  });
+  readonly glanceAttPageCategoryOpt = computed(() => {
+    const rows = this.attPageCategoryRows();
+    const state = this.attPageHeadline();
+    if (!rows.length) return {};
+    return {
+      textStyle: { fontFamily: 'Inter, system-ui, sans-serif' },
+      tooltip: { trigger: 'axis', formatter: (ps: any[]) => { const r = rows[ps[0]?.dataIndex ?? 0]; return `<b>${r.name}</b><br/>${ps[0].value}%<br/>${inrShort(r.enrolled)} enrolled · ${inr(r.schools)} schools`; } },
+      grid: { left: 40, right: 12, top: 16, bottom: 40 },
+      xAxis: { type: 'category', data: rows.map((r) => r.name), axisLabel: { fontSize: 10, color: '#64748B', interval: 0, lineHeight: 13 }, axisLine: { lineStyle: { color: '#CBD5E1' } }, axisTick: { show: false } },
+      yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 10, color: '#64748B', formatter: '{value}%' }, axisLine: { show: false }, splitLine: { lineStyle: { color: '#EEF2F8' } } },
+      series: [{
+        type: 'bar', data: rows.map((r) => r.v), barCategoryGap: '36%', barMaxWidth: 70,
+        itemStyle: { color: '#b45309', borderRadius: [4, 4, 0, 0] },
+        label: { show: true, position: 'top', fontSize: 11, fontWeight: 600, color: '#0F172A', formatter: (p: any) => `${p.value}%` },
+        markLine: state == null ? undefined : { silent: true, symbol: 'none', lineStyle: { color: '#334155', type: 'dashed' },
+          label: { formatter: `State avg ${state}%`, fontSize: 10, color: '#334155', position: 'insideEndTop' }, data: [{ yAxis: state }] },
+      }],
+    };
+  });
+  /**
+   * By gender: NO measured gender-split attendance/marking record exists
+   * anywhere in the attendance data (confirmed — no boys/girls field on
+   * AttendanceNode or AttendanceSchool). Rather than apportion a fabricated
+   * differential, both bars show the real scope-wide figure; only the
+   * enrolment counts (from the real enrolment roll) differ by gender. The
+   * chart says so plainly.
+   */
+  readonly attPageGenderRows = computed(() => {
+    const n = this.ds.current();
+    const state = this.attPageHeadline();
+    if (!n || state == null) return [];
+    return [
+      { name: 'Boys', v: state, enrolled: n.boys },
+      { name: 'Girls', v: state, enrolled: n.girls },
+    ];
+  });
+  readonly glanceAttPageGenderOpt = computed(() => {
+    const rows = this.attPageGenderRows();
+    if (!rows.length) return {};
+    return {
+      textStyle: { fontFamily: 'Inter, system-ui, sans-serif' },
+      tooltip: { trigger: 'axis', formatter: (ps: any[]) => { const r = rows[ps[0]?.dataIndex ?? 0]; return `<b>${r.name}</b><br/>${ps[0].value}% (scope-wide figure)<br/>${inrShort(r.enrolled)} enrolled (real)`; } },
+      grid: { left: 40, right: 12, top: 16, bottom: 40 },
+      xAxis: { type: 'category', data: rows.map((r) => `${r.name}\n${inrShort(r.enrolled)}`), axisLabel: { fontSize: 10, color: '#64748B', interval: 0, lineHeight: 13 }, axisLine: { lineStyle: { color: '#CBD5E1' } }, axisTick: { show: false } },
+      yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 10, color: '#64748B', formatter: '{value}%' }, axisLine: { show: false }, splitLine: { lineStyle: { color: '#EEF2F8' } } },
+      series: [{
+        type: 'bar', data: rows.map((r) => r.v), barCategoryGap: '45%', barMaxWidth: 70,
+        itemStyle: { color: '#0e7490', borderRadius: [4, 4, 0, 0] },
+        label: { show: true, position: 'top', fontSize: 11, fontWeight: 600, color: '#0F172A', formatter: (p: any) => `${p.value}%` },
+      }],
+    };
+  });
+  /** Children of the current scope with the active metric — reused for the peer chart and the unit table. */
+  readonly attPageUnitLabel = computed(() => {
+    const l = this.at.childLabel();
+    return l.endsWith('s') && l !== 'This School' ? l.slice(0, -1) : l;
+  });
+  readonly attPageUnitRows = computed(() => {
+    const field = this.attPageField();
+    if (this.ds.level() === 'school') return [];
+    return this.at.children().map((c) => {
+      const today = this.latestDay(c.node);
+      const working = c.node.schools;
+      const markedToday = today?.marked ?? null;
+      return {
+        key: c.key, name: c.name, v: (c.node as any)[field] as number, schools: this.unitSchoolCount(c.key),
+        working, markedToday, pendingToday: today?.unmarked ?? null,
+        markedPct: working && markedToday != null ? Math.round((markedToday / working) * 1000) / 10 : null,
+      };
+    });
+  });
+  /** Chart: my position vs the mean of peers vs the best peer (matches the reference design's distinct "state average" line). */
+  readonly glanceAttPagePeerOpt = computed(() => {
+    const rows = this.attPageUnitRows().filter((r) => r.v != null);
+    const mine = this.attPageHeadline();
+    if (!rows.length || mine == null) return {};
+    const mean = Math.round((rows.reduce((s, r) => s + (r.v as number), 0) / rows.length) * 10) / 10;
+    const best = [...rows].sort((a, b) => (b.v as number) - (a.v as number))[0];
+    const bars = [
+      { label: `My position\n(${this.ds.titleCase(this.ds.scopeLabel())})`, v: mine, color: '#1e3a5f' },
+      { label: `${this.attPageUnitLabel()} average\n(mean of ${rows.length})`, v: mean, color: '#94A3B8' },
+      { label: `Best ${this.attPageUnitLabel().toLowerCase().replace(/s$/, '')}\n(${best.name})`, v: best.v as number, color: '#D97706' },
+    ];
+    return {
+      textStyle: { fontFamily: 'Inter, system-ui, sans-serif' },
+      tooltip: { trigger: 'axis', valueFormatter: (v: number) => `${v}%` },
+      grid: { left: 40, right: 12, top: 16, bottom: 40 },
+      xAxis: { type: 'category', data: bars.map((b) => b.label), axisLabel: { fontSize: 10, color: '#64748B', interval: 0, lineHeight: 13 }, axisLine: { lineStyle: { color: '#CBD5E1' } }, axisTick: { show: false } },
+      yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 10, color: '#64748B', formatter: '{value}%' }, axisLine: { show: false }, splitLine: { lineStyle: { color: '#EEF2F8' } } },
+      series: [{ type: 'bar', data: bars.map((b) => ({ value: b.v, itemStyle: { color: b.color, borderRadius: [4, 4, 0, 0] } })), barCategoryGap: '40%', barMaxWidth: 70,
+        label: { show: true, position: 'top', fontSize: 11, fontWeight: 600, color: '#0F172A', formatter: (p: any) => `${p.value}%` } }],
+    };
+  });
+  /** "How much have I improved?" — 14 working days / weeks / months, built from the real daily series. */
+  readonly attPageWindow = signal<'14d' | '14w' | '14m'>('14d');
+  readonly attPageTrend = computed(() => {
+    const n = this.at.current() as any;
+    if (!n?.daily?.length) return [];
+    const field = this.attPageMetric() === 'marking' ? 'compliance' : (this.attPageShow() === 'students' ? 'attendance' : 'teacher');
+    const daily: any[] = n.daily;
+    const dayLabel = (iso: string) => new Date(iso + 'T00:00:00Z').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', timeZone: 'UTC' });
+    if (this.attPageWindow() === '14d') {
+      return daily.slice(-14).map((d) => ({ label: dayLabel(d.date), v: d[field] as number }));
+    }
+    const bucket = this.attPageWindow() === '14w' ? 7 : 30;
+    const groups = new Map<string, number[]>();
+    for (const d of daily) {
+      const t = new Date(d.date + 'T00:00:00Z').getTime();
+      const k = String(Math.floor(t / (bucket * 86400000)));
+      (groups.get(k) ?? groups.set(k, []).get(k)!).push(d[field] as number);
+    }
+    const keys = [...groups.keys()].sort((a, b) => +a - +b).slice(-14);
+    return keys.map((k, i) => {
+      const vs = groups.get(k)!;
+      const avg = Math.round((vs.reduce((s, v) => s + v, 0) / vs.length) * 10) / 10;
+      return { label: this.attPageWindow() === '14w' ? `wk ${i + 1}` : `mo ${i + 1}`, v: avg };
+    });
+  });
+  readonly glanceAttPageTrendOpt = computed(() => {
+    const rows = this.attPageTrend();
+    if (!rows.length) return {};
+    return {
+      textStyle: { fontFamily: 'Inter, system-ui, sans-serif' },
+      tooltip: { trigger: 'axis', valueFormatter: (v: number) => `${v}%` },
+      grid: { left: 44, right: 12, top: 16, bottom: 30 },
+      xAxis: { type: 'category', data: rows.map((r) => r.label), axisLabel: { fontSize: 10, color: '#64748B', interval: 0, rotate: rows.length > 10 ? 30 : 0 }, axisLine: { lineStyle: { color: '#CBD5E1' } }, axisTick: { show: false } },
+      yAxis: { type: 'value', axisLabel: { fontSize: 10, color: '#64748B', formatter: '{value}%' }, axisLine: { show: false }, splitLine: { lineStyle: { color: '#EEF2F8' } }, scale: true },
+      series: [{ type: 'bar', data: rows.map((r) => r.v), barMaxWidth: 48, itemStyle: { color: '#b45309', borderRadius: [4, 4, 0, 0] },
+        label: { show: true, position: 'top', fontSize: 10, fontWeight: 600, color: '#92400e' } }],
+    };
+  });
+  /** "How is my team doing?" — searchable unit table, same convention as the Palli page. */
+  readonly attPageUnitSearch = signal('');
+  readonly attPageUnitRowsFiltered = computed(() => {
+    const q = this.attPageUnitSearch().trim().toLowerCase();
+    const rows = this.attPageUnitRows();
+    return q ? rows.filter((r) => r.name.toLowerCase().includes(q)) : rows;
+  });
+  async copyAttPageCsv(): Promise<void> {
+    const rows = this.attPageUnitRowsFiltered();
+    const head = [this.attPageUnitLabel(), 'Schools', 'Working schools', `${this.attPageMetricLabel()} %`, 'Marked (latest day)', 'Pending (latest day)'];
+    const lines = [head.join(','), ...rows.map((r) => [r.name, r.schools, r.working, r.v ?? '', r.markedToday ?? '', r.pendingToday ?? ''].join(','))];
+    try { await navigator.clipboard.writeText(lines.join('\n')); } catch { /* clipboard unavailable */ }
+  }
+  /** "Standard reports" — quick links straight into the real catalog KPIs (tl30 is the one assumed field; flagged in the template). */
+  readonly attPageReports = computed(() => {
+    const ids: { id: string; label: string }[] = [
+      { id: 'a_s60', label: 'Schools below 60% student attendance' },
+      { id: 'a_t60', label: 'Schools below 60% teacher attendance' },
+      { id: 'd15', label: 'Potential dropout (15 days absent)' },
+      { id: 'tl30', label: 'Teacher long absent (30+ days)' },
+    ];
+    return ids.map((r) => ({ ...r, k: this.glanceKpi('Attendance', r.id) })).filter((r) => r.k);
+  });
+
   /** Needs your attention: KPIs off track (critical) and on watch, each with its component as owner. */
   readonly attentionCounts = computed(() => {
     const rows = this.glanceKpiRows().filter((r) => r.hasData);

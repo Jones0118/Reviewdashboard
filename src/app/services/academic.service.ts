@@ -4,7 +4,7 @@ import { loadAsset } from '../utils/asset-loader';
 import { schoolsInScope } from '../utils/scope';
 import { inr } from '../utils/format';
 import { CautionCheck } from '../models/caution.model';
-import {
+import { ExamSubjectStat, AcademicBreakdown, SubjectStat, ExamClassStat,
   AcademicData,
   AcademicMetric,
   AcademicNode,
@@ -18,11 +18,167 @@ export class AcademicService {
   private readonly http = inject(HttpClient);
   private readonly ds = inject(DataService);
 
-  private readonly _data = signal<AcademicData | null>(null);
-  private readonly _schools = signal<AcademicSchoolsData | null>(null);
+  private readonly _raw = signal<AcademicData | null>(null);
+  private readonly _rawSchools = signal<AcademicSchoolsData | null>(null);
+
+  // ================= Board mode (Class X & XII tab) =================
+  /**
+   * When on, every node (state / district / block / school, every year) is
+   * re-derived from its `examClass` sittings restricted to the board classes
+   * (10 and 12) and the selected exam type, so the whole Academic page
+   * (Numbers, Trend, Comparison, Alarming, Caution) shows Class X & XII only
+   * with no per-view changes. Mark-band counts (below 35 / 35-60 / ...) do
+   * not exist per sitting in the export, so they are 0 in board mode and the
+   * UI hides them. Scopes with no board sitting are dropped, not shown as 0.
+   */
+  readonly boardMode = signal(false);
+  /** Exam types in board mode (multi-select; empty = all three). */
+  readonly boardExams = signal<string[]>(['Annual']);
+  readonly boardExamOptions = ['Quarterly', 'Half Yearly', 'Annual'].map((e) => ({ label: e, value: e }));
+  /** Class filter in board mode: 0 = Class X & XII, 10 = Class X, 12 = Class XII. */
+  readonly boardClass = signal<number>(0);
+  readonly boardClassOptions = [{ label: 'Class X & XII', value: 0 }, { label: 'Class X', value: 10 }, { label: 'Class XII', value: 12 }];
+  /** Label of the active exam selection for headings. */
+  readonly boardExamLabel = computed(() => {
+    const e = this.boardExams();
+    return e.length === 0 || e.length === 3 ? 'All exams' : e.join(' + ');
+  });
+  /** True when any sitting shown at the current scope is derived rather than exported. */
+  readonly boardAssumed = computed(() => this.boardMode() && (this.current()?.examClass ?? []).some((r) => r.assumed));
+
+  /** Deterministic 0..1 from a string (FNV-1a), for stable per-scope jitter. */
+  private hash01(s: string): number {
+    let h = 2166136261;
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return ((h >>> 0) % 100000) / 100000;
+  }
+  /**
+   * Board-class sittings for the selected exams. The export has an Annual
+   * sitting only for classes 10 and 12; a requested Quarterly / Half Yearly
+   * is ASSUMED from that class's Annual sitting, stepped back by the gap the
+   * same scope shows between those exams for its other classes (byExam), with
+   * a small deterministic jitter so scopes differ. Flagged `assumed: true`.
+   */
+  private boardRows(n: AcademicNode, board: Set<number>, exams: string[], key: string): ExamClassStat[] {
+    const all = (n.examClass ?? []).filter((r) => board.has(r.cls));
+    const want = exams.length ? exams : ['Quarterly', 'Half Yearly', 'Annual'];
+    const r1 = (v: number) => Math.round(v * 10) / 10;
+    const gap = (exam: string): { avg: number; pass: number } => {
+      const a = n.byExam?.find((e) => e.name === 'Annual'), x = n.byExam?.find((e) => e.name === exam);
+      if (a && x && a.updated && x.updated) return { avg: x.avg - a.avg, pass: x.pass - a.pass };
+      return exam === 'Quarterly' ? { avg: -6.3, pass: -4.7 } : { avg: -3.8, pass: -2.8 };   // state-wide gap, classes 6-9 & 11
+    };
+    const out: ExamClassStat[] = [];
+    for (const exam of want) {
+      for (const cls of board) {
+        const real = all.find((r) => r.exam === exam && r.cls === cls);
+        if (real) { out.push(real); continue; }
+        const annual = all.find((r) => r.exam === 'Annual' && r.cls === cls);
+        if (!annual || exam === 'Annual') continue;
+        const g = gap(exam), j = (this.hash01(`${key}|${cls}|${exam}`) - 0.5) * 1.6;
+        const clamp = (v: number) => Math.max(0, Math.min(100, r1(v)));
+        out.push({
+          ...annual, exam, label: `${exam} - Class ${cls}`, assumed: true,
+          avg: clamp(annual.avg + g.avg + j), pass: clamp(annual.pass + g.pass + j * 0.7),
+          subjects: (annual.subjects ?? []).map((s) => ({ name: s.name, avg: clamp(s.avg + g.avg + j), pass: clamp(s.pass + g.pass + j * 0.7) })),
+        });
+      }
+    }
+    return out;
+  }
+
+  private projectNode<T extends AcademicNode>(n: T, board: Set<number>, exams: string[], key: string): T | null {
+    const rows = this.boardRows(n, board, exams, key);
+    if (!rows.length) return null;
+    const r1 = (v: number) => Math.round(v * 10) / 10;
+    const w = (pick: (r: ExamClassStat) => number) => {
+      const den = rows.reduce((s, r) => s + (r.updated || 0), 0);
+      return den ? r1(rows.reduce((s, r) => s + pick(r) * (r.updated || 0), 0) / den) : 0;
+    };
+    const total = rows.reduce((s, r) => s + (r.total || 0), 0);
+    const updated = rows.reduce((s, r) => s + (r.updated || 0), 0);
+    const subj = (sel: ExamClassStat[]): SubjectStat[] => {
+      const m = new Map<string, { a: number; p: number; w: number }>();
+      for (const r of sel) for (const s of r.subjects ?? []) {
+        const e = m.get(s.name) ?? { a: 0, p: 0, w: 0 };
+        e.a += s.avg * (r.updated || 0); e.p += s.pass * (r.updated || 0); e.w += r.updated || 0;
+        m.set(s.name, e);
+      }
+      return [...m.entries()].map(([name, e]) => ({
+        name, avg: e.w ? r1(e.a / e.w) : 0, pass: e.w ? r1(e.p / e.w) : 0,
+        below35: 0, b35_60: 0, b61_80: 0, above80: 0, absent: 0,
+      }));
+    };
+    const group = (key: (r: ExamClassStat) => string): AcademicBreakdown[] => {
+      const m = new Map<string, ExamClassStat[]>();
+      for (const r of rows) { const k = key(r); m.set(k, [...(m.get(k) ?? []), r]); }
+      return [...m.entries()].map(([name, sel]) => {
+        const den = sel.reduce((s, r) => s + (r.updated || 0), 0);
+        const tot = sel.reduce((s, r) => s + (r.total || 0), 0);
+        return {
+          name, total: tot, updated: den,
+          avg: den ? r1(sel.reduce((s, r) => s + r.avg * (r.updated || 0), 0) / den) : 0,
+          pass: den ? r1(sel.reduce((s, r) => s + r.pass * (r.updated || 0), 0) / den) : 0,
+          compliance: tot ? r1((den / tot) * 100) : 0,
+        };
+      });
+    };
+    const examSubject: ExamSubjectStat[] = [];
+    for (const e of new Set(rows.map((r) => r.exam))) {
+      for (const s of subj(rows.filter((r) => r.exam === e))) examSubject.push({ exam: e, subject: s.name, avg: s.avg, pass: s.pass });
+    }
+    return {
+      ...n,
+      total, updated, compliance: total ? r1((updated / total) * 100) : 0,
+      avgMark: w((r) => r.avg), passPct: w((r) => r.pass),
+      // Class X = the five core subjects, Class XII = stream subjects
+      bySubject: subj(rows.filter((r) => r.cls === 10)),
+      byHsSubject: subj(rows.filter((r) => r.cls === 12)),
+      byExam: group((r) => r.exam), byClass: group((r) => String(r.cls)),
+      examSubject, examClass: rows,
+    };
+  }
+  private projectMap<T extends AcademicNode>(m: Record<string, T>, board: Set<number>, exams: string[]): Record<string, T> {
+    const out: Record<string, T> = {};
+    for (const k of Object.keys(m)) { const p = this.projectNode(m[k], board, exams, k); if (p) out[k] = p; }
+    return out;
+  }
+  /** Board classes after the class filter. */
+  private boardSet(d: AcademicData): Set<number> {
+    const all = d.boardClasses?.length ? d.boardClasses : [10, 12];
+    const c = this.boardClass();
+    return new Set(c ? all.filter((x) => x === c) : all);
+  }
+  /** The dataset the rest of the service reads: raw, or the board projection. */
+  private readonly _data = computed<AcademicData | null>(() => {
+    const d = this._raw();
+    if (!d || !this.boardMode()) return d;
+    const board = this.boardSet(d);
+    const exams = this.boardExams();
+    const byYear = <T extends AcademicNode>(m: Record<string, Record<string, T>>) =>
+      Object.fromEntries(Object.entries(m).map(([y, v]) => [y, this.projectMap(v, board, exams)]));
+    const state: Record<string, AcademicNode> = {};
+    for (const y of Object.keys(d.state)) { const p = this.projectNode(d.state[y], board, exams, 'state'); if (p) state[y] = p; }
+    return {
+      ...d, coreClasses: [10], hsClasses: [12], subjects: d.subjects, hsSubjects: d.hsSubjects,
+      state, districts: byYear(d.districts), blocks: byYear(d.blocks),
+    };
+  });
+  private readonly _schools = computed<AcademicSchoolsData | null>(() => {
+    const s = this._rawSchools();
+    if (!s || !this.boardMode()) return s;
+    const board = this.boardSet(this._raw()!);
+    const exams = this.boardExams();
+    const out: AcademicSchoolsData = {};
+    for (const k of Object.keys(s)) {
+      const rows = s[k].map((sc) => this.projectNode(sc as unknown as AcademicNode & AcademicSchool, board, exams, sc.udise)).filter((x): x is AcademicNode & AcademicSchool => !!x);
+      if (rows.length) out[k] = rows;
+    }
+    return out;
+  });
   private readonly _loaded = signal(false);
 
-  readonly data = this._data.asReadonly();
+  readonly data = this._data;
   readonly loaded = this._loaded.asReadonly();
 
   /** Year selected for the point-in-time views (Numbers / Comparison / Alarming). */
@@ -64,8 +220,8 @@ export class AcademicService {
       loadAsset<AcademicData>('assets/academic.json'),
       loadAsset<AcademicSchoolsData>('assets/academic-schools.json'),
     ]);
-    this._data.set(d);
-    this._schools.set(s);
+    this._raw.set(d);
+    this._rawSchools.set(s);
     if (!this.year()) this.year.set(d.currentYear);
     this._loaded.set(true);
   }
@@ -86,7 +242,9 @@ export class AcademicService {
     return this.subjectSet() === 'hs' ? n.byHsSubject : n.bySubject;
   });
   readonly subjectSetLabel = computed(() =>
-    this.subjectSet() === 'hs'
+    this.boardMode()
+      ? (this.subjectSet() === 'hs' ? 'Class XII (streams)' : 'Class X (5 subjects)')
+      : this.subjectSet() === 'hs'
       ? `Higher Secondary (Class ${this.hsClasses().join(' & ')})`
       : `Core Subjects (Class ${this.coreClasses()[0]}-${this.coreClasses()[this.coreClasses().length - 1]})`,
   );

@@ -1467,3 +1467,153 @@ th.acis-sorted { background: #e0f2fe !important; }
     background: #f1f5f9; color: #64748b; font-size: 10.5px; font-weight: 600;
   }
 }
+
+/* ===== Board Exam tab (Class X / XII performance reports) ===== */
+.be-bar .be-views { margin-left: 8px; }
+.be-kpi { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+.be-kpi .ac-val small { font-size: 14px; font-weight: 600; opacity: .8; margin-left: 2px; }
+.be-cat-box { background: var(--cat, #6b7280) !important; }
+.be-cat-box .ac-val, .be-cat-box .ac-lbl { color: #fff; }
+.be-delta { font-size: 11px; font-weight: 700; white-space: nowrap; }
+.be-delta.up { color: #15803d; } .be-delta.down { color: #c53030; }
+.be-scope-row { background: #eef4ff; border: 1px solid #c9d8f2; border-radius: 10px; padding: 10px 14px; font-size: 13px; margin: 0 0 14px;
+  display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.be-link { margin-left: auto; border: 1px solid var(--gov-blue); background: #fff; color: var(--gov-blue); border-radius: 7px; padding: 4px 10px; font-size: 12px; font-weight: 700; cursor: pointer; }
+.be-link:hover { background: var(--gov-blue); color: #fff; }
+.be-state-grid { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); }
+@media (max-width: 1200px) { .be-state-grid { grid-template-columns: 1fr; } }
+.be-tall-chart { height: 640px; }
+.be-table th.sortable { cursor: pointer; user-select: none; } .be-table th.sortable:hover { color: var(--gov-blue); }
+.be-table tr.be-me > td { background: #fff7e6 !important; }
+.be-table tr.be-total > td { background: #f1f5fb; font-weight: 700; }
+.be-has { color: var(--gov-blue); font-size: 11px; margin-left: 4px; }
+.be-rank { display: inline-flex; min-width: 28px; height: 22px; align-items: center; justify-content: center; border-radius: 6px; font-weight: 800; font-size: 12px; color: #fff; }
+.be-rank.r1 { background: #2E9E4F; } .be-rank.r2 { background: #8BC34A; color: #1f2937; } .be-rank.r3 { background: #F2A33A; } .be-rank.r4 { background: #E53935; }
+.be-metric { margin-left: 12px; } .be-metric button { padding: 4px 10px; font-size: 12px; }
+.be-scroll { overflow-x: auto; border: 1px solid #e5e9f0; border-radius: 10px; }
+/* ---- hand-built grids (school report, subject x management): same look as the PrimeNG grids below ---- */
+.be-grid { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; color: #1f2937; }
+.be-grid th, .be-grid td { padding: 9px 12px; white-space: nowrap; border-bottom: 1px solid #eef1f5; }
+.be-grid th {
+  background: #f4f6f9; color: #334155; font-size: 11.5px; font-weight: 600; letter-spacing: .01em;
+  text-transform: none; white-space: normal; line-height: 1.25; vertical-align: bottom; border-bottom: 1px solid #dfe5ec;
+}
+.be-grid thead tr + tr th { font-weight: 500; color: #64748b; font-size: 11px; }
+.be-grid tbody tr:nth-child(even) td { background: #fafbfc; }
+.be-grid tbody tr:hover td { background: #f3f7fb; }
+.be-grid th.num, .be-grid td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.be-grid td.strong { font-weight: 600; color: var(--gov-blue-dark); }
+.be-grid td.be-all, .be-grid tr.be-all > td { background: #f8fafc !important; font-weight: 700; }
+.be-grid th.num.be-all, .be-grid td.num.be-all { background: #eef4ff !important; }
+.be-grid tr.be-me > td { background: #fff7e6 !important; }
+.be-grid tbody tr:last-child td { border-bottom: 0; }
+/* category stripe: a soft left bar, not a hard inset */
+.be-cell { box-shadow: inset 3px 0 0 var(--cat, transparent); padding-left: 14px !important; }
+.be-pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 600; background: color-mix(in srgb, var(--cat, #e5e7eb) 18%, #fff); color: #1f2937; border: 1px solid color-mix(in srgb, var(--cat, #e5e7eb) 45%, #fff); white-space: nowrap; }
+.be-pill::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--cat, #9ca3af); flex: 0 0 8px; }
+.be-pill[style*="#F2E205"] { color: #1f2937; }
+.be-foot { padding: 8px 2px 0; font-size: 11.5px; color: var(--text-muted); display: flex; gap: 6px; align-items: center; }
+.be-filters { margin-top: 0; }
+.be-filters input.metric-select { min-width: 220px; }
+.be-counts { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.be-cat-card { border-top: 4px solid var(--cat); }
+.be-school { min-width: 260px; max-width: 320px; white-space: normal; }
+.be-school small { font-size: 10.5px; }
+.be-report { border-left: 5px solid var(--gov-blue); margin-bottom: 16px; }
+.be-report .card-title { position: relative; }
+.be-close { margin-left: auto; width: 28px; height: 28px; border-radius: 7px; border: 1px solid var(--border-soft); background: #fff; color: var(--text-muted); cursor: pointer; }
+.be-close:hover { background: #fdecea; color: #c53030; border-color: #f3c6c0; }
+.be-report-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); margin-top: 12px; }
+@media (max-width: 1300px) { .be-report-grid { grid-template-columns: 1fr; } }
+.be-grid tr.be-all > td { background: #f8fafc; font-weight: 700; }
+.be-pill-lg { font-size: 12.5px; padding: 5px 14px; margin-left: 10px; }
+.be-delta.big { font-size: 13px; margin-left: 6px; }
+
+/* ---- PrimeNG grids in the Board Exam tab: one modern, readable style ---- */
+:host ::ng-deep .be-table {
+  .p-datatable-table { border-collapse: separate; border-spacing: 0; }
+  .p-datatable-thead > tr > th {
+    background: #f4f6f9; color: #334155; font-size: 11.5px; font-weight: 600; letter-spacing: .01em;
+    white-space: normal; line-height: 1.25; vertical-align: bottom;
+    padding: 10px 12px; border-bottom: 1px solid #dfe5ec; border-right: 0;
+  }
+  .p-datatable-thead > tr + tr > th { font-weight: 500; color: #64748b; font-size: 11px; padding-top: 6px; }
+  .p-datatable-thead > tr > th .hint { display: block; font-weight: 500; color: #94a3b8; font-size: 10.5px; margin-top: 2px; }
+  .p-datatable-thead > tr > th.be-grp { text-align: center !important; background: #eef4ff; color: var(--gov-blue-dark); border-bottom: 0; padding: 6px 10px; }
+  .p-sortable-column:hover { background: #eaeff5; }
+  .p-sortable-column.p-highlight, .p-datatable-column-sorted { background: #e8f0fb; color: var(--gov-blue-dark); }
+  .p-sortable-column .p-sortable-column-icon, .p-datatable-sort-icon { width: 11px; height: 11px; margin-left: 4px; color: #94a3b8; }
+  .p-datatable-tbody > tr > td {
+    padding: 9px 12px; font-size: 13px; color: #1f2937; border-bottom: 1px solid #eef1f5; border-right: 0;
+    vertical-align: middle;
+  }
+  .p-datatable-tbody > tr:nth-child(even) > td { background: #fafbfc; }
+  .p-datatable-tbody > tr.rv-row { cursor: pointer; transition: background .12s; }
+  .p-datatable-tbody > tr.rv-row:hover > td { background: #eef4ff; }
+  .p-datatable-tbody > tr.rv-row:hover td.strong { color: var(--gov-blue); }
+  .p-datatable-tbody > tr:last-child > td { border-bottom: 0; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.strong { font-weight: 600; color: var(--gov-blue-dark); }
+  td .text-muted, td small { color: #64748b; font-size: 11px; }
+  td .fa-chevron-right { font-size: 10px; color: #cbd5e1; }
+  tr.rv-row:hover td .fa-chevron-right { color: var(--gov-blue); }
+  tr.be-total > td { background: #f1f5fb !important; font-weight: 700; }
+  tr.be-me > td { background: #fff7e6 !important; }
+  .p-datatable-header { background: transparent; border: 0; padding: 0 0 10px; }
+  .p-paginator { background: transparent; border: 0; padding: 10px 0 0; font-size: 12px; }
+  .p-paginator .p-paginator-page, .p-paginator .p-paginator-first, .p-paginator .p-paginator-prev,
+  .p-paginator .p-paginator-next, .p-paginator .p-paginator-last { min-width: 30px; height: 30px; border-radius: 7px; }
+  .p-paginator .p-paginator-page.p-highlight, .p-paginator .p-paginator-page[data-p-active="true"] { background: var(--gov-blue); color: #fff; }
+  .p-datatable-wrapper, .p-datatable-table-container { border: 1px solid #e5e9f0; border-radius: 10px; }
+  .p-datatable-emptymessage td, td.empty { text-align: center; color: #94a3b8; padding: 22px; font-style: italic; }
+}
+/* table cards: breathing room between title and grid */
+.table-card .card-title { margin-bottom: 10px; }
+.be-search { display: inline-flex; align-items: center; position: relative; }
+.be-search > i { position: absolute; left: 10px; color: #94a3b8; font-size: 12px; pointer-events: none; }
+.be-search input { border: 1px solid #dfe5ec; border-radius: 8px; padding: 7px 10px 7px 30px; font-size: 12.5px; min-width: 260px; background: #fff; }
+.be-search input:focus { outline: 2px solid color-mix(in srgb, var(--gov-blue) 30%, #fff); border-color: var(--gov-blue); }
+.be-delta { display: inline-flex; align-items: center; gap: 2px; font-size: 11.5px; font-weight: 600; white-space: nowrap; padding: 1px 6px; border-radius: 6px; }
+.be-delta.up { color: #166534; background: #dcfce7; } .be-delta.down { color: #b91c1c; background: #fee2e2; }
+.be-delta.up::before { content: '▲'; font-size: 8px; } .be-delta.down::before { content: '▼'; font-size: 8px; }
+.be-rank { display: inline-flex; min-width: 30px; height: 24px; align-items: center; justify-content: center; border-radius: 7px; font-weight: 700; font-size: 12px; color: #fff; font-variant-numeric: tabular-nums; }
+
+/* ---- global filter chips (module 1) ---- */
+.be-scope-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.be-chip { background: #fff; border: 1px solid #c9d8f2; border-radius: 999px; padding: 3px 10px; font-size: 11.5px; color: var(--gov-blue-dark); }
+.be-chip b { font-weight: 700; margin-right: 3px; opacity: .75; }
+.be-na { font-size: 11px; color: var(--text-muted); font-style: italic; }
+.be-grid th.num.be-all, .be-grid td.num.be-all { background: #eef4ff; }
+.be-search input { border: 1px solid var(--border-soft); border-radius: 7px; padding: 5px 9px 5px 28px; font-size: 12.5px; min-width: 240px; }
+.be-table th.be-grp { text-align: center !important; background: #eef4ff; }
+
+/* ---- Needs Your Attention (module 7) ---- */
+.be-attention .count-chip.bad { background: #fdecea; color: #c53030; border-color: #f3c6c0; }
+.be-thresh { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; padding: 10px 2px 4px; border-bottom: 1px dashed var(--border-soft); margin-bottom: 10px; }
+.be-thresh input.metric-select { width: 90px; }
+.be-alert-groups { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 1100px) { .be-alert-groups { grid-template-columns: 1fr; } }
+.be-alert-col { border: 1px solid var(--border-soft); border-radius: 10px; padding: 10px; background: #fbfdff; }
+.be-alert-col.crit { border-color: #f3c6c0; background: #fffafa; }
+.be-alert-head { display: flex; align-items: center; gap: 7px; font-weight: 800; font-size: 13px; color: var(--gov-blue-dark); margin-bottom: 8px; }
+.be-alert-col.crit .be-alert-head { color: #c53030; }
+.be-alert { border-left: 4px solid #F2A33A; background: #fff; border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; box-shadow: 0 1px 2px rgba(15, 23, 42, .05); }
+.be-alert-col.crit .be-alert { border-left-color: #E53935; }
+.be-alert-top { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.be-alert-kind { font-weight: 700; font-size: 12.5px; }
+.be-alert-where { font-size: 11.5px; color: var(--text-muted); }
+.be-alert-nums { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font-size: 11.5px; margin: 5px 0 4px; }
+.be-alert-nums b { font-size: 13px; }
+.be-alert-n { background: #f1f5fb; border-radius: 6px; padding: 1px 7px; }
+.be-alert-tag { background: #fff4e5; color: #92400e; border-radius: 6px; padding: 1px 7px; font-weight: 700; font-size: 10.5px; text-transform: uppercase; letter-spacing: .02em; }
+.be-alert-detail { font-size: 11.5px; color: var(--text-muted); margin: 0 0 4px; }
+
+/* ---- KPI card: year-on-year improvement tone ---- */
+.be-kpi-up .ac-ico { background: #e7f6ec; color: #1e7a45; }
+.be-kpi-up .ac-val { color: #1e7a45; }
+.be-kpi-down .ac-ico { background: #fdecea; color: #b03024; }
+.be-kpi-down .ac-val { color: #b03024; }
+/* head-to-head source line */
+.h2h-row b.be-src { font-weight: 500; font-size: 11px; color: var(--text-muted); text-align: right; max-width: 60%; white-space: normal; }
+.be-alert-act { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 11.5px; color: #334155; border-top: 1px dashed var(--border-soft); padding-top: 5px; }
+.be-alert-act .be-link { padding: 2px 8px; font-size: 11px; }
