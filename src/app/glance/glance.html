@@ -366,7 +366,6 @@
       <div class="gl-mainview">
         <div class="mv" role="group" aria-label="Main view for the whole page">
           <b class="t">Attendance Dashboard</b>
-          <span class="tag">Main view · whole page</span>
           <span class="grp">
             <span class="vas">Show</span>
             <div class="gl-win" role="group" aria-label="Students or teachers">
@@ -508,33 +507,49 @@
       <!-- ===== Attendance analytics: state read-out, breakdowns, trend, unit drill ===== -->
       <section class="gl-c">
         @if (attPageCards(); as c) {
-          <div class="gl-bpanel" style="margin-top:0; box-shadow:none; padding:0; background:none">
-            <div class="gl-bp" style="background:#1e3a5f">
-              <div class="r1"><span class="lab">{{ attPageShowLabel() }} present that day</span><span class="ib"><i class="fa-solid fa-user-check"></i></span></div>
-              <div class="big">{{ c.presentPct != null ? c.presentPct + '%' : 'N/A' }}</div>
-              <div class="sub">{{ c.presentLabel }}</div>
-            </div>
-            <div class="gl-bp" style="background:#1e3a5f">
-              <div class="r1"><span class="lab">Schools marked that day</span><span class="ib"><i class="fa-solid fa-house-circle-check"></i></span></div>
-              <div class="big">{{ c.markedPct != null ? c.markedPct + '%' : 'N/A' }}</div>
-              <div class="sub">{{ c.markedLabel }}</div>
-            </div>
-            <div class="gl-bp" style="background:#1e3a5f">
-              <div class="r1"><span class="lab">Schools pending marking</span><span class="ib"><i class="fa-solid fa-triangle-exclamation"></i></span></div>
-              <div class="big">{{ fmtN(c.pending) }}</div>
-              <div class="sub">{{ c.pendingLabel }}</div>
-            </div>
+          <!-- same headline panel and card shape as the Overview -->
+          <div class="gl-bpanel">
+            @for (s of c.cards; track s.label; let i = $index) {
+              <div class="gl-bp gl-anim" [style.--i]="i">
+                <div class="r1"><span class="lab">{{ s.label }}</span><span class="ib"><i [class]="s.icon"></i></span></div>
+                <div class="big" [glCountUp]="s.big"></div>
+                <div class="sub">{{ s.sub }}</div>
+                @for (sp of s.splits; track $index) {
+                  <div class="sp">
+                    <div class="lr">
+                      @for (g of sp.segs; track g.k) {
+                        <span><i class="dot" [style.background]="g.color"></i>{{ g.k }} <b [glCountUp]="g.v"></b></span>
+                      }
+                    </div>
+                    <div class="sbar">
+                      @for (g of sp.segs; track g.k) { <i [style.width.%]="g.pct" [style.background]="g.color"></i> }
+                    </div>
+                  </div>
+                }
+              </div>
+            }
           </div>
         } @else {
           <div class="gl-nodata">No day-level attendance record at this scope.</div>
         }
-        <div class="gl-tgrid" style="margin-top:16px">
+        <div class="gl-sechead tight" style="margin-top:18px"><h2>Attendance Marking Status</h2></div>
+        <div class="gl-tgrid" style="margin-top:8px">
           <div>
-            <div class="ct"><b>{{ attPageShowLabel() }} {{ attPageMetricLabel() | lowercase }} by gender</b></div>
-            @if (attPageGenderRows().length) {
-              <div echarts [options]="glanceAttPageGenderOpt()" class="gl-chart"></div>
+            @if (attPageMetric() === 'marking') {
+              <!-- marking is recorded per school, so the first chart is schools marked vs not marked -->
+              <div class="ct"><b>{{ attPageShowLabel() }} marking status by schools</b></div>
+              @if (attPageSchoolRows().length) {
+                <div echarts [options]="glanceAttPageSchoolsOpt()" class="gl-chart"></div>
+              } @else {
+                <div class="gl-nodata">No day-level marking record at this scope.</div>
+              }
             } @else {
-              <div class="gl-nodata">No enrolment data at this scope.</div>
+              <div class="ct"><b>{{ attPageShowLabel() }} {{ attPageMetricLabel() | lowercase }} by gender</b></div>
+              @if (attPageGenderRows().length) {
+                <div echarts [options]="glanceAttPageGenderOpt()" class="gl-chart"></div>
+              } @else {
+                <div class="gl-nodata">No enrolment data at this scope.</div>
+              }
             }
           </div>
           <div>
@@ -557,13 +572,28 @@
       </section>
 
       <section class="gl-c">
-        <div class="ct"><b class="lg">How much have I improved?</b>
-          <div class="gl-win" role="group" aria-label="Window">
-            <button type="button" class="chip" [class.on]="attPageWindow() === '14d'" (click)="attPageWindow.set('14d')">14 days</button>
-            <button type="button" class="chip" [class.on]="attPageWindow() === '14w'" (click)="attPageWindow.set('14w')">14 weeks</button>
-            <button type="button" class="chip" [class.on]="attPageWindow() === '14m'" (click)="attPageWindow.set('14m')">14 months</button>
+        <div class="ct"><b class="lg">Attendance trend</b>
+          <!-- range: days / months / years, with the second-level pick beside it -->
+          <div class="gl-win" role="group" aria-label="Range">
+            <button type="button" class="chip" [class.on]="attPageRange() === 'days'" [attr.aria-pressed]="attPageRange() === 'days'" (click)="attPageRange.set('days')">Days</button>
+            <button type="button" class="chip" [class.on]="attPageRange() === 'months'" [attr.aria-pressed]="attPageRange() === 'months'" (click)="attPageRange.set('months')">Months</button>
+            <button type="button" class="chip" [class.on]="attPageRange() === 'years'" [attr.aria-pressed]="attPageRange() === 'years'" (click)="attPageRange.set('years')">Years</button>
           </div>
-          <span class="s">{{ attPageShowLabel() }} {{ attPageMetricLabel() | lowercase }} &middot; real working-day records, {{ attPageWindow() === '14d' ? 'daily' : attPageWindow() === '14w' ? 'weekly average of daily %' : 'monthly average of daily %' }}</span></div>
+          @if (attPageRange() === 'months') {
+            <div class="gl-win" role="group" aria-label="Number of months" style="margin-left:8px">
+              @for (m of ATT_MONTH_OPTIONS; track m) {
+                <button type="button" class="chip" [class.on]="attPageMonths() === m" [attr.aria-pressed]="attPageMonths() === m" (click)="attPageMonths.set(m)">{{ m }} months</button>
+              }
+            </div>
+          }
+          @if (attPageRange() === 'years') {
+            <div class="gl-win" role="group" aria-label="Year" style="margin-left:8px">
+              @for (y of attPageYears(); track y) {
+                <button type="button" class="chip" [class.on]="attPageYearSel() === y" [attr.aria-pressed]="attPageYearSel() === y" (click)="setAttPageYear(y)">{{ y }}</button>
+              }
+            </div>
+          }
+          <span class="s">{{ attPageTrendCaption() }}</span></div>
         @if (attPageTrend().length) {
           <div echarts [options]="glanceAttPageTrendOpt()" class="gl-chart" style="margin-top:12px"></div>
         } @else {
@@ -576,10 +606,9 @@
           <div class="ct"><b class="lg">How is my team doing?</b>
             <span class="s">{{ attPageUnitLabel() }}-wise &middot; click a row to drill down</span></div>
           <div class="row" style="display:flex; gap:10px; align-items:center; margin:12px 0">
-            <span class="p-input-icon-left" style="position:relative">
-              <input type="text" [ngModel]="attPageUnitSearch()" (ngModelChange)="attPageUnitSearch.set($event)"
-                     [placeholder]="'Find a ' + (attPageUnitLabel() | lowercase) + ' by name'"
-                     style="border:1px solid #E2E8F0; border-radius:8px; padding:8px 12px; font-size:13px; min-width:260px" />
+            <span style="position:relative">
+              <input type="text" class="gl-search" [ngModel]="attPageUnitSearch()" (ngModelChange)="attPageUnitSearch.set($event)"
+                     [placeholder]="'Find a ' + (attPageUnitLabel() | lowercase) + ' by name'" />
             </span>
             <button type="button" class="freset" (click)="copyAttPageCsv()"><i class="fa-solid fa-copy"></i> Copy table as CSV</button>
             <span class="s" style="margin-left:auto">{{ attPageUnitRowsFiltered().length }} of {{ attPageUnitRows().length }} {{ attPageUnitLabel() | lowercase }}s</span>

@@ -340,12 +340,11 @@ export class GlancePage implements OnInit {
       { id: 'board', label: '10th & 12th Board Exam Performance', module: 'Academic Performance', icon: 'fa-solid fa-graduation-cap' },
       { id: 'blp-middle', label: 'Basic-level Proficiency in Middle Grades', module: 'THIRAN', icon: 'fa-solid fa-book-open-reader' },
       { id: 'qh-exam', label: '10th & 12th Quarterly / Half-yearly Exam Performance', module: 'Academic Performance', icon: 'fa-solid fa-pen-ruler' },
-      { id: 'attendance', label: 'Attendance', module: 'Attendance', icon: 'fa-solid fa-calendar-check' },
+      { id: 'attendance', label: 'School Governance', module: 'Attendance', icon: 'fa-solid fa-landmark' },
       { id: 'classroom', label: 'Classroom Teaching & Engagement', module: 'Palli Paarvai', icon: 'fa-solid fa-eye' },
       { id: 'learn-monitor', label: 'Learning Monitoring & Support', module: null, icon: 'fa-solid fa-magnifying-glass-chart' },
       { id: 'teacher-cap', label: 'Teacher Capacity & Development', module: null, icon: 'fa-solid fa-user-tie' },
       { id: 'digital', label: 'Labs & Digital Infra', module: 'Digital Infrastructure (Middle/High/Hr.Sec)', icon: 'fa-solid fa-desktop' },
-      { id: 'governance', label: 'School Governance', module: 'Palli Paarvai', icon: 'fa-solid fa-landmark' },
       { id: 'vetri', label: 'Vetri Palligal', module: null, icon: 'fa-solid fa-trophy' },
       { id: 'field', label: 'District Governance - Field Inspections & Monitoring', module: 'Palli Paarvai', icon: 'fa-solid fa-clipboard-check' },
     ] },
@@ -1017,20 +1016,96 @@ export class GlancePage implements OnInit {
     return n ? (n[this.attPageField()] as number) : null;
   });
   readonly attPageToday = computed(() => this.latestDay(this.at.current()));
-  /** "Where am I?" — three real snapshot cards for the latest working day in scope. */
+  /**
+   * Schools that did / did not mark attendance on the latest working day, by
+   * category. Real: each AttendanceSchool carries dailyAtt[] with -1 on a day
+   * it did not mark, so the last entry is that school's status for the day.
+   */
+  private readonly attPageMarkingByCategory = computed(() => {
+    const schools = this.at.scopeSchools();
+    if (!schools.length) return [];
+    const order = ['Primary School', 'Middle School', 'High School', 'Higher Secondary School'];
+    const short: Record<string, string> = { 'Primary School': 'Primary', 'Middle School': 'Middle', 'High School': 'High', 'Higher Secondary School': 'Hr. Sec' };
+    const m = new Map<string, { marked: number; unmarked: number }>();
+    for (const s of schools) {
+      const d = s.dailyAtt;
+      const last = d?.length ? d[d.length - 1] : -1;
+      const k = s.ctype || 'Other';
+      const e = m.get(k) ?? { marked: 0, unmarked: 0 };
+      if (last >= 0) e.marked++; else e.unmarked++;
+      m.set(k, e);
+    }
+    const keys = [...order.filter((k) => m.has(k)), ...[...m.keys()].filter((k) => !order.includes(k))];
+    return keys.map((k) => ({ name: short[k] ?? k, ...m.get(k)! }));
+  });
+  /**
+   * Students present on the latest working day, by management. The attendance
+   * data covers Government and Aided (fully / partially) schools only, and each
+   * school's dailyAtt[] holds its own attendance % for the day, so present =
+   * enrolled x that day's % summed per management. Schools not marked that day
+   * contribute nothing.
+   */
+  private readonly attPagePresentByMgmt = computed(() => {
+    const schools = this.at.scopeSchools();
+    const m = new Map<string, number>();
+    for (const s of schools) {
+      const d = s.dailyAtt;
+      const last = d?.length ? d[d.length - 1] : -1;
+      if (last < 0) continue;
+      const k = s.stype === 'Government' ? 'Govt' : /aided/i.test(s.stype) ? 'Aided' : 'Other';
+      m.set(k, (m.get(k) ?? 0) + Math.round((s.enrolled * last) / 100));
+    }
+    return ['Govt', 'Aided', 'Other'].filter((k) => (m.get(k) ?? 0) > 0).map((k) => [k, m.get(k)!] as [string, number]);
+  });
+  /**
+   * Headline tiles for the latest working day in scope, in the Overview card
+   * shape (label, big figure, sub line, split bars). Student attendance splits
+   * present students Govt / Aided (the managements the attendance data covers);
+   * the two school tiles split by school category.
+   */
   readonly attPageCards = computed(() => {
     const day = this.attPageToday();
     if (!day) return null;
     const students = this.attPageShow() === 'students';
     const present = students ? day.present : day.tPresent;
     const expected = students ? day.expected : day.tExpected;
-    const presentPct = expected ? Math.round((present / expected) * 1000) / 10 : null;
-    const markedPct = day.schools ? Math.round((day.marked / day.schools) * 1000) / 10 : null;
+    const pct = (a: number, b: number) => (b ? Math.round((a / b) * 1000) / 10 : null);
+    const presentPct = pct(present, expected);
+    const markedPct = pct(day.marked, day.schools);
+    const COLORS = ['#6EE7B7', '#FDE68A', '#BAE6FD', '#E9D5FF'];
+    const split = (parts: [string, number][], asPct = false) => {
+      const tot = parts.reduce((s, [, v]) => s + v, 0) || 1;
+      return { segs: parts.map(([k, v], i) => {
+        const share = Math.round((v / tot) * 1000) / 10;
+        return { k, n: v, v: asPct ? `${share}%` : inr(v), color: COLORS[i % COLORS.length], pct: share };
+      }) };
+    };
+    const mgmt = this.attPagePresentByMgmt();
+    const cat = this.attPageMarkingByCategory();
+    const byCat = (f: 'marked' | 'unmarked') => cat.filter((c) => c[f] > 0).map((c) => [c.name, c[f]] as [string, number]);
+    const who = students ? 'Student' : 'Teacher';
     return {
       date: day.date,
-      presentPct, presentLabel: `${inrShort(present)} of ${inrShort(expected)} ${students ? 'enrolled' : 'teaching staff'}`,
-      markedPct, markedLabel: `${inr(day.marked)} of ${inr(day.schools)} schools reporting that day`,
-      pending: day.unmarked, pendingLabel: `${inr(day.unmarked)} schools had not marked attendance that day`,
+      cards: [
+        {
+          label: `${who} Attendance`, icon: 'fa-solid fa-user-check',
+          big: presentPct != null ? `${presentPct}%` : 'N/A',
+          sub: 'Govt / Aided schools',
+          splits: students && mgmt.length ? [split(mgmt)] : [],
+        },
+        {
+          label: 'Schools Marked Attendance', icon: 'fa-solid fa-house-circle-check',
+          big: markedPct != null ? `${markedPct}%` : 'N/A',
+          sub: 'All categories',
+          splits: cat.length ? [split(byCat('marked'))] : [],
+        },
+        {
+          label: 'Schools Not Marked Attendance', icon: 'fa-solid fa-triangle-exclamation',
+          big: inr(day.unmarked),
+          sub: 'All categories',
+          splits: cat.length ? [split(byCat('unmarked'))] : [],
+        },
+      ],
     };
   });
   /** By school category (real: AttendanceSchool.ctype = Primary/Middle/High/Higher Secondary School, confirmed real in the asset). */
@@ -1054,22 +1129,96 @@ export class GlancePage implements OnInit {
       return { name: k.replace(' School', ''), v: wavg(list), enrolled: list.reduce((a, s) => a + s.enrolled, 0), schools: list.length };
     }).filter((r) => r.v != null);
   });
+  /**
+   * Bar colour for an Attendance-page percentage: the catalog band of the KPI
+   * the number stands for (student attendance 'a_s', teacher attendance 'a_t',
+   * or marking via 'schools not marked' 'a_nm' on the complement), so the
+   * charts read in the same three colours as the Overview pillar bars.
+   */
+  private attPageColor(v: number | null): string {
+    if (v == null) return '#CBD5E1';
+    const marking = this.attPageMetric() === 'marking';
+    const id = marking ? 'a_nm' : this.attPageShow() === 'students' ? 'a_s' : 'a_t';
+    const def = KPI_MODULES.find((m) => m.title === 'Attendance')?.kpis.find((k) => k.id === id);
+    return def ? this.glanceColor(this.kv.band(def, marking ? 100 - v : v)) : this.glanceColor('none');
+  }
+  /** Shared axis/grid/typography for the Attendance charts: Inter, muted 11px axes, hairline grid. */
+  private attPageAxes(xData: string[], extraX: Record<string, unknown> = {}) {
+    return {
+      textStyle: { fontFamily: 'Inter, system-ui, sans-serif' },
+      xAxis: { type: 'category', data: xData, axisLabel: { fontSize: 11, color: '#64748B', interval: 0, lineHeight: 14, ...extraX }, axisLine: { lineStyle: { color: '#CBD5E1' } }, axisTick: { show: false } },
+      yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 11, color: '#64748B', formatter: '{value}%' }, axisLine: { show: false }, splitLine: { lineStyle: { color: '#EEF2F8' } } },
+    };
+  }
   readonly glanceAttPageCategoryOpt = computed(() => {
     const rows = this.attPageCategoryRows();
     const state = this.attPageHeadline();
     if (!rows.length) return {};
+    const r1 = (v: number) => Math.round(v * 10) / 10;
+    const scope = this.ds.titleCase(this.ds.scopeLabel());
+    // the scope-average line is labelled outside the plot, on the right, so it
+    // never collides with the value label on the last bar
+    const avgLine = state == null ? undefined : {
+      silent: true, symbol: 'none', lineStyle: { color: '#334155', type: 'dashed' },
+      label: { formatter: `${scope}\n${state}%`, fontSize: 11, lineHeight: 14, color: '#334155', position: 'end', align: 'left', padding: [0, 0, 0, 6] },
+      data: [{ yAxis: state }],
+    };
+    const base = { ...this.attPageAxes(rows.map((r) => r.name)), grid: { left: 40, right: 84, top: 16, bottom: 40 } };
+    if (this.attPageMetric() === 'marking') {
+      // stacked: schools that marked attendance vs schools that did not, per category
+      const GREEN = '#10B981', RED = '#E11D48';
+      return {
+        ...base,
+        legend: { bottom: 0, icon: 'roundRect', itemWidth: 10, itemHeight: 10, textStyle: { fontSize: 11, color: '#334155' } },
+        grid: { ...base.grid, bottom: 56 },
+        tooltip: { trigger: 'axis', formatter: (ps: any[]) => { const r = rows[ps[0]?.dataIndex ?? 0]; return `<b>${r.name}</b><br/>${ps.map((p) => `${p.marker} ${p.seriesName} ${p.value}%`).join('<br/>')}<br/>${inr(r.schools)} schools`; } },
+        series: [
+          { name: 'Marked attendance', type: 'bar', stack: 'm', barCategoryGap: '36%', barMaxWidth: 70,
+            data: rows.map((r) => r1(r.v as number)), itemStyle: { color: GREEN },
+            label: { show: true, position: 'inside', fontSize: 11, fontWeight: 600, color: '#fff', formatter: (p: any) => `${p.value}%` },
+            markLine: avgLine },
+          { name: 'Not marked attendance', type: 'bar', stack: 'm', barCategoryGap: '36%', barMaxWidth: 70,
+            data: rows.map((r) => r1(100 - (r.v as number))), itemStyle: { color: RED, borderRadius: [4, 4, 0, 0] },
+            label: { show: true, position: 'inside', fontSize: 11, fontWeight: 600, color: '#fff', formatter: (p: any) => (p.value >= 6 ? `${p.value}%` : '') } },
+        ],
+      };
+    }
     return {
-      textStyle: { fontFamily: 'Inter, system-ui, sans-serif' },
+      ...base,
       tooltip: { trigger: 'axis', formatter: (ps: any[]) => { const r = rows[ps[0]?.dataIndex ?? 0]; return `<b>${r.name}</b><br/>${ps[0].value}%<br/>${inrShort(r.enrolled)} enrolled · ${inr(r.schools)} schools`; } },
-      grid: { left: 40, right: 12, top: 16, bottom: 40 },
-      xAxis: { type: 'category', data: rows.map((r) => r.name), axisLabel: { fontSize: 10, color: '#64748B', interval: 0, lineHeight: 13 }, axisLine: { lineStyle: { color: '#CBD5E1' } }, axisTick: { show: false } },
-      yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 10, color: '#64748B', formatter: '{value}%' }, axisLine: { show: false }, splitLine: { lineStyle: { color: '#EEF2F8' } } },
       series: [{
-        type: 'bar', data: rows.map((r) => r.v), barCategoryGap: '36%', barMaxWidth: 70,
-        itemStyle: { color: '#b45309', borderRadius: [4, 4, 0, 0] },
+        type: 'bar', data: rows.map((r) => ({ value: r.v, itemStyle: { color: this.attPageColor(r.v), borderRadius: [4, 4, 0, 0] } })), barCategoryGap: '36%', barMaxWidth: 70,
         label: { show: true, position: 'top', fontSize: 11, fontWeight: 600, color: '#0F172A', formatter: (p: any) => `${p.value}%` },
-        markLine: state == null ? undefined : { silent: true, symbol: 'none', lineStyle: { color: '#334155', type: 'dashed' },
-          label: { formatter: `State avg ${state}%`, fontSize: 10, color: '#334155', position: 'insideEndTop' }, data: [{ yAxis: state }] },
+        markLine: avgLine,
+      }],
+    };
+  });
+  /**
+   * Chart 1 under Marking status: schools that marked attendance on the latest
+   * working day vs schools that did not (real, from the day record). Replaces
+   * the gender split, which has no measured marking data behind it.
+   */
+  readonly attPageSchoolRows = computed(() => {
+    const day = this.attPageToday();
+    if (!day?.schools) return [];
+    const marked = Math.round((day.marked / day.schools) * 1000) / 10;
+    return [
+      { name: 'Marked attendance', v: marked, n: day.marked as number },
+      { name: 'Not marked attendance', v: Math.round((100 - marked) * 10) / 10, n: day.unmarked as number },
+    ];
+  });
+  readonly glanceAttPageSchoolsOpt = computed(() => {
+    const rows = this.attPageSchoolRows();
+    if (!rows.length) return {};
+    const GREEN = '#10B981', RED = '#E11D48';
+    return {
+      ...this.attPageAxes(rows.map((r) => `${r.name}\n${inr(r.n)} schools`)),
+      tooltip: { trigger: 'axis', formatter: (ps: any[]) => { const r = rows[ps[0]?.dataIndex ?? 0]; return `<b>${r.name}</b><br/>${ps[0].value}% · ${inr(r.n)} schools`; } },
+      grid: { left: 40, right: 12, top: 16, bottom: 40 },
+      series: [{
+        type: 'bar', barCategoryGap: '45%', barMaxWidth: 70,
+        data: rows.map((r, i) => ({ value: r.v, itemStyle: { color: i === 0 ? GREEN : RED, borderRadius: [4, 4, 0, 0] } })),
+        label: { show: true, position: 'top', fontSize: 11, fontWeight: 600, color: '#0F172A', formatter: (p: any) => `${p.value}%` },
       }],
     };
   });
@@ -1094,14 +1243,11 @@ export class GlancePage implements OnInit {
     const rows = this.attPageGenderRows();
     if (!rows.length) return {};
     return {
-      textStyle: { fontFamily: 'Inter, system-ui, sans-serif' },
+      ...this.attPageAxes(rows.map((r) => `${r.name}\n${inrShort(r.enrolled)}`)),
       tooltip: { trigger: 'axis', formatter: (ps: any[]) => { const r = rows[ps[0]?.dataIndex ?? 0]; return `<b>${r.name}</b><br/>${ps[0].value}% (scope-wide figure)<br/>${inrShort(r.enrolled)} enrolled (real)`; } },
       grid: { left: 40, right: 12, top: 16, bottom: 40 },
-      xAxis: { type: 'category', data: rows.map((r) => `${r.name}\n${inrShort(r.enrolled)}`), axisLabel: { fontSize: 10, color: '#64748B', interval: 0, lineHeight: 13 }, axisLine: { lineStyle: { color: '#CBD5E1' } }, axisTick: { show: false } },
-      yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 10, color: '#64748B', formatter: '{value}%' }, axisLine: { show: false }, splitLine: { lineStyle: { color: '#EEF2F8' } } },
       series: [{
-        type: 'bar', data: rows.map((r) => r.v), barCategoryGap: '45%', barMaxWidth: 70,
-        itemStyle: { color: '#0e7490', borderRadius: [4, 4, 0, 0] },
+        type: 'bar', data: rows.map((r) => ({ value: r.v, itemStyle: { color: this.attPageColor(r.v), borderRadius: [4, 4, 0, 0] } })), barCategoryGap: '45%', barMaxWidth: 70,
         label: { show: true, position: 'top', fontSize: 11, fontWeight: 600, color: '#0F172A', formatter: (p: any) => `${p.value}%` },
       }],
     };
@@ -1132,57 +1278,105 @@ export class GlancePage implements OnInit {
     if (!rows.length || mine == null) return {};
     const mean = Math.round((rows.reduce((s, r) => s + (r.v as number), 0) / rows.length) * 10) / 10;
     const best = [...rows].sort((a, b) => (b.v as number) - (a.v as number))[0];
+    // every bar carries its own RAG band, so "my position" vs "best" reads as status, not as a palette
     const bars = [
-      { label: `My position\n(${this.ds.titleCase(this.ds.scopeLabel())})`, v: mine, color: '#1e3a5f' },
-      { label: `${this.attPageUnitLabel()} average\n(mean of ${rows.length})`, v: mean, color: '#94A3B8' },
-      { label: `Best ${this.attPageUnitLabel().toLowerCase().replace(/s$/, '')}\n(${best.name})`, v: best.v as number, color: '#D97706' },
+      { label: `My position\n(${this.ds.titleCase(this.ds.scopeLabel())})`, v: mine },
+      { label: `${this.attPageUnitLabel()} average\n(mean of ${rows.length})`, v: mean },
+      { label: `Best ${this.attPageUnitLabel().toLowerCase().replace(/s$/, '')}\n(${best.name})`, v: best.v as number },
     ];
     return {
-      textStyle: { fontFamily: 'Inter, system-ui, sans-serif' },
+      ...this.attPageAxes(bars.map((b) => b.label)),
       tooltip: { trigger: 'axis', valueFormatter: (v: number) => `${v}%` },
       grid: { left: 40, right: 12, top: 16, bottom: 40 },
-      xAxis: { type: 'category', data: bars.map((b) => b.label), axisLabel: { fontSize: 10, color: '#64748B', interval: 0, lineHeight: 13 }, axisLine: { lineStyle: { color: '#CBD5E1' } }, axisTick: { show: false } },
-      yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 10, color: '#64748B', formatter: '{value}%' }, axisLine: { show: false }, splitLine: { lineStyle: { color: '#EEF2F8' } } },
-      series: [{ type: 'bar', data: bars.map((b) => ({ value: b.v, itemStyle: { color: b.color, borderRadius: [4, 4, 0, 0] } })), barCategoryGap: '40%', barMaxWidth: 70,
+      series: [{ type: 'bar', data: bars.map((b) => ({ value: b.v, itemStyle: { color: this.attPageColor(b.v), borderRadius: [4, 4, 0, 0] } })), barCategoryGap: '40%', barMaxWidth: 70,
         label: { show: true, position: 'top', fontSize: 11, fontWeight: 600, color: '#0F172A', formatter: (p: any) => `${p.value}%` } }],
     };
   });
   /** "How much have I improved?" — 14 working days / weeks / months, built from the real daily series. */
-  readonly attPageWindow = signal<'14d' | '14w' | '14m'>('14d');
+  /**
+   * Attendance trend range: Days (last 12 working days), Months (last 3 / 6 / 9
+   * calendar months as monthly averages of the daily %), Years (one chosen
+   * year, Jan-Dec monthly averages). Months with no records in the data are
+   * left empty, never filled in, and the caption says what the data covers.
+   */
+  readonly attPageRange = signal<'days' | 'months' | 'years'>('days');
+  readonly attPageMonths = signal<number>(3);
+  readonly ATT_MONTH_OPTIONS = [3, 6, 9];
+  private readonly attPageYear = signal<number | null>(null);
+  setAttPageYear(y: number): void { this.attPageYear.set(y); }
+  /** Years that actually have daily records at this scope, latest first. */
+  readonly attPageYears = computed(() => {
+    const daily: any[] = (this.at.current() as any)?.daily ?? [];
+    return [...new Set(daily.map((d) => +d.date.slice(0, 4)))].sort((a, b) => b - a);
+  });
+  readonly attPageYearSel = computed(() => {
+    const ys = this.attPageYears();
+    const y = this.attPageYear();
+    return y != null && ys.includes(y) ? y : ys[0] ?? null;
+  });
+  /** First and last recorded working day, for the caption. */
+  readonly attPageCoverage = computed(() => {
+    const daily: any[] = (this.at.current() as any)?.daily ?? [];
+    if (!daily.length) return null;
+    const f = (iso: string) => new Date(iso + 'T00:00:00Z').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' });
+    return { from: f(daily[0].date), to: f(daily[daily.length - 1].date), days: daily.length };
+  });
   readonly attPageTrend = computed(() => {
     const n = this.at.current() as any;
     if (!n?.daily?.length) return [];
     const field = this.attPageMetric() === 'marking' ? 'compliance' : (this.attPageShow() === 'students' ? 'attendance' : 'teacher');
     const daily: any[] = n.daily;
     const dayLabel = (iso: string) => new Date(iso + 'T00:00:00Z').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', timeZone: 'UTC' });
-    if (this.attPageWindow() === '14d') {
-      return daily.slice(-14).map((d) => ({ label: dayLabel(d.date), v: d[field] as number }));
+    if (this.attPageRange() === 'days') {
+      return daily.slice(-12).map((d) => ({ label: dayLabel(d.date), v: d[field] as number, n: 1 }));
     }
-    const bucket = this.attPageWindow() === '14w' ? 7 : 30;
-    const groups = new Map<string, number[]>();
+    // monthly averages of the daily %, keyed YYYY-MM
+    const byMonth = new Map<string, number[]>();
     for (const d of daily) {
-      const t = new Date(d.date + 'T00:00:00Z').getTime();
-      const k = String(Math.floor(t / (bucket * 86400000)));
-      (groups.get(k) ?? groups.set(k, []).get(k)!).push(d[field] as number);
+      const k = d.date.slice(0, 7);
+      (byMonth.get(k) ?? byMonth.set(k, []).get(k)!).push(d[field] as number);
     }
-    const keys = [...groups.keys()].sort((a, b) => +a - +b).slice(-14);
-    return keys.map((k, i) => {
-      const vs = groups.get(k)!;
-      const avg = Math.round((vs.reduce((s, v) => s + v, 0) / vs.length) * 10) / 10;
-      return { label: this.attPageWindow() === '14w' ? `wk ${i + 1}` : `mo ${i + 1}`, v: avg };
-    });
+    const avg = (vs: number[] | undefined) => (vs?.length ? Math.round((vs.reduce((s, v) => s + v, 0) / vs.length) * 10) / 10 : null);
+    const label = (ym: string, withYear: boolean) =>
+      new Date(ym + '-01T00:00:00Z').toLocaleDateString('en-GB', withYear ? { month: 'short', year: '2-digit', timeZone: 'UTC' } : { month: 'short', timeZone: 'UTC' });
+    let keys: string[];
+    if (this.attPageRange() === 'months') {
+      // the last N calendar months ending at the latest recorded month
+      const last = daily[daily.length - 1].date.slice(0, 7);
+      const [y, m] = last.split('-').map(Number);
+      keys = Array.from({ length: this.attPageMonths() }, (_, i) => {
+        const d = new Date(Date.UTC(y, m - 1 - (this.attPageMonths() - 1 - i), 1));
+        return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+      });
+      return keys.map((k) => ({ label: label(k, true), v: avg(byMonth.get(k)), n: byMonth.get(k)?.length ?? 0 }));
+    }
+    const year = this.attPageYearSel();
+    if (year == null) return [];
+    keys = Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`);
+    return keys.map((k) => ({ label: label(k, false), v: avg(byMonth.get(k)), n: byMonth.get(k)?.length ?? 0 }));
+  });
+  /** Caption under the trend heading. */
+  readonly attPageTrendCaption = computed(() => {
+    const who = `${this.attPageShowLabel()} ${this.attPageMetricLabel().toLowerCase()}`;
+    const cov = this.attPageCoverage();
+    const covTxt = cov ? ` · records cover ${cov.from} – ${cov.to} (${cov.days} working days)` : '';
+    switch (this.attPageRange()) {
+      case 'days': return `${who} · last 12 working days, daily`;
+      case 'months': return `${who} · monthly average of daily %, last ${this.attPageMonths()} months${covTxt}`;
+      default: return `${who} · monthly average of daily %, ${this.attPageYearSel() ?? ''}${covTxt}`;
+    }
   });
   readonly glanceAttPageTrendOpt = computed(() => {
     const rows = this.attPageTrend();
     if (!rows.length) return {};
     return {
-      textStyle: { fontFamily: 'Inter, system-ui, sans-serif' },
-      tooltip: { trigger: 'axis', valueFormatter: (v: number) => `${v}%` },
+      ...this.attPageAxes(rows.map((r) => r.label), { rotate: rows.length > 10 ? 30 : 0 }),
+      // trend keeps a scaled axis so day-to-day movement stays visible
+      yAxis: { type: 'value', axisLabel: { fontSize: 11, color: '#64748B', formatter: '{value}%' }, axisLine: { show: false }, splitLine: { lineStyle: { color: '#EEF2F8' } }, scale: true },
+      tooltip: { trigger: 'axis', formatter: (ps: any[]) => { const r = rows[ps[0]?.dataIndex ?? 0]; return r.v == null ? `<b>${r.label}</b><br/>No records` : `<b>${r.label}</b><br/>${r.v}%${r.n > 1 ? `<br/>average of ${r.n} working days` : ''}`; } },
       grid: { left: 44, right: 12, top: 16, bottom: 30 },
-      xAxis: { type: 'category', data: rows.map((r) => r.label), axisLabel: { fontSize: 10, color: '#64748B', interval: 0, rotate: rows.length > 10 ? 30 : 0 }, axisLine: { lineStyle: { color: '#CBD5E1' } }, axisTick: { show: false } },
-      yAxis: { type: 'value', axisLabel: { fontSize: 10, color: '#64748B', formatter: '{value}%' }, axisLine: { show: false }, splitLine: { lineStyle: { color: '#EEF2F8' } }, scale: true },
-      series: [{ type: 'bar', data: rows.map((r) => r.v), barMaxWidth: 48, itemStyle: { color: '#b45309', borderRadius: [4, 4, 0, 0] },
-        label: { show: true, position: 'top', fontSize: 10, fontWeight: 600, color: '#92400e' } }],
+      series: [{ type: 'bar', data: rows.map((r) => ({ value: r.v, itemStyle: { color: this.attPageColor(r.v), borderRadius: [4, 4, 0, 0] } })), barMaxWidth: 48,
+        label: { show: true, position: 'top', fontSize: 10, fontWeight: 600, color: '#0F172A', formatter: (p: any) => (p.value == null ? '' : `${p.value}%`) } }],
     };
   });
   /** "How is my team doing?" — searchable unit table, same convention as the Palli page. */

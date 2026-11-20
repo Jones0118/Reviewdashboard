@@ -205,6 +205,10 @@
   &:hover .ib, &.dim:hover .ib { background: var(--pri-dk); color: #fff; }
 }
 
+/* ---- search box (unit tables) ---- */
+.gl-search { border: 1px solid var(--bd); border-radius: 8px; padding: 8px 12px; font-size: 13px; min-width: 260px; background: var(--soft); color: var(--ink);
+  &:focus { outline: 2px solid var(--pri); outline-offset: 1px; border-color: var(--pri-soft-bd); background: #fff; } }
+
 /* ---- page title row ---- */
 
 .gl-h1 { margin: 0; font-size: 28px; font-weight: 600; letter-spacing: -.01em; color: var(--ink); }
@@ -403,8 +407,9 @@
     box-shadow: 0 4px 14px rgba(15,23,42,.08);
   }
   .t { font-size: 18px; font-weight: 700; color: var(--ink); white-space: nowrap; }
-  .tag { font-size: 12px; font-weight: 700; color: #fff; background: var(--pri-dk); border-radius: 6px; padding: 4px 8px; }
   .grp { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+  /* the title stays left; the Show / Metric groups sit at the right end */
+  .t + .grp { margin-left: auto; }
   .gl-win { margin-left: 0; justify-content: flex-start; }
 }
 
