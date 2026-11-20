@@ -43,30 +43,21 @@
 </div>
 } @else {
 <div class="gl-page">
-  <!-- sticky top: header + viewing/filter bar stay visible while scrolling -->
+  <!-- sticky top: the main header stays visible while scrolling -->
   <div class="gl-top">
   <header class="gl-bar1">
     <div class="brand">
-      <span class="em"><i class="fa-solid fa-school"></i></span>
+      <span class="em">
+        <img src="GOVT_LOGO.png" alt="Government of Tamil Nadu" class="em-logo"
+             (error)="logoOk.set(false)" [class.hide]="!logoOk()" />
+        @if (!logoOk()) { <i class="fa-solid fa-school"></i> }
+      </span>
       <span>
         <small lang="ta">பள்ளிக் கல்வித் துறை · தமிழ்நாடு</small>
         <b>School Education Dashboard</b>
       </span>
     </div>
     <div class="b1r">
-      <nav class="crumbs" aria-label="Scope">
-        <button type="button" (click)="ds.goToState()" [class.active]="ds.level() === 'state'"
-                [attr.aria-current]="ds.level() === 'state' ? 'page' : null"><i class="fa-solid fa-house"></i> Tamil Nadu</button>
-        @if (ds.selectedDistrict()) {
-          <i class="fa-solid fa-chevron-right sep" aria-hidden="true"></i>
-          <button type="button" (click)="ds.goToDistrict()" [class.active]="ds.level() === 'district'"
-                  [attr.aria-current]="ds.level() === 'district' ? 'page' : null">{{ ds.titleCase(ds.selectedDistrict()!) }}</button>
-        }
-        @if (ds.selectedBlock()) {
-          <i class="fa-solid fa-chevron-right sep" aria-hidden="true"></i>
-          <span class="active static" aria-current="page">{{ ds.titleCase(ds.selectedBlock()!) }}</span>
-        }
-      </nav>
       <span class="yr">Year <span class="inp">{{ rv.currentYear() }}</span></span>
       <span class="role-wrap">
         <button type="button" class="role" [class.on]="roleOpen()" (click)="toggleRole()"
@@ -90,86 +81,121 @@
       </span>
     </div>
   </header>
-  <!-- main filter area: district / block / management / category dropdowns -->
-  <div class="gl-bar2" role="region" aria-label="Scope and filters">
-    <div class="row">
-      <span class="vas">Filter</span>
-      <div class="sel">
-        <p-select [options]="districtOptions()" [ngModel]="ds.selectedDistrict()" (ngModelChange)="onDistrictChange($event)"
-                  optionLabel="label" optionValue="value" placeholder="District: all" [showClear]="true"
-                  [filter]="true" filterBy="label" styleClass="gl-flt" ariaLabel="District" />
-        @if (ds.selectedDistrict()) {
-          <p-select [options]="blockOptions()" [ngModel]="ds.selectedBlock()" (ngModelChange)="onBlockChange($event)"
-                    optionLabel="label" optionValue="value" placeholder="Block: all" [showClear]="true"
-                    [filter]="true" filterBy="label" styleClass="gl-flt" ariaLabel="Block" />
-        }
-        <p-multiSelect [options]="mgmtOptions" [ngModel]="mgmtSel()" (ngModelChange)="setMgmt($event)"
-                       optionLabel="label" optionValue="value" placeholder="Management: all" display="chip" [maxSelectedLabels]="2"
-                       [showToggleAll]="true" styleClass="gl-flt gl-flt-sm" ariaLabel="Management" />
-        <p-multiSelect [options]="typeOptions" [ngModel]="typeSel()" (ngModelChange)="setType($event)"
-                       optionLabel="label" optionValue="value" placeholder="Category: all" display="chip" [maxSelectedLabels]="2"
-                       [showToggleAll]="true" styleClass="gl-flt gl-flt-sm" ariaLabel="School category" />
-      </div>
-      <div class="fsum" aria-live="polite">
-        <span class="fl">Showing</span><b>{{ filterSummary() }}</b>
-        @if (filterActive()) { <button type="button" class="freset" (click)="resetChips()">Reset</button> }
-      </div>
-    </div>
-  </div>
   </div><!-- /gl-top -->
 
   @if (!ready()) {
     <div class="gl-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading dashboard…</div>
   } @else {
-<div class="gl-wrap" [class.nav-collapsed]="navCollapsed()">
-  <!-- side panel: Overview + menu → submenu; collapsible to an icon rail -->
-  <aside class="gl-side">
-    <button type="button" class="gl-collapse" (click)="toggleNav()" [title]="navCollapsed() ? 'Expand menu' : 'Collapse menu'"
-            [attr.aria-expanded]="!navCollapsed()" aria-controls="gl-nav-items">
-      <i class="fa-solid" [class.fa-angles-left]="!navCollapsed()" [class.fa-angles-right]="navCollapsed()"></i>
-      @if (!navCollapsed()) { <span>Collapse</span> }
-    </button>
-    <div id="gl-nav-items">
-    <button type="button" class="gl-sni" [class.on]="glanceView() === 'overview'" (click)="setGlanceView('overview')" title="Overview"
-            data-tip="Overview" [attr.aria-current]="glanceView() === 'overview' ? 'page' : null">
-      <span class="ib"><i class="fa-solid fa-house"></i></span>
-      <span class="t"><b>Overview</b><span>{{ ds.scopeLabel() }}</span></span>
-    </button>
-    <h5 class="mt">Menu</h5>
-    <!-- menu (group) → submenu (items); a group stays open while one of its items is the page -->
-    @for (g of glanceMenu(); track g.id) {
-      <button type="button" class="gl-sni gl-grp" [class.open]="isGroupOpen(g.id)" (click)="toggleGroup(g.id)"
-              [attr.data-tip]="g.group"
-              [attr.aria-expanded]="isGroupOpen(g.id)" [attr.aria-controls]="'gl-sub-' + g.id"
-              [title]="g.group + (g.bad ? ' · ' + g.bad + ' KPI(s) off track' : '')">
-        <span class="ib" [class.flag]="g.bad > 0"><i [class]="g.icon"></i></span>
-        <span class="t"><b>{{ g.group }}</b></span>
-        @if (g.bad) { <span class="bg">{{ g.bad }}</span> }
-        <i class="fa-solid fa-chevron-down chev"></i>
+<div class="gl-wrap" [class.panel-open]="panelOpen()">
+  <!-- navigation, Gmail-style: a fixed icon rail (Overview + the five pillars,
+       short label under each icon) and a second panel listing the current
+       pillar's pages. The rail never changes; the arrow shows/hides the panel.
+       With the panel hidden, hovering a pillar icon shows the same list as a
+       flyout, so every page stays reachable either way. -->
+  <div class="gl-nav">
+    <nav class="gl-rail" aria-label="Pillars">
+      <button type="button" class="gl-collapse" (click)="togglePanel()"
+              [attr.aria-label]="panelOpen() ? 'Hide page list' : 'Show page list'"
+              [attr.aria-expanded]="panelOpen()" aria-controls="gl-panel">
+        <i class="fa-solid fa-bars"></i>
       </button>
-      @if (isGroupOpen(g.id)) {
-        <div class="gl-sub" [id]="'gl-sub-' + g.id">
-          @for (m of g.items; track m.id) {
-            <button type="button" class="gl-sni gl-sni-sub" [class.on]="glanceView() === m.id" [class.dim]="!m.built"
-                    [attr.aria-current]="glanceView() === m.id ? 'page' : null"
-                    (click)="setGlanceView(m.id)" [title]="m.built ? m.label + ' · ' + m.short : m.label + ' · not built yet'">
-              <span class="ib"><i [class]="m.icon"></i></span>
-              <span class="t"><b>{{ m.label }}</b><span>{{ m.sub }}</span></span>
-              @if (m.bad) { <span class="bg">{{ m.bad }}</span> }
-            </button>
+      <button type="button" class="gl-ri" [class.on]="glanceView() === 'overview'" (click)="setGlanceView('overview')"
+              [attr.aria-current]="glanceView() === 'overview' ? 'page' : null">
+        <span class="ib"><i class="fa-house" [class.fa-solid]="glanceView() === 'overview'" [class.fa-regular]="glanceView() !== 'overview'"></i></span>
+        <span class="lb">Overview</span>
+      </button>
+      @for (g of glanceMenu(); track g.id) {
+        <div class="gl-railgrp">
+          <button type="button" class="gl-ri" [class.on]="railOn(g.id)" (click)="openGroup(g.id)"
+                  [attr.aria-label]="g.group + (g.bad ? ' · ' + g.bad + ' KPI(s) off track' : '')"
+                  [attr.aria-current]="railOn(g.id) ? 'page' : null">
+            <!-- filled glyph when active, outlined otherwise -->
+            <span class="ib"><i [class]="g.icon" [class.fa-solid]="railOn(g.id)" [class.fa-regular]="!railOn(g.id)"></i>@if (g.bad) { <span class="bg">{{ g.bad }}</span> }</span>
+            <span class="lb">{{ g.short }}</span>
+          </button>
+          @if (!panelOpen() && g.items.length) {
+            <div class="gl-fly" role="menu" [attr.aria-label]="g.group">
+              <span class="gl-sub-h">{{ g.group }}</span>
+              @for (m of g.items; track m.id) {
+                <button type="button" class="gl-sni gl-sni-sub" role="menuitem" [class.on]="glanceView() === m.id" [class.dim]="!m.built"
+                        (click)="setGlanceView(m.id)" [attr.aria-label]="m.built ? m.label + ' · ' + m.short : m.label + ' · not built yet'">
+                  <span class="ib"><i [class]="m.icon"></i></span>
+                  <span class="t"><b>{{ m.label }}</b></span>
+                  @if (m.bad) { <span class="bg">{{ m.bad }}</span> }
+                </button>
+              }
+            </div>
           }
         </div>
       }
+    </nav>
+    <!-- the page panel: a pillar's pages, or on the Overview the page's own sections -->
+    @if (panelOpen()) {
+      @if (glanceView() === 'overview') {
+        <aside class="gl-panel" id="gl-panel" aria-label="Overview sections">
+          <span class="gl-sub-h">Overview</span>
+          @for (a of OVERVIEW_ANCHORS; track a.id) {
+            <a class="gl-sni gl-sni-sub" [href]="'#' + a.id" (click)="$event.preventDefault(); scrollToAnchor(a.id)">
+              <span class="ib"><i [class]="a.icon"></i></span>
+              <span class="t"><b>{{ a.label }}</b></span>
+            </a>
+          }
+        </aside>
+      } @else if (panelGroup(); as pg) {
+        @if (pg.items.length) {
+          <aside class="gl-panel" id="gl-panel" [attr.aria-label]="pg.group">
+            <span class="gl-sub-h">{{ pg.group }}</span>
+            @for (m of pg.items; track m.id) {
+              <button type="button" class="gl-sni gl-sni-sub" [class.on]="glanceView() === m.id" [class.dim]="!m.built"
+                      [attr.aria-current]="glanceView() === m.id ? 'page' : null"
+                      (click)="setGlanceView(m.id)" [attr.aria-label]="m.built ? m.label + ' · ' + m.short : m.label + ' · not built yet'">
+                <span class="ib"><i [class]="m.icon"></i></span>
+                <span class="t"><b>{{ m.label }}</b></span>
+                @if (m.bad) { <span class="bg">{{ m.bad }}</span> }
+              </button>
+            }
+          </aside>
+        }
+      }
     }
-    </div>
-  </aside>
+  </div>
 
   <main class="gl-main">
+    <!-- main filter area: district / block / management / category dropdowns,
+         pinned under the header on every page -->
+    <div class="gl-filterwrap pin">
+    <div class="gl-bar2" role="region" aria-label="Scope and filters">
+      <div class="row">
+        <span class="vas">Filter</span>
+        <div class="sel">
+          <p-select [options]="districtOptions()" [ngModel]="ds.selectedDistrict()" (ngModelChange)="onDistrictChange($event)"
+                    optionLabel="label" optionValue="value" placeholder="District: all" [showClear]="true"
+                    [filter]="true" filterBy="label" styleClass="gl-flt" ariaLabel="District" />
+          @if (ds.selectedDistrict()) {
+            <p-select [options]="blockOptions()" [ngModel]="ds.selectedBlock()" (ngModelChange)="onBlockChange($event)"
+                      optionLabel="label" optionValue="value" placeholder="Block: all" [showClear]="true"
+                      [filter]="true" filterBy="label" styleClass="gl-flt" ariaLabel="Block" />
+          }
+          @if (ds.selectedBlock()) {
+            <p-select [options]="schoolOptions()" [ngModel]="ds.selectedSchool()" (ngModelChange)="onSchoolChange($event)"
+                      optionLabel="label" optionValue="value" placeholder="School: all" [showClear]="true"
+                      [filter]="true" filterBy="label" styleClass="gl-flt gl-flt-lg" ariaLabel="School" />
+          }
+          <p-multiSelect [options]="mgmtOptions" [ngModel]="mgmtSel()" (ngModelChange)="setMgmt($event)"
+                         optionLabel="label" optionValue="value" placeholder="Management: all" display="chip" [maxSelectedLabels]="2"
+                         [showToggleAll]="true" styleClass="gl-flt gl-flt-sm" ariaLabel="Management" />
+          <p-multiSelect [options]="typeOptions" [ngModel]="typeSel()" (ngModelChange)="setType($event)"
+                         optionLabel="label" optionValue="value" placeholder="Category: all" display="chip" [maxSelectedLabels]="2"
+                         [showToggleAll]="true" styleClass="gl-flt gl-flt-sm" ariaLabel="School category" />
+        </div>
+        @if (anyFilterActive()) {
+          <div class="fsum"><button type="button" class="freset" (click)="resetFilters()">Reset</button></div>
+        }
+      </div>
+    </div>
+    </div><!-- /gl-filterwrap -->
     @if (!glanceModule()) {
     <!-- ===== Overview ===== -->
-    <div class="gl-crumb">
-      <span class="bc">{{ glanceCrumb() }}</span>
-    </div>
 
     <!-- headline panel -->
     <div class="gl-bpanel">
@@ -182,7 +208,7 @@
             <div class="sp">
               <div class="lr">
                 @for (g of sp.segs; track g.k) {
-                  <span><i class="dot" [style.background]="g.color"></i>{{ g.k }} <b [glCountUp]="g.v"></b> <em>{{ g.pct }}%</em></span>
+                  <span><i class="dot" [style.background]="g.color"></i>{{ g.k }} <b [glCountUp]="g.v"></b></span>
                 }
               </div>
               <div class="sbar">
@@ -195,7 +221,7 @@
     </div>
 
     <!-- key insights by pillar -->
-    <div class="gl-sechead"><h2>Key Insights by Pillar</h2>
+    <div class="gl-sechead" id="gl-pillars"><h2>Key Insights</h2>
       <span class="hint">Five pillars · {{ ds.scopeLabel() }}</span></div>
     <div class="gl-pgrid">
       @for (col of pillarColumns(); track $index) {
@@ -214,12 +240,12 @@
                   <div class="pc-metric">
                     <span class="pc-lbl">{{ m.label }}</span>
                     <div class="pc-big">{{ m.big }}@if (m.suffix) { <em>{{ m.suffix }}</em> }</div>
-                    <div class="pc-bar">
+                    <div class="pc-bar" [attr.data-tip]="m.tip" tabindex="0" [attr.aria-label]="m.tip">
                       @for (s of m.segs; track s.label) { <i [style.width.%]="s.pct" [style.background]="s.color"></i> }
                     </div>
                     <div class="pc-legend">
                       @for (s of m.segs; track s.label) {
-                        <span><i class="dot" [style.background]="s.color"></i>{{ s.label }} <b>{{ s.value }}</b></span>
+                        <span><i class="dot" [style.background]="s.color"></i>{{ s.label }}</span>
                       }
                     </div>
                   </div>
@@ -231,12 +257,12 @@
                         <div class="pc-metric">
                           <span class="pc-lbl">{{ m.label }}</span>
                           <div class="pc-big">{{ m.big }}@if (m.suffix) { <em>{{ m.suffix }}</em> }</div>
-                          <div class="pc-bar">
+                          <div class="pc-bar" [attr.data-tip]="m.tip" tabindex="0" [attr.aria-label]="m.tip">
                             @for (s of m.segs; track s.label) { <i [style.width.%]="s.pct" [style.background]="s.color"></i> }
                           </div>
                           <div class="pc-legend">
                             @for (s of m.segs; track s.label) {
-                              <span><i class="dot" [style.background]="s.color"></i>{{ s.label }} <b>{{ s.value }}</b></span>
+                              <span><i class="dot" [style.background]="s.color"></i>{{ s.label }}</span>
                             }
                           </div>
                         </div>
@@ -263,7 +289,7 @@
       <!-- needs attention -->
       <section class="gl-c" id="gl-attention">
         <div class="ct"><b class="lg">Need Your Attention</b>
-          <span class="s">KPIs outside their expected range at this scope, with the component that owns them</span></div>
+          <span class="s">KPIs off track at this scope, with the component that owns them</span></div>
         <div class="gl-acols">
           <div class="acol crit">
             <h6>Critical attention</h6>
@@ -278,19 +304,7 @@
               <div class="gl-empty">Nothing off track at this scope.</div>
             }
           </div>
-          <div class="acol micro">
-            <h6>Watch</h6>
-            <span class="ch">Inside the range, but not yet on track</span>
-            @for (a of glanceAttention().watch; track a.module + a.id; let i = $index) {
-              <button type="button" class="na" [class.first]="i === 0" (click)="openGlanceKpi(a)">
-                <span class="n micro">{{ i + 1 }}</span>
-                <span class="t"><b>{{ a.title }}</b><span>{{ a.sub }}</span></span>
-                <span class="own">{{ a.owner }}</span>
-              </button>
-            } @empty {
-              <div class="gl-empty">Nothing on watch at this scope.</div>
-            }
-          </div>
+
         </div>
       </section>
 
@@ -320,25 +334,23 @@
     } @else {
     <!-- ===== Submenu item page ===== -->
     @let gm = glanceModule()!;
-    <div class="gl-crumb">
-      <span class="bc">{{ glanceCrumb() }} › {{ gm.group }} › {{ gm.label }}</span>
-    </div>
-    <div class="gl-modhead" [style.--kc]="gm.color">
-      <span class="av"><i [class]="gm.icon"></i></span>
-      <div>
-        <h1 class="gl-h1">{{ gm.label }}</h1>
-        @if (gm.built) {
-          <span class="s">Data: {{ gm.short }} component · {{ ds.scopeLabel() }} · {{ gm.kpis.length }} KPIs
-            @if (gm.bad) { · <b class="cr">{{ gm.bad }} off track</b> }</span>
-        } @else {
-          <span class="s">{{ gm.group }} · {{ ds.scopeLabel() }}</span>
-        }
+    @if (gm.module !== 'Attendance') {
+      <!-- page heading, pinned under the filter the same way the Attendance main-view bar is -->
+      <div class="gl-mainview">
+        <div class="mv gl-modhead" [style.--kc]="gm.color">
+          <span class="av"><i [class]="gm.icon"></i></span>
+          <div>
+            <h1 class="gl-h1">{{ gm.label }}</h1>
+            @if (gm.built) {
+              <span class="s">Data: {{ gm.short }} component · {{ ds.scopeLabel() }} · {{ gm.kpis.length }} KPIs
+                @if (gm.bad) { · <b class="cr">{{ gm.bad }} off track</b> }</span>
+            } @else {
+              <span class="s">{{ gm.group }} · {{ ds.scopeLabel() }}</span>
+            }
+          </div>
+        </div>
       </div>
-      <button class="gl-btn ghost" (click)="setGlanceView('overview')"><i class="fa-solid fa-arrow-left"></i> Overview</button>
-      @if (gm.built) {
-        <button class="gl-btn" (click)="openGlanceModule({ topic: gm.topic, title: gm.module! })">View details <i class="fa-solid fa-arrow-right"></i></button>
-      }
-    </div>
+    }
     @if (gm.module === 'Palli Paarvai') {
       <section class="gl-c" style="display:flex; align-items:center; gap:14px; flex-wrap:wrap">
         <span class="vas">Show</span>
@@ -350,19 +362,27 @@
       </section>
     }
     @if (gm.module === 'Attendance') {
-      <section class="gl-c" style="display:flex; align-items:center; gap:14px; flex-wrap:wrap">
-        <span class="vas">Show</span>
-        <div class="gl-win" role="group" aria-label="Show" style="margin-left:0; justify-content:flex-start">
-          <button type="button" class="chip" [class.on]="attPageShow() === 'students'" [attr.aria-pressed]="attPageShow() === 'students'" (click)="attPageShow.set('students')">Students</button>
-          <button type="button" class="chip" [class.on]="attPageShow() === 'teachers'" [attr.aria-pressed]="attPageShow() === 'teachers'" (click)="attPageShow.set('teachers')">Teachers</button>
+      <!-- main view: one floating control bar that drives the whole Attendance page -->
+      <div class="gl-mainview">
+        <div class="mv" role="group" aria-label="Main view for the whole page">
+          <b class="t">Attendance Dashboard</b>
+          <span class="tag">Main view · whole page</span>
+          <span class="grp">
+            <span class="vas">Show</span>
+            <div class="gl-win" role="group" aria-label="Students or teachers">
+              <button type="button" class="chip" [class.on]="attPageShow() === 'students'" [attr.aria-pressed]="attPageShow() === 'students'" (click)="attPageShow.set('students')">Students</button>
+              <button type="button" class="chip" [class.on]="attPageShow() === 'teachers'" [attr.aria-pressed]="attPageShow() === 'teachers'" (click)="attPageShow.set('teachers')">Teachers</button>
+            </div>
+          </span>
+          <span class="grp">
+            <span class="vas">Metric</span>
+            <div class="gl-win" role="group" aria-label="Metric">
+              <button type="button" class="chip" [class.on]="attPageMetric() === 'marking'" [attr.aria-pressed]="attPageMetric() === 'marking'" (click)="attPageMetric.set('marking')">Marking status</button>
+              <button type="button" class="chip" [class.on]="attPageMetric() === 'attendance'" [attr.aria-pressed]="attPageMetric() === 'attendance'" (click)="attPageMetric.set('attendance')">Attendance %</button>
+            </div>
+          </span>
         </div>
-        <span class="vas">Metric</span>
-        <div class="gl-win" role="group" aria-label="Metric" style="margin-left:0; justify-content:flex-start">
-          <button type="button" class="chip" [class.on]="attPageMetric() === 'marking'" [attr.aria-pressed]="attPageMetric() === 'marking'" (click)="attPageMetric.set('marking')">Marking status</button>
-          <button type="button" class="chip" [class.on]="attPageMetric() === 'attendance'" [attr.aria-pressed]="attPageMetric() === 'attendance'" (click)="attPageMetric.set('attendance')">Attendance %</button>
-        </div>
-        <span class="s">{{ attPageShowLabel() }} {{ attPageMetricLabel() | lowercase }}{{ attPageMetric() === 'marking' ? ' — marking is recorded once per school, not split by student/teacher' : '' }}</span>
-      </section>
+      </div>
     }
     @if (!gm.built) {
       <section class="gl-c"><div class="gl-nodata"><b class="gl-nodata-t">{{ gm.label }} is not built yet</b>
@@ -487,9 +507,8 @@
     @if (gm.module === 'Attendance') {
       <!-- ===== Attendance analytics: state read-out, breakdowns, trend, unit drill ===== -->
       <section class="gl-c">
-        <div class="ct"><b class="lg">Where am I?</b><span class="s">{{ ds.scopeLabel() }} &middot; real attendance data, last working day {{ attPageToday()?.date }}</span></div>
         @if (attPageCards(); as c) {
-          <div class="gl-bpanel" style="margin-top:14px; box-shadow:none; padding:0; background:none">
+          <div class="gl-bpanel" style="margin-top:0; box-shadow:none; padding:0; background:none">
             <div class="gl-bp" style="background:#1e3a5f">
               <div class="r1"><span class="lab">{{ attPageShowLabel() }} present that day</span><span class="ib"><i class="fa-solid fa-user-check"></i></span></div>
               <div class="big">{{ c.presentPct != null ? c.presentPct + '%' : 'N/A' }}</div>
@@ -507,11 +526,11 @@
             </div>
           </div>
         } @else {
-          <div class="gl-nodata" style="margin-top:12px">No day-level attendance record at this scope.</div>
+          <div class="gl-nodata">No day-level attendance record at this scope.</div>
         }
         <div class="gl-tgrid" style="margin-top:16px">
           <div>
-            <div class="ct"><b>{{ attPageShowLabel() }} {{ attPageMetricLabel() | lowercase }} by gender</b><span class="s">Assumed for the rate — no gender-split attendance/marking record exists; both bars show the {{ ds.scopeLabel() }} figure. Enrolment counts are real.</span></div>
+            <div class="ct"><b>{{ attPageShowLabel() }} {{ attPageMetricLabel() | lowercase }} by gender</b></div>
             @if (attPageGenderRows().length) {
               <div echarts [options]="glanceAttPageGenderOpt()" class="gl-chart"></div>
             } @else {
@@ -519,7 +538,7 @@
             }
           </div>
           <div>
-            <div class="ct"><b>{{ attPageShowLabel() }} {{ attPageMetricLabel() | lowercase }} by school category</b><span class="s">Real &middot; Primary / Middle / High / Higher Secondary &middot; dashed line = {{ ds.scopeLabel() }} figure</span></div>
+            <div class="ct"><b>{{ attPageShowLabel() }} {{ attPageMetricLabel() | lowercase }} by school category</b></div>
             @if (attPageCategoryRows().length) {
               <div echarts [options]="glanceAttPageCategoryOpt()" class="gl-chart"></div>
             } @else {

@@ -60,6 +60,9 @@ export class GlancePage implements OnInit {
   toggleRole(): void { this.roleOpen.update((v) => !v); }
   selectRole(id: string): void { this.auth.setRole(id); this.roleOpen.set(false); }
 
+  // ---- header brand emblem (real asset; fall back to a generic icon if it fails to load) ----
+  readonly logoOk = signal(true);
+
   async ngOnInit(): Promise<void> {
     // Same datasets the dashboard loads; every load() is idempotent, so landing
     // here directly or after the main page costs nothing extra.
@@ -83,8 +86,8 @@ export class GlancePage implements OnInit {
   readonly mainWidth = signal(0);
   constructor() {
     afterRenderEffect(() => {
-      // re-measure after any render that can change the bar's height
-      this.auth.isAuthenticated(); this.ready(); this.ds.level(); this.filterActive();
+      // re-measure after any render that can change the header's or the pinned filter's height
+      this.auth.isAuthenticated(); this.ready(); this.ds.level(); this.filterActive(); this.anyFilterActive(); this.glanceView();
       this.measureLayout();
     });
     afterNextRender(() => {
@@ -96,6 +99,9 @@ export class GlancePage implements OnInit {
     this.el.nativeElement.style.setProperty('--gl-top-h', `${top?.offsetHeight ?? 0}px`);
     const main = this.el.nativeElement.querySelector<HTMLElement>('.gl-main');
     this.mainWidth.set(main?.clientWidth ?? 0);
+    // pinned filter card height (its wrapper carries a 22px band below the card)
+    const flt = this.el.nativeElement.querySelector<HTMLElement>('.gl-filterwrap.pin');
+    this.el.nativeElement.style.setProperty('--gl-filter-h', `${flt ? Math.max(0, flt.offsetHeight - 22) : 0}px`);
   }
 
   // ---- filters (V3 chip filters), applied through the shared DataService ----
@@ -134,11 +140,15 @@ export class GlancePage implements OnInit {
     const cat = res.length ? this.ds.catOptions().map((o) => o.value).filter((v) => res.some((re) => re.test(v))) : [];
     this.ds.filters.update((f) => ({ ...f, cat }));
   }
-  resetChips(): void {
+  /** Reset: every control in the filter bar — Management, Category and the scope back to state. */
+  resetFilters(): void {
     this.mgmtSel.set([]); this.typeSel.set([]);
     this.ds.filters.update((f) => ({ ...f, stype: [], cat: [] }));
+    this.ds.goToState();
   }
   readonly filterActive = computed(() => this.mgmtSel().length > 0 || this.typeSel().length > 0);
+  /** Anything narrowing the page: a scope below state, or a Management / Category selection. */
+  readonly anyFilterActive = computed(() => this.ds.level() !== 'state' || this.filterActive());
   readonly filterSummary = computed(() => {
     const m = this.mgmtSel(), c = this.typeSel();
     if (!m.length && !c.length) return 'All schools';
@@ -146,15 +156,20 @@ export class GlancePage implements OnInit {
     return parts.join(' \u00B7 ') + ' schools';
   });
 
-  // ---- scope (State -> District -> Block), shared DataService state ----
+  // ---- scope (State -> District -> Block -> School), shared DataService state ----
   readonly districtOptions = computed(() =>
     this.ds.districts().map((d) => ({ label: this.ds.titleCase(d.name), value: d.name })),
   );
   readonly blockOptions = computed(() =>
     this.ds.blocksForDistrict().map((b) => ({ label: this.ds.titleCase(b.block), value: b.block })),
   );
+  /** Schools in the selected block; honours the Management / Category filters, same as the main dashboard. */
+  readonly schoolOptions = computed(() =>
+    this.ds.schoolsForBlock().map((s) => ({ label: s.name, value: s.name })),
+  );
   onDistrictChange(name: string | null): void { if (name) this.ds.drillToDistrict(name); else this.ds.goToState(); }
   onBlockChange(block: string | null): void { if (block) this.ds.drillToBlock(block); else this.ds.goToDistrict(); }
+  onSchoolChange(name: string | null): void { if (name) this.ds.drillToSchool(name); else this.ds.goToBlock(); }
   print(): void { window.print(); }
 
   // ---- "Download HTML": a self-contained snapshot of the page as rendered ----
@@ -203,7 +218,7 @@ export class GlancePage implements OnInit {
         try { inlineCss.push(await this.inlineCssAssets(await (await fetch(link.href)).text(), link.href)); } catch { /* skip an unreachable sheet */ }
       }
       // the page animates in; a saved file should open settled
-      inlineCss.push('.gl-anim,.gl-bp .sbar i,.gl-ent .bar i,.gl-spark .sl{animation:none!important}.gl-spark .sl{stroke-dashoffset:0!important}.gl-top{position:static!important}.gl-side{position:static!important;max-height:none!important}');
+      inlineCss.push('.gl-anim,.gl-bp .sbar i,.gl-ent .bar i,.gl-spark .sl{animation:none!important}.gl-spark .sl{stroke-dashoffset:0!important}.gl-top{position:static!important}.gl-nav{position:static!important;height:auto!important}.gl-mainview{position:static!important}.gl-filterwrap{position:static!important}');
 
       const scope = this.ds.titleCase(this.ds.scopeLabel());
       const when = new Date();
@@ -308,18 +323,18 @@ export class GlancePage implements OnInit {
    * Performance backs both exam items, Palli Paarvai backs both observation
    * items). Group 4 has no heading in the sheet — named here, flagged as such.
    */
-  private readonly GLANCE_GROUPS: { id: string; group: string; icon: string; items: { id: string; label: string; module: string | null; icon: string }[] }[] = [
-    { id: 'g1', group: '1. Access and Equity', icon: 'fa-solid fa-scale-balanced', items: [
+  private readonly GLANCE_GROUPS: { id: string; group: string; short: string; icon: string; items: { id: string; label: string; module: string | null; icon: string }[] }[] = [
+    { id: 'g1', group: '1. Access and Equity', short: 'Access', icon: 'fa-handshake', items: [
       { id: 'scholar', label: 'Scholarships and Entitlements', module: 'Scholarship', icon: 'fa-solid fa-award' },
       { id: 'cwsn', label: 'Support to CWSN', module: null, icon: 'fa-solid fa-wheelchair' },
       { id: 'acis', label: 'All Children in Schools (ACiS)', module: 'All Children in School', icon: 'fa-solid fa-children' },
       { id: 'scheme', label: 'Scheme & Service Delivery', module: null, icon: 'fa-solid fa-gift' },
     ] },
-    { id: 'g2', group: '2. Safe and Secure Schools', icon: 'fa-solid fa-shield-halved', items: [
+    { id: 'g2', group: '2. Safe and Secure Schools', short: 'Safety', icon: 'fa-building', items: [
       { id: 'infra', label: 'Physical Infra', module: 'Infrastructure', icon: 'fa-solid fa-building-columns' },
       { id: 'grievance', label: 'Grievance Redressal & Public Interface', module: null, icon: 'fa-solid fa-headset' },
     ] },
-    { id: 'g3', group: '3. Learning Outcomes First', icon: 'fa-solid fa-book-open', items: [
+    { id: 'g3', group: '3. Learning Outcomes First', short: 'Learning', icon: 'fa-lightbulb', items: [
       { id: 'glp-primary', label: 'Grade-level Proficiency for Primary Grades', module: null, icon: 'fa-solid fa-child-reaching' },
       { id: 'glp-middle', label: 'Grade-level Proficiency for Middle Grades', module: null, icon: 'fa-solid fa-person-chalkboard' },
       { id: 'board', label: '10th & 12th Board Exam Performance', module: 'Academic Performance', icon: 'fa-solid fa-graduation-cap' },
@@ -334,7 +349,7 @@ export class GlancePage implements OnInit {
       { id: 'vetri', label: 'Vetri Palligal', module: null, icon: 'fa-solid fa-trophy' },
       { id: 'field', label: 'District Governance - Field Inspections & Monitoring', module: 'Palli Paarvai', icon: 'fa-solid fa-clipboard-check' },
     ] },
-    { id: 'g5', group: '4. Social and Emotional Wellbeing', icon: 'fa-solid fa-heart', items: [
+    { id: 'g5', group: '4. Social and Emotional Wellbeing', short: 'Wellbeing', icon: 'fa-heart', items: [
       { id: 'cocurricular', label: 'Co-curricular', module: null, icon: 'fa-solid fa-palette' },
       { id: 'libraries', label: 'Public Libraries', module: null, icon: 'fa-solid fa-book' },
       { id: 'health', label: 'Student Health & Wellbeing', module: null, icon: 'fa-solid fa-heart-pulse' },
@@ -342,30 +357,43 @@ export class GlancePage implements OnInit {
       { id: 'thunai', label: 'Thunai', module: null, icon: 'fa-solid fa-hands-holding-child' },
       { id: 'values', label: 'Value Education', module: null, icon: 'fa-solid fa-seedling' },
     ] },
-    { id: 'g6', group: '5. Alumni and Community Mentorship', icon: 'fa-solid fa-people-arrows', items: [
+    { id: 'g6', group: '5. Alumni and Community Mentorship', short: 'Community', icon: 'fa-comments', items: [
       { id: 'smc', label: 'School Management Committee (SMC)', module: 'SMC', icon: 'fa-solid fa-people-group' },
       { id: 'alumni', label: 'Vizhuthugal (Alumni)', module: null, icon: 'fa-solid fa-user-graduate' },
       { id: 'nsnop', label: 'Namma School Namma Ooru Palli (NSNOP)', module: null, icon: 'fa-solid fa-house-flag' },
     ] },
   ];
 
-  /** Expanded menu groups (submenus). The group holding the open item is kept open. */
-  readonly openGroups = signal<Set<string>>(new Set());
-  toggleGroup(id: string): void {
-    // in the icon rail, clicking a pillar icon jumps straight into that
-    // pillar's domain (its first built item, or its first item's "not
-    // built yet" stub) — same as a pillar card's "Open pillar" — rather
-    // than re-expanding the whole sidebar.
-    if (this.navCollapsed()) {
-      const g = this.glanceMenu().find((x) => x.id === id);
-      const target = g?.items.find((i) => i.built)?.id ?? g?.items[0]?.id;
-      if (target) this.setGlanceView(target);
-      return;
-    }
-    this.openGroups.update((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  /**
+   * Navigation state. The icon rail is fixed; the arrow at its top shows or
+   * hides the second panel (closed by default), which lists the pages of the
+   * pillar that owns the open page. Overview has no pages of its own, so no
+   * panel is shown there whatever the arrow says.
+   * Picking a pillar on the rail opens its first page (the Gmail pattern: the
+   * rail switches app, the panel is that app's folder list).
+   */
+  readonly panelOpen = signal(false);
+  togglePanel(): void { this.panelOpen.update((v) => !v); }
+  readonly panelGroup = computed(() => {
+    const view = this.glanceView();
+    return this.glanceMenu().find((g) => g.items.some((i) => i.id === view)) ?? null;
+  });
+  openGroup(id: string): void {
+    const first = this.glanceMenu().find((g) => g.id === id)?.items[0]?.id;
+    if (first) this.setGlanceView(first);
   }
-  isGroupOpen(id: string): boolean {
-    return this.openGroups().has(id) || this.GLANCE_GROUPS.some((g) => g.id === id && g.items.some((i) => i.id === this.glanceView()));
+  /** Overview has no pages; its panel lists the page's own sections instead. */
+  readonly OVERVIEW_ANCHORS: { id: string; label: string; icon: string }[] = [
+    { id: 'gl-pillars', label: 'Key Insights', icon: 'fa-solid fa-table-cells-large' },
+    { id: 'gl-attention', label: 'Need Your Attention', icon: 'fa-solid fa-triangle-exclamation' },
+  ];
+  scrollToAnchor(id: string): void {
+    // scroll-margin-top on the targets keeps them clear of the pinned header + filter
+    this.el.nativeElement.querySelector<HTMLElement>('#' + id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  /** Rail highlight: the pillar whose page is open (none while on Overview). */
+  railOn(id: string): boolean {
+    return this.glanceView() !== 'overview' && this.panelGroup()?.id === id;
   }
 
   /** Sidebar: menu groups → submenu items, each with its component's off-track count. */
@@ -378,25 +406,16 @@ export class GlancePage implements OnInit {
         return {
           id: it.id, label: it.label, icon: it.icon,
           module: it.module, short: meta?.short ?? it.module ?? '',
-          sub: mod ? `${meta?.short ?? it.module} component` : 'Not built yet',
           built: !!mod,
           color: mod?.color ?? '#8a96ae',
           topic: mod?.kpis[0]?.topic ?? '',
           bad: mod ? rows.filter((r) => r.module === mod.title && r.band === 'bad').length : 0,
         };
       });
-      return { id: g.id, group: g.group, icon: g.icon, items, bad: items.reduce((s, i) => s + i.bad, 0) };
+      return { id: g.id, group: g.group, short: g.short, icon: g.icon, items, bad: items.reduce((s, i) => s + i.bad, 0) };
     });
   });
   private readonly glanceItems = computed(() => this.glanceMenu().flatMap((g) => g.items.map((i) => ({ ...i, group: g.group }))));
-
-  readonly glanceCrumb = computed(() => {
-    const parts = ['Tamil Nadu'];
-    if (this.ds.selectedDistrict()) parts.push(this.ds.titleCase(this.ds.selectedDistrict()!));
-    if (this.ds.selectedBlock()) parts.push(this.ds.titleCase(this.ds.selectedBlock()!));
-    if (this.ds.selectedSchool()) parts.push(this.ds.selectedSchool()!);
-    return parts.join(' › ') + ' › ' + this.rv.currentYear();
-  });
 
   /** School counts by broad type for the current scope (roll is students-only in the node). */
   private readonly glanceSchoolTypeCounts = computed(() => {
@@ -405,14 +424,27 @@ export class GlancePage implements OnInit {
     return m;
   });
 
+
+  /**
+   * Headline figure on the three cards: same Indian units as `inrShort`, but
+   * with the unit spelt out ("1.27 Crore", "5.62 Lakh") because these numbers
+   * are read on their own. Thousands stay as a full grouped number.
+   */
+  private bigUnit(v: number | null | undefined): string {
+    const n = Number(v ?? 0);
+    const abs = Math.abs(n);
+    if (abs >= 1e7) return (n / 1e7).toFixed(2) + ' Crore';
+    if (abs >= 1e5) return (n / 1e5).toFixed(2) + ' Lakh';
+    return inr(n);
+  }
+
   /** The three headline cards: schools, students, teachers, each with a split bar. */
-  readonly glanceStats = computed(() => {
-    const n = this.ds.current();
+  readonly glanceStats = computed(() => {    const n = this.ds.current();
     if (!n) return [];
     const typeN = this.glanceSchoolTypeCounts();
     const cnt = (...names: string[]) => names.reduce((s, k) => s + (typeN.get(k) ?? 0), 0);
     const govtSch = cnt('Government'), aidedSch = cnt('Fully Aided', 'Partially Aided'), privSch = cnt('Un-aided');
-    const ptr = n.teaching ? Math.round((n.students / n.teaching) * 10) / 10 : 0;
+
     // white tints read as one scale on the blue panel and stay legible (reviewer: old greens/ambers were ~2.6:1)
     // V3 headline-bar palette (mint / amber) plus a light sky for the third segment; all legible on the blue panel
     const COLORS = ['#6EE7B7', '#FDE68A', '#BAE6FD'];
@@ -428,18 +460,18 @@ export class GlancePage implements OnInit {
     const hasTypes = typeN.size > 0;
     return [
       {
-        label: 'No. of schools', icon: 'fa-solid fa-school', big: inr(n.schools),
+        label: 'No. of Schools', icon: 'fa-solid fa-school', big: inr(n.schools),
         sub: 'All managements',
         splits: hasTypes ? [split(['Govt', govtSch], ['Aided', aidedSch], ['Private', privSch])] : [],
       },
       {
-        label: 'No. of students', icon: 'fa-solid fa-user-graduate', big: inrShort(n.students),
-        sub: `${inr(n.students)} · Pre-KG to XII · all managements`,
+        label: 'No. of Students', icon: 'fa-solid fa-user-graduate', big: this.bigUnit(n.students),
+        sub: 'Class 1–12, All managements',
         splits: [split(['Boys', n.boys], ['Girls', n.girls])],
       },
       {
-        label: 'No. of teachers', icon: 'fa-solid fa-chalkboard-user', big: inrShort(n.teaching),
-        sub: `${inr(n.teaching)} teaching · PTR ${ptr} : 1`,
+        label: 'No. of Teachers', icon: 'fa-solid fa-chalkboard-user', big: this.bigUnit(n.teaching),
+        sub: 'All managements',
         splits: [split(['Teaching', n.teaching], ['Non-teaching', n.nonTeaching])],
       },
     ];
@@ -480,7 +512,8 @@ export class GlancePage implements OnInit {
    */
   readonly glancePillarInsights = computed(() => {
     type Seg = { label: string; value: string; pct: number; color: string };
-    type Metric = { label: string; big: string; suffix: string; segs: [Seg, Seg] };
+    /** `tip` is what the bar shows on hover; the legend itself carries labels only. */
+    type Metric = { label: string; big: string; suffix: string; segs: [Seg, Seg]; tip?: string };
     type Card = {
       id: string; icon: string; title: string; tileBg: string; tileFg: string;
       pill: { cls: string; text: string } | null; metrics: Metric[]; openId: string | null;
@@ -509,10 +542,13 @@ export class GlancePage implements OnInit {
         const flagPct = r1(pdp.raw as number), okPct = r1(100 - flagPct);
         metrics.push({
           label: 'Potential dropouts', big: pdp.value, suffix: '',
+          // red flagged share, green remainder; the hover tip spells out the
+          // flagged count against the enrolment the % is computed on
           segs: [
-            { label: 'Absent 15+ days (flagged)', value: `${inr(pdN)} · ${flagPct}%`, pct: flagPct, color: RED },
-            { label: 'Not flagged', value: `${inr(pdD - pdN)} · ${okPct}%`, pct: okPct, color: GREEN },
+            { label: 'Absent 15+ days', value: inr(pdN), pct: flagPct, color: RED },
+            { label: 'Enrolled', value: inr(pdD - pdN), pct: okPct, color: GREEN },
           ],
+          tip: `Absent 15+ days ${inr(pdN)} of ${inr(pdD)} students`,
         });
       }
       // Dropout rate %: N = common-pool children not re-admitted to any school
@@ -526,8 +562,8 @@ export class GlancePage implements OnInit {
         metrics.push({
           label: 'Dropout rate', big: dr.value, suffix: '',
           segs: [
-            { label: 'Dropped out, not re-enrolled', value: `${inr(drN)} · ${outPct}%`, pct: outPct, color: RED },
-            { label: 'Re-enrolled / continuing', value: `${inr(drD - drN)} · ${inPct}%`, pct: inPct, color: GREEN },
+            { label: 'Dropped out', value: `${inr(drN)} · ${outPct}%`, pct: outPct, color: RED },
+            { label: 'Enrolled', value: `${inr(drD - drN)} · ${inPct}%`, pct: inPct, color: GREEN },
           ],
         });
       }
@@ -705,6 +741,8 @@ export class GlancePage implements OnInit {
       });
     }
 
+    // hover tip for every bar that did not set its own: "label value · label value"
+    for (const c of out) for (const m of c.metrics) m.tip ??= m.segs.map((s) => `${s.label} ${s.value}`).join(' \u00B7 ');
     return out;
   });
 
@@ -731,8 +769,6 @@ export class GlancePage implements OnInit {
   });
 
   // ---- side nav collapse (icon rail) ----
-  readonly navCollapsed = signal(false);
-  toggleNav(): void { this.navCollapsed.update((v) => !v); }
   fmtN(v: number): string { return inr(v); }
 
   /** Pillar cards expanded past their first two metrics (Key insights by pillar). */
@@ -1186,10 +1222,7 @@ export class GlancePage implements OnInit {
       sub: r.fmt === 'pct' ? `Outside the expected range for ${r.module}` : `${r.module} count at this scope`,
       owner: this.GLANCE_META[r.module]?.short ?? r.module,
     });
-    return {
-      critical: rows.filter((r) => r.band === 'bad').slice(0, 5).map(item),
-      watch: rows.filter((r) => r.band === 'warn').slice(0, 5).map(item),
-    };
+    return { critical: rows.filter((r) => r.band === 'bad').slice(0, 5).map(item) };
   });
 
   /** Completion strip: real programme completion percentages at this scope. */
@@ -1234,8 +1267,5 @@ export class GlancePage implements OnInit {
    */
   openGlanceKpi(k: { id: string; topic: string; module: string }): void {
     this.router.navigate(['/'], { queryParams: { topic: k.topic, kpi: k.id, module: k.module } });
-  }
-  openGlanceModule(m: { topic: string; title: string }): void {
-    this.router.navigate(['/'], { queryParams: { topic: m.topic, module: m.title } });
   }
 }

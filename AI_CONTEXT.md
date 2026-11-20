@@ -699,6 +699,54 @@ with a Total row and Excel/CSV/PDF (`exportScholar` in app.ts).
 
 ## 10. Feature changelog (what was built, newest first)
 
+- **At a glance: real government emblem added to its own header (19-Nov-2026).**
+  The user asked why swapping `app.html`'s logo didn't change anything on
+  `/glance` — because the glance header never used an image at all: its
+  `.brand .em` box held a decorative `fa-school` FontAwesome icon, not
+  `tn-logo.png`/`GOVT_LOGO.png`. Added the same real emblem there for
+  consistency: `glance.html`'s `<span class="em">` now contains an
+  `<img src="GOVT_LOGO.png">` with the same error-fallback pattern as the
+  main dashboard (`logoOk` signal added to `glance.ts`, falls back to the
+  `fa-school` icon only if the image fails to load); `glance.scss`'s
+  `.em`/`.em-logo` rules updated so the image fills the existing 44×44px
+  badge with `object-fit: contain` on a white background, matching the
+  main dashboard's non-distorting treatment. Verified live: `.em-logo` has
+  no `.hide` class (image loaded successfully) and the screenshot shows
+  the real seal next to "பள்ளிக் கல்வித் துறை · தமிழ்நாடு / School
+  Education Dashboard".
+
+- **Main dashboard header: "Review Dashboard" line, theme tokens; glance
+  headline card labels capitalized (19-Nov-2026).**
+  - **Main dashboard (`app.html`/`app.scss`)**: the header's third text line
+    changed from "State Education Portal" to "Review Dashboard" — the
+    emblem (real `public/tn-logo.png` asset, `object-fit: contain`, no
+    distortion), the "School Education Department" / "Government of Tamil
+    Nadu" lines, the vertical centering (`.moe-brand { align-items: center
+    }`) and the sticky positioning (`position: sticky; top: 0`) were all
+    already correct and untouched. Replaced two hardcoded `#1a1a1a` text
+    colours (`.ministry`, `.govt`) with the existing `--text-dark` token
+    (defined in `src/styles.scss`; no separate dark theme exists in this
+    codebase yet, so using the token is the correct "ready for light/dark"
+    move without inventing a theme nobody asked for). No dashboard cards,
+    charts, or filters were touched. Verified live via headless Chrome and
+    screenshot: header reads "School Education Department / Government of
+    Tamil Nadu / Review Dashboard" next to the real state emblem, and the
+    computed `.ministry` colour is `rgb(31,41,55)` (`#1f2937`, exactly
+    `--text-dark`).
+  - **At a glance headline panel**: the three card labels in
+    `glanceStats()` (`glance.ts`) capitalized — "No. of schools" → "No. of
+    Schools", "No. of students" → "No. of Students", "No. of teachers" →
+    "No. of Teachers". Verified live.
+  - **Logo asset swap**: the user supplied the real official emblem file
+    directly at `public/GOVT_LOGO.png` (circular seal: "தமிழ்நாடு அரசு",
+    Gopuram tower, Ashoka Lion Capital, "வாய்மையே வெல்லும்" motto) —
+    `app.html`'s `<img src="tn-logo.png" ...>` updated to
+    `src="GOVT_LOGO.png"` (one-line change, same `object-fit: contain`
+    emblem styling, same error-fallback icon logic). Verified the file
+    copies into the Angular build output (`dist/dashboard-app/browser/
+    GOVT_LOGO.png`) and renders live with no fallback triggered
+    (`logoVisible: true`).
+
 - **At a glance: two section label text changes (19-Nov-2026).** STEERING:
   "Key insights by pillar" → "Key Insights by Pillar"; "Needs your
   attention" → "Need Your Attention". Pure text/casing changes in

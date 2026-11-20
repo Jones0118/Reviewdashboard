@@ -19,7 +19,7 @@
   button, select, input { font: inherit; }
   /* visible keyboard focus everywhere; white ring on the blue surfaces */
   :is(button, a, [tabindex]):focus-visible { outline: 2px solid var(--pri); outline-offset: 2px; border-radius: 8px; }
-  .gl-side :is(button, a):focus-visible, .gl-bpanel :is(button, a):focus-visible { outline-color: #fff; }
+  .gl-bpanel :is(button, a):focus-visible { outline-color: #fff; }
   ::ng-deep .gl-flt.p-focus, ::ng-deep .gl-flt:focus-within { outline: 2px solid var(--pri); outline-offset: 1px; }
 }
 
@@ -34,7 +34,9 @@
   display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between;
   .brand { display: flex; gap: 14px; align-items: center; min-width: 0; }
   .brand .em { width: 44px; height: 44px; flex: none; border-radius: 10px; background: var(--pri); color: #fff;
-    display: flex; align-items: center; justify-content: center; font-size: 20px; }
+    display: flex; align-items: center; justify-content: center; font-size: 20px; overflow: hidden; }
+  .brand .em .em-logo { width: 100%; height: 100%; object-fit: contain; background: #fff; border-radius: 10px; }
+  .brand .em .em-logo.hide { display: none; }
   .brand small { display: block; font-family: "Noto Sans Tamil", Inter, sans-serif; font-size: 12px; color: var(--mu); }
   .brand b { display: block; font-size: 20px; font-weight: 600; line-height: 1.25; }
   .b1r { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
@@ -72,16 +74,22 @@
 }
 
 .vas { font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--mu); flex: none; }
-.crumbs { display: flex; align-items: center; gap: 6px; font-size: 13px; flex-wrap: wrap;
-  button, .static { color: var(--mu2); font-weight: 600; min-height: 40px; display: inline-flex; align-items: center; gap: 6px;
-    padding: 0 14px; border-radius: 10px; border: 1px solid var(--bd); background: #fff; cursor: pointer;
-    &.active { background: var(--pri); border-color: var(--pri); color: #fff; } }
-  .static { cursor: default; }
-  button:hover:not(.active) { border-color: var(--pri-soft-bd); }
-  .sep { font-size: 10px; color: var(--mu); } }
-/* ---- viewing bar: district / block / management / category dropdowns, one line ---- */
+
+/* ---- filter row: district / block / school / management / category.
+   Sits at the top of the content column, to the right of the side nav. On the
+   Overview the wrapper pins under the header: an opaque band in the page colour
+   that absorbs the 24px top padding and the 22px gap below, so scrolled cards
+   disappear under it instead of showing through the spacing. ---- */
+#gl-pillars, #gl-attention { scroll-margin-top: calc(var(--gl-top-h, 150px) + var(--gl-filter-h, 0px) + 12px); }
+.gl-filterwrap.pin {
+  position: sticky; top: var(--gl-top-h, 150px); z-index: 6;
+  /* full width of the content column: bleed across the 24px grid gap after the
+     side nav on the left and the wrapper's 28px padding on the right */
+  width: calc(100% + 24px + 28px); margin: -24px -28px -22px -24px; padding: 0 0 22px; background: #F4F6FA;
+}
 .gl-bar2 {
-  background: #F8FAFD; border-bottom: 1px solid var(--bd); padding: 10px 28px;
+  /* a band, not a card: no side borders or corners; 24px/28px inner padding keeps the controls level with the cards below */
+  background: #fff; border: 1px solid var(--bd); border-left: 0; border-right: 0; border-radius: 0; box-shadow: var(--shadow); padding: 10px 28px 10px 24px;
   .row { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
   .sel { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .fl { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--mu); }
@@ -90,7 +98,13 @@
   .freset { min-height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--pri-dk); background: transparent; color: var(--pri-dk);
     font-size: 12px; font-weight: 600; cursor: pointer; &:hover { background: var(--pri-soft); } }
 }:host ::ng-deep .gl-flt { min-width: 200px; height: 40px; font-size: 14px; border-radius: 8px; border-color: #E2E8F0; background: var(--soft); }
+/* the selected text sits on the control's vertical centre line, next to the 40px-tall siblings */
+:host ::ng-deep .gl-flt.p-select { display: flex; align-items: center; }
+:host ::ng-deep .gl-flt.p-select .p-select-label { display: flex; align-items: center; padding-top: 0; padding-bottom: 0; }
 :host ::ng-deep .gl-flt-sm { min-width: 190px; }
+/* school names are long; give that select room and keep the label on one line */
+:host ::ng-deep .gl-flt-lg { min-width: 280px; max-width: 340px; }
+:host ::ng-deep .gl-flt-lg .p-select-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* multi-select chips must fit the 40px control */
 :host ::ng-deep .gl-flt.p-multiselect { height: auto; min-height: 40px; }
 :host ::ng-deep .gl-flt .p-multiselect-label { padding-top: 4px; padding-bottom: 4px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
@@ -99,98 +113,100 @@
 
 /* ---- shell ---- */
 .gl-wrap {
-  max-width: 1600px; margin: 0 auto; padding: 24px 28px 48px;
-  display: grid; grid-template-columns: 272px minmax(0, 1fr); gap: 24px; align-items: start;
+  max-width: 1600px; margin: 0 auto; padding: 24px 28px 48px 0;
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 24px; align-items: start;
 }
 .gl-main { min-width: 0; display: flex; flex-direction: column; gap: 22px; }
 
-/* ---- side nav ---- */
-.gl-side {
-  background: linear-gradient(180deg, #3366C9 0%, #2A58B3 100%); border: 1px solid #2A58B3; border-radius: var(--r);
-  box-shadow: var(--shadow); padding: 16px 12px 18px; display: flex; flex-direction: column; gap: 6px;
-  position: sticky; top: calc(var(--gl-top-h, 150px) + 16px); max-height: calc(100vh - var(--gl-top-h, 150px) - 32px); overflow-y: auto;
-  scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.3) transparent;
-  h5 { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: #EEF3FC; padding: 6px 12px 10px; }
-  h5.mt { padding: 18px 12px 10px; border-top: 1px solid rgba(255,255,255,.25); margin-top: 10px; }
+/* ---- navigation, Gmail-style. `.gl-nav` holds two columns that pin under the
+   header and run to the bottom of the viewport: a fixed icon rail (Overview +
+   the five pillars, short label under each icon) and a panel listing the
+   current pillar's pages. The rail never changes; the arrow shows/hides the
+   panel. With the panel hidden, hovering a pillar shows the list as a flyout. ---- */
+.gl-nav {
+  display: flex; align-items: stretch;
+  margin-top: -24px;
+  position: sticky; top: var(--gl-top-h, 150px); height: calc(100vh - var(--gl-top-h, 150px)); overflow: visible;
+  /* sticky makes this its own stacking context: sit above the main column and
+     the floating main-view bar so the flyouts are never covered */
+  z-index: 8;
 }
+.gl-rail {
+  width: 84px; flex: none; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 6px 0 16px; background: var(--soft); border-right: 1px solid var(--bd);
+}
+.gl-panel {
+  width: 264px; flex: none; display: flex; flex-direction: column; gap: 4px;
+  padding: 14px 10px 16px; background: #fff; border-right: 1px solid var(--bd); box-shadow: var(--shadow);
+  overflow-y: auto; scrollbar-width: none; &::-webkit-scrollbar { display: none; }
+}
+.gl-sub-h { display: block; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--mu); padding: 4px 10px 8px; }
+
+/* rail entry: icon in a pill, short label underneath (Mail / Chat / Meet) */
+.gl-ri {
+  width: 76px; border: 0; background: none; cursor: pointer; color: var(--mu2);
+  display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 0 6px;
+  .ib { position: relative; width: 56px; height: 32px; border-radius: 16px; background: transparent; color: var(--mu2);
+    display: flex; align-items: center; justify-content: center; font-size: 17px;
+    transition: background .2s ease, color .2s ease; }
+  .lb { font-size: 11px; font-weight: 500; line-height: 1.2; white-space: nowrap; }
+  .bg { position: absolute; top: -5px; right: 4px; min-width: 18px; height: 18px; border-radius: 999px; padding: 0 5px;
+    background: #E11D48; color: #fff; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center;
+    border: 2px solid var(--soft); }
+  &:hover .ib { background: var(--pri-soft); color: var(--pri-dk); }
+  &.on { color: var(--ink); .ib { background: var(--pri); color: #fff; } .lb { font-weight: 700; } }
+}
+.gl-railgrp { width: 100%; display: flex; justify-content: center; }
+
+/* panel hidden: hovering a pillar shows its page list as an overlay panel that
+   starts at the rail's right edge and runs the full height of the nav (header
+   to viewport bottom), the way Gmail's Chat flyout does. Positioned against
+   `.gl-nav` (sticky = containing block), not the icon, so it never clips. */
+.gl-fly {
+  position: absolute; left: 100%; top: 0; height: 100%; width: 264px; z-index: 200;
+  visibility: hidden; opacity: 0; transition: opacity .15s ease, visibility .15s ease;
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 14px 10px 16px; background: #fff; border: 1px solid var(--bd); border-left: 0; border-radius: 0 16px 16px 0;
+  box-shadow: 0 12px 30px rgba(15,23,42,.18);
+  overflow-y: auto; scrollbar-width: none; &::-webkit-scrollbar { display: none; }
+}
+.gl-railgrp:hover .gl-fly, .gl-railgrp:focus-within .gl-fly { visibility: visible; opacity: 1; }
+
+/* show / hide the page panel */
+.gl-collapse {
+  width: 40px; height: 40px; margin: 4px 0 6px; border: 0; border-radius: 50%; background: transparent; color: var(--mu2);
+  font-size: 15px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+  transition: background .2s ease, color .2s ease;
+  &:hover { background: var(--pri-soft); color: var(--pri-dk); }
+}
+
+/* page rows (panel and flyout share these) */
 .gl-sni {
-  min-height: 52px; width: 100%; border: 0; border-radius: 10px; background: transparent; color: #fff;
-  cursor: pointer; display: flex; gap: 12px; align-items: center; padding: 10px 12px; text-align: left;
-  transition: background .15s;
-  &:hover { background: rgba(71,121,213,.55); }
-  &.on { background: #4A7FDD; }
-  .ib { width: 34px; height: 34px; flex: none; border-radius: 8px; background: rgba(255,255,255,.14);
-    display: flex; align-items: center; justify-content: center; font-size: 15px; }
-  &.on .ib, &.open .ib { background: rgba(255,255,255,.25); }
-  .t { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
-  .t b { font-size: 14px; font-weight: 600; line-height: 1.35; }
-  .t span { font-size: 12px; color: #EEF3FC; line-height: 1.4; }
+  width: 100%; border: 0; background: transparent; color: var(--ink); cursor: pointer; text-decoration: none;
+  display: flex; align-items: center; text-align: left; box-sizing: border-box;
+  &:hover { background: var(--pri-soft); }
+  .ib { flex: none; background: var(--pri-soft); color: var(--pri); display: flex; align-items: center; justify-content: center;
+    transition: background .2s ease, color .2s ease; }
+  .t { display: flex; flex-direction: column; min-width: 0; flex: 1; }
   .bg { font-size: 11px; font-weight: 700; min-width: 22px; height: 22px; border-radius: 999px; background: #FFE4E6; color: #BE123C;
     display: flex; align-items: center; justify-content: center; padding: 0 6px; flex: none; }
-}
-/* menu groups: breathing room between groups so each reads as its own block */
-.gl-grp {
-  margin-top: 4px;
-  &.open { background: rgba(255,255,255,.10); }
-  .chev { flex: none; font-size: 11px; opacity: .8; transition: transform .15s; margin-left: 4px; }
-  &.open .chev { transform: rotate(180deg); }
-}
-.gl-sub { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 12px 22px; padding-left: 12px; border-left: 1px solid rgba(255,255,255,.3); }
-
-/* collapse / expand the whole nav to an icon rail */
-.gl-collapse {
-  align-self: flex-end; min-height: 32px; border: 1px solid rgba(255,255,255,.3); border-radius: 8px; background: rgba(255,255,255,.1);
-  color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px;
-  &:hover { background: rgba(255,255,255,.2); }
-}
-.gl-wrap.nav-collapsed {
-  grid-template-columns: 76px minmax(0, 1fr);
-  .gl-side { padding: 12px 8px; overflow: visible; }
-  .gl-collapse { align-self: center; padding: 0; width: 36px; justify-content: center; }
-  .gl-side h5 { font-size: 0; padding: 6px 0; border-top: 1px solid rgba(255,255,255,.25); margin: 4px 6px; }
-  .gl-side h5:first-of-type { border-top: 0; }
-  .gl-sni { justify-content: center; padding: 8px 0; min-height: 48px; }
-  .gl-sni .t, .gl-sni .bg, .gl-sni .chev { display: none; }
-  .gl-sub { display: none; }
-  /* off-track groups keep a red dot on the icon so the signal survives the collapse */
-  .gl-sni .ib { position: relative; }
-  .gl-sni .ib.flag::after { content: ''; position: absolute; top: -3px; right: -3px; width: 9px; height: 9px; border-radius: 50%; background: #E11D48; border: 2px solid #2A58B3; }
-  /* custom tooltip: the icon rail has no visible label, so show one on hover */
-  .gl-sni { position: relative; }
-  .gl-sni[data-tip]:hover::after {
-    content: attr(data-tip);
-    position: absolute; left: calc(100% + 10px); top: 50%; transform: translateY(-50%);
-    background: #1E293B; color: #fff; font-size: 12px; font-weight: 600; white-space: nowrap;
-    padding: 6px 10px; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,.25); z-index: 70; pointer-events: none;
-  }
-  .gl-sni[data-tip]:hover::before {
-    content: ''; position: absolute; left: 100%; top: 50%; transform: translateY(-50%);
-    border: 5px solid transparent; border-right-color: #1E293B; z-index: 70; pointer-events: none;
-  }
-}
-.gl-sni-sub {
-  min-height: 44px; border-radius: 8px; padding: 8px 10px; gap: 10px; align-items: flex-start;
-  .ib { width: 26px; height: 26px; font-size: 11px; border-radius: 6px; margin-top: 1px; }
-  .t { gap: 3px; }
-  .t b { font-size: 13px; font-weight: 500; line-height: 1.4; }
-  .t span { font-size: 11px; line-height: 1.4; }
-  .bg { margin-top: 3px; }
-  &.on { background: rgba(255,255,255,.22); .t b { font-weight: 600; } }
-  &.dim { color: rgba(255,255,255,.55); .ib { background: rgba(255,255,255,.07); } }
-  &.dim:hover { color: rgba(255,255,255,.85); }
+}.gl-sni-sub {
+  min-height: 40px; border-radius: 8px; padding: 6px 10px; gap: 10px; align-items: center;
+  transition: background .2s ease, color .2s ease;
+  /* single line, like the Gmail folder list: icon · label · count */
+  .ib { width: 26px; height: 26px; font-size: 11px; border-radius: 6px; margin-top: 0; }
+  .t { gap: 0; overflow: hidden; }
+  .t b { font-size: 13px; font-weight: 500; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bg { margin-top: 0; }
+  &.on { background: var(--pri); color: #fff; .t b { font-weight: 600; } .t span { color: #EEF3FC; } .ib { background: rgba(255,255,255,.22); color: #fff; } }
+  &.dim { color: var(--mu); .ib { background: var(--bd2); color: var(--mu); } }
+  &.dim:hover { color: var(--ink); }
+  /* hover: the icon tile goes dark brand blue with a white glyph */
+  &:hover .ib, &.dim:hover .ib { background: var(--pri-dk); color: #fff; }
 }
 
 /* ---- page title row ---- */
-.gl-crumb { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between;
-  .status { margin-left: auto; display: inline-flex; align-items: center; gap: 12px; text-decoration: none; font-size: 12px; font-weight: 600;
-    background: #fff; border: 1px solid var(--bd); border-radius: 999px; padding: 4px 6px 4px 12px;
-    span { display: inline-flex; align-items: center; gap: 6px; }
-    i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-    .cr { color: var(--cr); i { background: var(--cr-c); } } .wa { color: var(--wa); i { background: var(--wa-c); } }
-    .go { width: 24px; height: 24px; border-radius: 50%; background: var(--pri-soft); color: var(--pri-dk); justify-content: center; i { width: auto; height: auto; background: none; font-size: 10px; } }
-    &:hover { border-color: var(--pri-soft-bd); } }
-  .bc { font-size: 13px; color: var(--mu); }
-  .asof { font-size: 12px; font-weight: 600; background: var(--wa-bg); color: var(--wa); padding: 4px 10px; border-radius: 999px; } }
+
 .gl-h1 { margin: 0; font-size: 28px; font-weight: 600; letter-spacing: -.01em; color: var(--ink); }
 
 /* ---- cards ---- */
@@ -284,13 +300,26 @@
   .pc-head:hover .pc-head-r-txt, .pc-head:focus-visible .pc-head-r-txt { opacity: 1; transform: translateX(0); }
   .pc-head:hover .pc-head-r i, .pc-head:focus-visible .pc-head-r i { opacity: 1; }
 }
-.pc-metric { display: flex; flex-direction: column; gap: 6px; padding-top: 14px; border-top: 1px solid var(--bd2);
-  &:first-of-type { border-top: 0; padding-top: 0; } }
+.pc-metric { display: flex; flex-direction: column; gap: 6px; padding: 14px 10px 0; margin: 0 -10px;
+  border-top: 1px solid var(--bd2); border-radius: 0; transition: background .15s ease, border-radius .15s ease;
+  &:first-of-type { border-top: 0; padding-top: 0; }
+  /* neutral tint on hover — these rows are read, not clicked, so no accent colour */
+  &:hover { background: var(--bd2); border-radius: 10px; padding-bottom: 14px; margin-bottom: -14px; } }
 .pc-lbl { font-size: 13px; color: var(--tx2); }
 .pc-big { font-size: 26px; font-weight: 600; color: var(--ink); line-height: 1.1; font-variant-numeric: tabular-nums;
   em { font-size: 12px; font-weight: 500; font-style: normal; color: var(--mu); margin-left: 6px; } }
-.pc-bar { height: 8px; width: 100%; background: var(--bd2); border-radius: 4px; overflow: hidden; display: flex;
-  i { display: block; height: 100%; } }
+.pc-bar { height: 8px; width: 100%; background: var(--bd2); border-radius: 4px; display: flex; position: relative; cursor: default;
+  i { display: block; height: 100%; }
+  i:first-child { border-radius: 4px 0 0 4px; } i:last-child { border-radius: 0 4px 4px 0; }
+  /* the figures behind the bar, shown only on hover / keyboard focus */
+  &[data-tip]:hover::after, &[data-tip]:focus-visible::after {
+    content: attr(data-tip); position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%);
+    background: #1E293B; color: #fff; font-size: 12px; font-weight: 600; white-space: nowrap;
+    padding: 6px 10px; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,.25); z-index: 20; pointer-events: none; }
+  &[data-tip]:hover::before, &[data-tip]:focus-visible::before {
+    content: ''; position: absolute; left: 50%; bottom: 100%; transform: translateX(-50%);
+    border: 5px solid transparent; border-top-color: #1E293B; z-index: 20; pointer-events: none; }
+  &:focus-visible { outline-offset: 3px; } }
 .pc-legend { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 14px; font-size: 12px; color: var(--tx2);
   span { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
   b { font-weight: 600; color: var(--ink); }
@@ -330,7 +359,7 @@
   i.dash { width: 14px; height: 0; border-radius: 0; border-top: 2px dashed #D97706; } }
 
 /* ---- needs attention ---- */
-.gl-acols { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 14px 28px; margin-top: 16px;
+.gl-acols { display: grid; grid-template-columns: 1fr; gap: 14px 28px; margin-top: 16px;
   .acol h6 { margin: 0; font-size: 17px; font-weight: 600; color: var(--ink); }
   .acol .ch { display: block; font-size: 12px; color: var(--mu); margin: 2px 0 6px; }
   .acol.crit h6 { color: var(--cr); } .acol.micro h6 { color: var(--wa); } }
@@ -360,11 +389,34 @@
 .gl-foot { font-size: 12px; color: var(--mu); display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; }
 
 /* ---- submenu item page ---- */
-.gl-modhead { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-  .av { width: 44px; height: 44px; flex: none; border-radius: 12px; background: var(--kc, var(--pri)); color: #fff;
+/* ---- Attendance page "main view": one control bar that floats below the sticky
+   top block and drives every chart on the page (ref: TN Attendance Dashboard).
+   The outer band is an opaque strip in the page colour that eats the 22px flex
+   gap above it, so scrolled cards disappear under the bar instead of showing
+   through the space between it and the header. ---- */
+.gl-mainview {
+  position: sticky; top: calc(var(--gl-top-h, 150px) + var(--gl-filter-h, 0px)); z-index: 5;
+  margin: -22px 0 -10px; padding: 22px 0 10px; background: #F4F6FA;
+  .mv {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 10px 28px;
+    background: #fff; border: 1px solid #C9D3E3; border-radius: 12px; padding: 10px 14px;
+    box-shadow: 0 4px 14px rgba(15,23,42,.08);
+  }
+  .t { font-size: 18px; font-weight: 700; color: var(--ink); white-space: nowrap; }
+  .tag { font-size: 12px; font-weight: 700; color: #fff; background: var(--pri-dk); border-radius: 6px; padding: 4px 8px; }
+  .grp { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+  .gl-win { margin-left: 0; justify-content: flex-start; }
+}
+
+.gl-modhead { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;  .av { width: 44px; height: 44px; flex: none; border-radius: 12px; background: var(--kc, var(--pri)); color: #fff;
     display: flex; align-items: center; justify-content: center; font-size: 19px; }
   > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .s { display: block; font-size: 13px; color: var(--mu); b.cr { color: var(--cr); } } }
+/* inside the pinned bar the heading sits at the Attendance bar's scale */
+.gl-mainview .mv.gl-modhead { gap: 14px; flex-wrap: nowrap;
+  .av { width: 36px; height: 36px; border-radius: 10px; font-size: 16px; }
+  .gl-h1 { font-size: 20px; line-height: 1.2; }
+  .s { font-size: 12px; } }
 .kpi-period { display: flex; align-items: center; gap: 6px; justify-content: flex-end; }
 .kpi-period-lbl { font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--mu); margin-right: 4px; }
 .kpi-period-btn {
@@ -400,23 +452,34 @@
 @media (max-width: 1100px) {
   .gl-wrap { grid-template-columns: 1fr; padding: 16px; }
   .gl-tgrid { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
-  .gl-side { position: static; max-height: none; }
-  .gl-bar1, .gl-bar2 { padding-left: 16px; padding-right: 16px; }
+  /* narrow: nav becomes a static block above the content; rail runs horizontally */
+  .gl-nav { position: static; height: auto; margin-top: 0; flex-direction: column; border: 1px solid var(--bd); border-radius: var(--r); overflow: hidden; }
+  .gl-rail { width: auto; flex-direction: row; flex-wrap: wrap; justify-content: center; border-right: 0; border-bottom: 1px solid var(--bd); padding: 6px; }
+  .gl-panel { width: auto; max-height: 50vh; border-right: 0; box-shadow: none; }
+  .gl-fly { display: none; }
+  .gl-bar1 { padding-left: 16px; padding-right: 16px; }
+  /* single column here: the filter is a card again, no bleed across a grid gap */
+  .gl-filterwrap.pin { width: auto; margin: 0 0 -22px; }
+  .gl-bar2 { border-left: 1px solid var(--bd); border-right: 1px solid var(--bd); border-radius: var(--r); padding: 10px 16px; }
   .gl-bar2 .fsum .fl { display: none; }
 }
 @media (max-width: 640px) {
   /* the pinned block would cover half a phone screen; let it scroll away */
   .gl-top { position: static; box-shadow: none; }
+  .gl-mainview { position: static; margin: 0; padding: 0; background: none; }
+  .gl-filterwrap.pin { position: static; width: auto; margin: 0; padding: 0; background: none; }
   .gl-bar1 { padding: 10px 12px; .yr, .role { display: none; } .gl-btn { height: 36px; padding: 0 12px; font-size: 13px; } }
-  .gl-bar2 { padding: 8px 12px; .crumbs { display: none; } .sel { width: 100%; } .fsum { margin-left: 0; } }
+  .gl-bar2 { padding: 10px 12px; .sel { width: 100%; } .fsum { margin-left: 0; } }
   :host ::ng-deep .gl-flt, :host ::ng-deep .gl-flt-sm { min-width: calc(50% - 4px); flex: 1 1 calc(50% - 4px); }
-  .gl-crumb .status { margin-left: 0; }
+  :host ::ng-deep .gl-flt-lg { min-width: 100%; max-width: 100%; flex: 1 1 100%; }
 }
 @media print {
-  .gl-bar1 .b1r, .gl-bar2, .gl-side { display: none; }
+  .gl-bar1 .b1r, .gl-bar2, .gl-nav { display: none; }
   .gl-top { position: static; box-shadow: none; }
   .gl-wrap { display: block; }
   .gl-c, .gl-bpanel { box-shadow: none; break-inside: avoid; }
+  .gl-mainview { position: static; box-shadow: none; }
+  .gl-filterwrap.pin { position: static; width: auto; margin: 0; padding: 0; }
 }
 
 /* =====================================================================

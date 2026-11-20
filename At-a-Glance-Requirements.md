@@ -6,8 +6,8 @@
 | Route | `/glance` (standalone page, shares data services with the main Review Dashboard at `/`) |
 | Owner | School Education Department, Government of Tamil Nadu |
 | Author | Product Management (reverse-documented from the shipped implementation) |
-| Version / date | 1.0 – 19-Nov-2026 |
-| Status | Implemented and live; this document formalises the requirements the shipped page already satisfies, as a baseline for sign-off, QA and future enhancement |
+| Version / date | 1.1 – 19-Nov-2026 |
+| Status | Implemented and live; this document formalises the requirements the shipped page already satisfies, as a baseline for sign-off, QA and future enhancement. Updated from v1.0 to reflect the pillar-grid masonry layout, equal card heights, sidebar hover/tooltip/navigation fixes, and the cosmetic role-display picker added after the initial version. |
 
 ---
 
@@ -51,12 +51,12 @@ All personas share one login; there is no role-based data restriction today (see
 ### 4.1 In scope (this document / current build)
 
 - Sign-in gate (shared with the main dashboard).
-- Sticky header: brand, year, signed-in user.
-- Scope and filter bar: District / Block drill-down, Management multi-select, School-category multi-select, live "Showing…" summary with Reset.
-- Collapsible sidebar: Overview link + five pillar groups, each expandable to its real submenu items; each item shows whether it has real data.
-- Headline panel: schools / students / teachers, each with a management or gender/role split bar.
-- "Key insights by pillar": one card per pillar, each with up to two metrics visible by default, a "Show more/fewer metrics" expander for pillars with more, and an "Open pillar" action in the header that deep-links to that pillar's data.
-- "Needs your attention": top-5 critical (off-track) and top-5 watch (borderline) KPIs across the whole catalog, each naming its owning component, each a deep link.
+- Sticky header: brand, scope breadcrumb (Tamil Nadu › District › Block), review year, a cosmetic role-display dropdown next to the signed-in user, all on one row.
+- Scope and filter bar, labelled "Filter": District / Block drill-down, Management multi-select, School-category multi-select, live "Showing…" summary with Reset.
+- Collapsible sidebar: Overview link + five pillar groups, each expandable to its real submenu items; each item shows whether it has real data. Collapsed to an icon-only rail, each icon shows a tooltip naming its domain on hover, and clicking an icon while collapsed navigates straight into that pillar's domain rather than re-expanding the sidebar.
+- Headline panel: schools / students / teachers, each with a management or gender/role split bar, all three bars aligned to the same vertical position regardless of how many legend lines each card needs.
+- "Key Insights by Pillar": one card per pillar, laid out as independent masonry columns (not a uniform grid) so one card expanding never stretches or gaps its neighbours; every card shares the same default height; each card's border takes its own accent colour on hover; each with up to two metrics visible by default, a "Show more/fewer metrics" control pinned to the bottom of the card for pillars with more, and an "Open pillar" header action (label hidden until hover on devices that support it, always visible on touch) that deep-links to that pillar's data.
+- "Need Your Attention": top-5 critical (off-track) and top-5 watch (borderline) KPIs across the whole catalog, each naming its owning component, each a deep link.
 - "Programme completion" strip: a fixed set of six completion-style KPIs shown as percentage bars.
 - Submenu item pages: for a built item, its component's tiled KPIs plus a "View details" deep link; for an unbuilt item, an explicit "not built yet" message.
 - Deep-linking back into the main Review Dashboard's per-KPI / per-module drill.
@@ -81,8 +81,8 @@ All personas share one login; there is no role-based data restriction today (see
 ├── Sign-in (shared session with "/")
 └── Overview (default view)
 │   ├── Headline panel (schools / students / teachers)
-│   ├── Key insights by pillar (5 cards)
-│   ├── Needs your attention (Critical / Watch, top 5 each)
+│   ├── Key Insights by Pillar (5 cards, masonry columns)
+│   ├── Need Your Attention (Critical / Watch, top 5 each)
 │   ├── Programme completion (6-metric strip)
 │   └── Footer (data-source note, RAG legend note)
 └── Submenu item page (one per sidebar item with a `module`)
@@ -100,33 +100,39 @@ Deep links from anywhere on this page open `/` (the main Review Dashboard) with 
 - **FR-1.3** Failed sign-in must show a plain-language error, not a stack trace or generic failure.
 
 ### 6.2 Header and filter bar
-- **FR-2.1** The header must always show: Department brand (Tamil + English), the active review year, and the signed-in username.
-- **FR-2.2** A breadcrumb (Tamil Nadu › District › Block) must reflect the current scope and be independently clickable at each level to jump back up.
-- **FR-2.3** A District selector and, once a district is chosen, a Block selector must be available, both searchable.
+- **FR-2.1** The header must always show, in this order: Department brand (Tamil + English), the scope breadcrumb, the active review year, and a role-display control next to the signed-in username.
+- **FR-2.2** A breadcrumb (Tamil Nadu › District › Block) must reflect the current scope and be independently clickable at each level to jump back up; it sits in the top header row, before the Year display.
+- **FR-2.3** A District selector and, once a district is chosen, a Block selector must be available, both searchable, inside a filter row labelled "Filter".
 - **FR-2.4** Management (Govt / Aided / Private / Central) and School category (Primary/Middle/High/Higher Secondary) must be independent multi-select filters, OR-ed within each filter and AND-ed between them.
 - **FR-2.5** A live "Showing: …" summary must reflect the active filter combination, with a one-click Reset when any filter is active.
 - **FR-2.6** Every section on the Overview and every submenu page must re-render against the current scope and filters without a page reload.
+- **FR-2.7** A role-display dropdown (Secretary/State, District Collector/District, CEO/District, DEO (Elementary)/Educational district, DEO (Secondary)/Educational district, BEO/Block, School/a named school) must let the user switch which role/scope label is shown next to the user icon. **This is cosmetic only**: it must never change the scope, filters, or any data shown elsewhere on the page — see §9.3.
 
 ### 6.3 Sidebar navigation
 - **FR-3.1** The sidebar must list an "Overview" entry and exactly five pillar groups, each expandable to show its member items.
 - **FR-3.2** A pillar group must stay expanded whenever the active page is one of its own items.
 - **FR-3.3** Each sidebar item must visually distinguish "has real data" from "not built yet" (dimmed / explicit sub-label) before the user clicks it.
 - **FR-3.4** Each pillar group must show a count badge of how many of its KPIs are currently in the "off track" (critical) band.
-- **FR-3.5** The sidebar must be collapsible to an icon-only rail and must re-expand automatically when a user opens a group from the collapsed state.
+- **FR-3.5** The sidebar must be collapsible to an icon-only rail. While collapsed, clicking a pillar icon must navigate directly into that pillar's domain (its first built item, or its first item's "not built yet" page) — it must **not** re-expand the sidebar. The sidebar only re-expands via its own explicit collapse/expand toggle.
+- **FR-3.6** While collapsed, hovering any icon (Overview or a pillar group) must show a tooltip naming that item's domain, since no text label is visible in the icon rail.
+- **FR-3.7** The hover highlight colour on any sidebar row must be clearly distinguishable from the colour used for the currently-active row, so a user can tell "this is what I'm pointing at" apart from "this is where I am."
 
 ### 6.4 Headline panel
 - **FR-4.1** Three cards — Schools, Students, Teachers — each showing: a plain-language label, a large headline count, one line of context, and a two-or-three-segment split bar with its own legend (counts + percentages).
 - **FR-4.2** Schools must split by management (Govt / Aided / Private); Students by gender; Teachers by role (Teaching / Non-teaching) with the pupil-teacher ratio shown in the context line.
 - **FR-4.3** The split bar for every card must sit at the same vertical position across all three cards regardless of how many legend lines a given card needs (i.e. the three bars must visually align on one horizontal line).
 
-### 6.5 Key insights by pillar
+### 6.5 Key Insights by Pillar
 - **FR-5.1** Exactly five cards must render, one per pillar, in a fixed order: Access and Equity, Safe and Secure Schools, Learning Outcomes First, Social and Emotional Wellbeing, Alumni and Community Mentorship — regardless of how many (if any) real metrics a pillar has.
-- **FR-5.2** Each card's header must be a single, full-row click target: title on the left, an "Open pillar" action with an arrow icon on the right, that navigates into the pillar's own data (its first component with real data, or — if none exists — the first item's "not built yet" page).
-- **FR-5.3** Each card must show its first two real metrics by default. A metric block = a plain-language label, a large headline value, a two-segment progress bar, and a text legend for each segment (value + percentage).
-- **FR-5.4** Progress-bar segments must use only the catalog's three status colours (good / watch / bad), never an unrelated decorative colour, and every segment's meaning must also be stated in text (not colour alone).
-- **FR-5.5** If a pillar has more than two real metrics, a "Show more metrics" / "Show fewer metrics" control must appear at the bottom of the card; expanding it must insert the remaining metrics above the control (the control itself always stays the last element in the card) and must only increase the card's height, never its width, so neighbouring cards in the same row are undisturbed.
-- **FR-5.6** If a pillar has zero real metrics (no data source exists anywhere for it), the card must show an explicit plain-language message instead of any number, chart, or placeholder value.
-- **FR-5.7** Current pillar-to-metric mapping (must stay accurate as the catalog evolves):
+- **FR-5.2** The cards must be laid out as independent masonry columns, not a single uniform grid: each column packs its own cards tightly based on their own content height. A card expanding (FR-5.5) must only grow its own column — it must never create, or close, a gap under a shorter card in a different column.
+- **FR-5.3** Every card must share the same default (collapsed) height, so the grid reads as one even row regardless of how much content an individual card has — including a pillar with zero metrics (FR-5.6), which must still match that height rather than appearing visibly shorter than its neighbours.
+- **FR-5.4** Each card's header must be a single, full-row click target: title on the left, an "Open pillar" action with an arrow icon on the right, that navigates into the pillar's own data (its first component with real data, or — if none exists — the first item's "not built yet" page). On devices that support hover, the "Open pillar" text is hidden until the header is hovered or focused (the arrow icon stays dimly visible at rest); on touch devices, the full label is always visible. The card's border takes on that pillar's own accent colour on hover, matching its icon tile's colour.
+- **FR-5.5** Each card must show its first two real metrics by default. A metric block = a plain-language label, a large headline value, a two-segment progress bar, and a text legend for each segment (value + percentage).
+- **FR-5.6** Progress-bar segments must use only the catalog's three status colours (good / watch / bad), never an unrelated decorative colour, and every segment's meaning must also be stated in text (not colour alone).
+- **FR-5.7** If a pillar has more than two real metrics, a "Show more metrics" / "Show fewer metrics" control must appear, always as the last element in the card (pinned to the bottom in both the collapsed and expanded state — the extra metrics insert above the control, never below it). Expanding it must only increase that card's own height; per FR-5.2, this must never affect any other card.
+- **FR-5.8** If a pillar has zero real metrics (no data source exists anywhere for it), the card must show an explicit plain-language message instead of any number, chart, or placeholder value, and must still match the shared default card height (FR-5.3).
+- **FR-5.9** No status badge (e.g. "On track"/"Watch"/"Off track") is shown on the card itself; the only RAG signal on a pillar card is inside its own progress bars (FR-5.6). A reviewer relying solely on the card header for status must instead use "Need Your Attention" (§6.6), which is the page's dedicated status-ranking section.
+- **FR-5.10** Current pillar-to-metric mapping (must stay accurate as the catalog evolves):
 
   | Pillar | Metrics shown | Real data source |
   | ----- | ----- | ----- |
@@ -136,7 +142,7 @@ Deep links from anywhere on this page open `/` (the main Review Dashboard) with 
   | Social and Emotional Wellbeing | *(none — see §4.2)* | — |
   | Alumni and Community Mentorship | Schools holding SMC meetings %; SMC resolutions (closed vs open) | SMC export |
 
-### 6.6 Needs your attention
+### 6.6 Need Your Attention
 - **FR-6.1** Two ranked lists — "Critical attention" (off track / below catalog range) and "Watch" (inside range but not yet on track) — each showing up to five KPIs, numbered, each naming the owning component.
 - **FR-6.2** Each row must be a deep link into that KPI's drill in the main dashboard.
 - **FR-6.3** An empty list must show a plain "nothing off track / nothing on watch at this scope" message, not a blank space.
@@ -184,14 +190,14 @@ Every figure on this page must originate from one of the Department's real expor
 
 ## 9. Known gaps and risks
 
-### 9.1 Needs your attention — duplicate entries (defect, not a requirement gap)
+### 9.1 Need Your Attention — duplicate entries (defect, not a requirement gap)
 Two of the five "Critical attention" slots and two of the five "Watch" slots can be consumed by the same real-world KPI counted under two catalog modules (e.g. "Teacher attendance %" under both State Summary and Attendance). This halves the effective signal of a top-5 list and should be deduplicated — tracked as a fix, not a scope change.
 
 ### 9.2 Social and Emotional Wellbeing pillar has zero data
 This is working as designed (§8), but as a product matter it means one of five pillars on the page is permanently empty until the Department begins collecting sports/counselling/SEL data through an export this dashboard can ingest. Stakeholders should not expect a number here without a new data source being commissioned first.
 
 ### 9.3 No role-based access control
-Every signed-in user sees every district/block's data; there is no concept of "this official only sees their own district." If the Department needs that control, it is a new requirement, not a configuration change to the existing login.
+Every signed-in user sees every district/block's data; there is no concept of "this official only sees their own district." The header's role-display dropdown (FR-2.7) does **not** change this — it only swaps a label/scope word next to the user icon for presentation purposes (e.g. showing "BEO · Block" instead of "Secretary · State") and must never be mistaken for real role-based scoping. If the Department needs actual per-role data restriction, that is a new requirement, not a configuration change to the existing login or that dropdown.
 
 ### 9.4 No export from this page
 A user who wants to share this page's figures must use the browser's native print, or take a screenshot; there is no built-in "save as PDF/Excel" from `/glance` itself (unlike the main dashboard's per-table export). If departmental reporting requires a shareable snapshot from this specific page, that is a new requirement to scope and build.
